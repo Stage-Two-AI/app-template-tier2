@@ -111,7 +111,7 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
 - **Een machine die een functie aanroept** (server, Pi, script) logt niet in als mens. Hij
   krijgt een apparaatsleutel: `pnpm apparaat:nieuw <naam>` zet de vingerafdruk in
   `supabase/functions/_shared/apparaten.json` en toont de sleutel één keer. De functie
-  controleert hem met `welkApparaat()` uit `_shared/apparaat.ts` en staat in
+  controleert hem met `welkApparaat(request, ["<naam>"])` uit `_shared/apparaat.ts`, altijd met de namen van de apparaten die déze functie mogen gebruiken, en staat in
   `supabase/config.toml` op `verify_jwt = false`. Zet de sleutel zelf nooit in git of een
   chat; de gebruiker zet hem op het apparaat.
 - **Een sleutel van een ander systeem** (Stripe, Moneybird, een AI-dienst) in een functie

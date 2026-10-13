@@ -21,13 +21,18 @@ describe("apparaatsleutels in de functie", () => {
 
   it("herkent een apparaat aan zijn sleutel, en verder niets", async () => {
     const lijst = [{ naam: "pi", sha256: afdruk(SLEUTEL) }];
-    expect(await welkApparaat(verzoek(SLEUTEL), lijst)).toBe("pi");
-    expect(await welkApparaat(verzoek("b".repeat(43)), lijst)).toBeNull();
-    expect(await welkApparaat(verzoek(), lijst)).toBeNull();
-    expect(
-      await welkApparaat(verzoek("kort"), [{ naam: "kort", sha256: afdruk("kort") }]),
-    ).toBeNull();
-    expect(await welkApparaat(verzoek(SLEUTEL), [])).toBeNull();
+    expect(await welkApparaat(verzoek(SLEUTEL), ["pi"], lijst)).toBe("pi");
+    expect(await welkApparaat(verzoek("b".repeat(43)), ["pi"], lijst)).toBeNull();
+    expect(await welkApparaat(verzoek(), ["pi"], lijst)).toBeNull();
+    const kort = [{ naam: "kort", sha256: afdruk("kort") }];
+    expect(await welkApparaat(verzoek("kort"), ["kort"], kort)).toBeNull();
+    expect(await welkApparaat(verzoek(SLEUTEL), ["pi"], [])).toBeNull();
+  });
+
+  it("een geldig apparaat dat niet bij deze functie hoort, wordt geweigerd", async () => {
+    const lijst = [{ naam: "pi", sha256: afdruk(SLEUTEL) }];
+    expect(await welkApparaat(verzoek(SLEUTEL), ["server"], lijst)).toBeNull();
+    expect(await welkApparaat(verzoek(SLEUTEL), [], lijst)).toBeNull();
   });
 });
 

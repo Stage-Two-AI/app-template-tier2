@@ -8,6 +8,8 @@
 // sleutel één keer). Intrekken: `pnpm apparaat:nieuw -- --intrekken <naam>`. Daarna via een
 // pull request; na de merge rolt de beheer-repo de functies opnieuw uit.
 //
+// In een functie: `const apparaat = await welkApparaat(request, ["pi-kantoor"])`; null = weigeren.
+//
 // Zet bij een functie die dit gebruikt in supabase/config.toml:
 //   [functions.<naam>]
 //   verify_jwt = false
@@ -36,9 +38,14 @@ function gelijk(a: string, b: string): boolean {
   return verschil === 0;
 }
 
-/** De naam van het apparaat dat dit verzoek doet, of null als de sleutel niet klopt. */
+/**
+ * De naam van het apparaat dat dit verzoek doet, of null als de sleutel niet klopt of het
+ * apparaat niet bij `toegestaan` hoort. Noem altijd welke apparaten deze functie mogen
+ * gebruiken: anders kan elk apparaat uit de lijst elke functie aanroepen.
+ */
 export async function welkApparaat(
   request: Request,
+  toegestaan: readonly string[],
   apparaten: Apparaat[] = lijst.apparaten,
 ): Promise<string | null> {
   const sleutel = request.headers.get(KOP) ?? "";
@@ -46,7 +53,7 @@ export async function welkApparaat(
   const afdruk = await vingerafdruk(sleutel);
   let gevonden: string | null = null;
   for (const a of apparaten) if (gelijk(afdruk, a.sha256.toLowerCase())) gevonden = a.naam;
-  return gevonden;
+  return gevonden && toegestaan.includes(gevonden) ? gevonden : null;
 }
 
 /** Een 401-antwoord voor een verzoek zonder geldige apparaatsleutel. */
