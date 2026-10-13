@@ -202,7 +202,12 @@ export function nepWolk({
         if (staat.poolerFout) return antwoord(staat.poolerFout, { message: "pooler kapot" });
         if (staat.geenPooler) return antwoord(200, []);
         return antwoord(200, [
-          { database_type: "PRIMARY", db_host: "aws-0-eu-central-1.pooler.supabase.com" },
+          {
+            database_type: "PRIMARY",
+            db_host: staat.projecten.find((x) => x.ref === m[1])?.name?.endsWith("-test")
+              ? "aws-1-eu-central-1.pooler.supabase.com"
+              : "aws-0-eu-central-1.pooler.supabase.com",
+          },
         ]);
       }
       if (pas(/^\/projects\/([^/]+)\/config\/auth$/)) {

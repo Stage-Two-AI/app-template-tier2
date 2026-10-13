@@ -104,7 +104,9 @@ jobs:
         env:
           PROJECT_REF: ${{ steps.stack.outputs.testref }}
           WACHTWOORD: ${{ secrets.SUPABASE_TEST_DB_PASSWORD }}
-          POOLER: ${{ vars.SUPABASE_POOLER_HOST }}
+          # De testdatabase kan op een andere pooler staan (aws-0 of aws-1); de inrichting
+          # zet die als SUPABASE_TEST_POOLER_HOST. Ontbreekt hij, dan die van productie.
+          POOLER: ${{ vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}
         run: |
           # Eerst het masker voor het gecodeerde wachtwoord, dan pas het adres.
           node scripts/db-url.mjs --mask
