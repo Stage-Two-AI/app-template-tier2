@@ -25,7 +25,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar stack-beheer."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 16,
+  "stackVersion": 17,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -59,6 +59,8 @@
       "scripts/write-test-env.mjs",
       "scripts/dev.mjs",
       "scripts/preview.mjs",
+      "scripts/apparaat-nieuw.mjs",
+      "supabase/functions/_shared/apparaat.ts",
       "docs/WERKWIJZE.md",
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",
