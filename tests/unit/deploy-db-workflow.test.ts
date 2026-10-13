@@ -57,7 +57,10 @@ describe("deploy-db.yml", () => {
       `${EXPRESSIE} secrets.SUPABASE_DB_PASSWORD }}`,
     ]);
     expect(env[1]?.PROJECT_REF).toBe(`${EXPRESSIE} secrets.SUPABASE_PROJECT_REF }}`);
-    for (const e of env) expect(e.POOLER).toBe(`${EXPRESSIE} vars.SUPABASE_POOLER_HOST }}`);
+    expect(env[0]?.POOLER).toBe(
+      `${EXPRESSIE} vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}`,
+    );
+    expect(env[1]?.POOLER).toBe(`${EXPRESSIE} vars.SUPABASE_POOLER_HOST }}`);
   });
 
   it("bouwt het adres met scripts/db-url.mjs, en maskeert het gecodeerde wachtwoord eerst", () => {

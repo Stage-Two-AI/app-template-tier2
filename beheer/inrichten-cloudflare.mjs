@@ -109,6 +109,7 @@ const GH_VARIABELEN = [
   "VITE_SUPABASE_ANON_KEY",
   "VITE_INLOGDIENST",
   "SUPABASE_POOLER_HOST",
+  "SUPABASE_TEST_POOLER_HOST",
   "VITE_SENTRY_DSN",
 ];
 /**
@@ -735,6 +736,16 @@ export async function richtIn(arg, d) {
       "Supabase gaf geen session pooler terug; zet SUPABASE_POOLER_HOST in omgeving production met de hand (Supabase > Connect > Session pooler), anders kan deploy-db.yml niet migreren",
     );
   }
+  // De testdatabase kan op een andere pooler staan dan productie (aws-0 tegenover aws-1);
+  // deploy-db.yml gebruikt deze voor de canary. Ontbreekt hij, dan valt die terug op productie.
+  const testPooler = test
+    ? await supabase.poolerHost(test.ref).catch((fout) => {
+        resultaat.waarschuwingen.push(
+          `de session pooler van de testdatabase was niet op te halen (${fout.message}); zet SUPABASE_TEST_POOLER_HOST in omgeving production met de hand, anders mislukt de canary in deploy-db.yml`,
+        );
+        return null;
+      })
+    : null;
   const gezet = await zetGithub(d, arg.repo, {
     variabelen: {
       VITE_SUPABASE_URL: supabaseUrl(project.ref),
@@ -742,6 +753,7 @@ export async function richtIn(arg, d) {
       VITE_INLOGDIENST: "cloudflare",
       CLOUDFLARE_ACCOUNT_ID: d.accountId,
       ...(pooler ? { SUPABASE_POOLER_HOST: pooler } : {}),
+      ...(testPooler ? { SUPABASE_TEST_POOLER_HOST: testPooler } : {}),
       // Sentry staat alleen aan als de beheeromgeving een DSN heeft; anders niets.
       ...(d.sentryDsn ? { VITE_SENTRY_DSN: d.sentryDsn } : {}),
     },

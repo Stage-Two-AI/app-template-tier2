@@ -1298,6 +1298,15 @@ test("testdatabase: eigen project en eigen SaaS-app, de previews wijzen erheen",
     `https://${testProj.ref}.supabase.co`,
   );
   assert.equal(w.staat.ghVariabelen.repo.PREVIEW_VITE_SUPABASE_ANON_KEY, `anon-${testProj.ref}`);
+  // De testdatabase staat op een andere pooler; de canary in deploy-db.yml krijgt die.
+  assert.equal(
+    w.staat.ghVariabelen.production.SUPABASE_POOLER_HOST,
+    "aws-0-eu-central-1.pooler.supabase.com",
+  );
+  assert.equal(
+    w.staat.ghVariabelen.production.SUPABASE_TEST_POOLER_HOST,
+    "aws-1-eu-central-1.pooler.supabase.com",
+  );
   assert.deepEqual(w.staat.ghSecrets.production.sort(), [
     "SUPABASE_DB_PASSWORD",
     "SUPABASE_PROJECT_REF",
