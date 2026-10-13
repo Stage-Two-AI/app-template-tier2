@@ -1,0 +1,4 @@
+{
+  "$beschrijving": "Apparaten die Edge Functions mogen aanroepen met een eigen sleutel. Alleen de vingerafdruk (SHA-256) staat hier, nooit de sleutel. Toevoegen en intrekken met pnpm apparaat:nieuw. Zie apparaat.ts.",
+  "apparaten": []
+}

@@ -7,8 +7,9 @@
 // Een betaalprovider, een AI-API, een koppeling met een systeem van de klant,
 // webhooks. Dat mag nooit in de app-bundel, want die is voor iedereen leesbaar.
 //
-// Deployen: `pnpm exec supabase functions deploy voorbeeld-met-geheim`
-// Geheimen zetten: `pnpm exec supabase secrets set MIJN_API_SLEUTEL=...`
+// Live zetten: na de merge de workflow "Functies uitrollen" in de beheer-repo (zie AGENTS.md).
+// De geheime sleutel zet de owner van de organisatie bij Supabase; dat is een
+// architectuurwijziging en geen werk vanaf de computer van de bouwer.
 
 Deno.serve(async (request: Request) => {
   if (request.method !== "POST") {

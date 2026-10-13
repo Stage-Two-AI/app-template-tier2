@@ -102,6 +102,22 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   naar een Supabase Edge Function.
 - **`supabase/functions/` draait op Deno**, de rest op Node en in de browser. Imports
   zijn niet uitwisselbaar tussen die twee, en die map valt buiten `tsconfig.json`.
+- **Edge Functions gaan live via de beheer-repo, niet vanaf deze computer.** Na de merge
+  start je de workflow **Functies uitrollen** in de beheer-repo van de organisatie
+  (`gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer -f app=<naam>`); die zet
+  de functies van `main` eerst op de testdatabase en dan op productie. Draai nooit zelf
+  `supabase functions deploy` of `supabase secrets set`: op deze computer hoort geen
+  Supabase-toegang.
+- **Een machine die een functie aanroept** (server, Pi, script) logt niet in als mens. Hij
+  krijgt een apparaatsleutel: `pnpm apparaat:nieuw <naam>` zet de vingerafdruk in
+  `supabase/functions/_shared/apparaten.json` en toont de sleutel één keer. De functie
+  controleert hem met `welkApparaat()` uit `_shared/apparaat.ts` en staat in
+  `supabase/config.toml` op `verify_jwt = false`. Zet de sleutel zelf nooit in git of een
+  chat; de gebruiker zet hem op het apparaat.
+- **Een sleutel van een ander systeem** (Stripe, Moneybird, een AI-dienst) in een functie
+  zetten is een architectuurwijziging: dat doet de owner, niet de bouwer. Schrijf de functie
+  zo dat hij een duidelijke fout geeft als de sleutel ontbreekt (zie
+  `supabase/functions/voorbeeld-met-geheim/`), en zeg de gebruiker dat de owner hem moet zetten.
 - **Databasewijzigingen altijd als migratie** in `supabase/migrations/`, nooit
   handmatig in de Supabase-console. Draai daarna `pnpm db:types` en commit het resultaat.
 - **Gebruikt deze app een gedeelde database** (`"database": "gedeeld"`), schrijf dan hier

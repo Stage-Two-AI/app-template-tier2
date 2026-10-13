@@ -240,6 +240,33 @@ Regels die hierbij horen en niet vrijblijvend zijn:
 
 ---
 
+### Edge Functions en apparaten
+
+Een Edge Function is een klein stukje code dat bij Supabase draait, voor alles met een
+geheime sleutel of voor machines die bij de gegevens moeten. De code staat in
+`supabase/functions/` en gaat, net als de rest, via een pull request. Live zetten doet de
+beheer-repo: na de merge start je daar **Functies uitrollen**. Die zet de functies van `main`
+eerst op de testdatabase en dan op productie. Zo blijft de Supabase-sleutel in de beheer-repo,
+en hoeft de bouwer nooit bij Supabase in te loggen.
+
+**Machines** (een server, een Pi, een script dat elke nacht iets ophaalt) loggen niet in als
+mens. Ze krijgen een eigen apparaatsleutel:
+
+| Wat | Hoe |
+|---|---|
+| Een apparaat toevoegen | `pnpm apparaat:nieuw <naam>`; de sleutel verschijnt één keer, zet hem op het apparaat |
+| Wat er in de repo komt | alleen de vingerafdruk, in `supabase/functions/_shared/apparaten.json`; die mag openbaar zijn |
+| Intrekken | `pnpm apparaat:nieuw -- --intrekken <naam>`, pull request, merge, functies uitrollen |
+| In de functie | `welkApparaat(request)` uit `_shared/apparaat.ts`, en `verify_jwt = false` in `supabase/config.toml` |
+
+Een apparaatsleutel geeft alleen toegang tot wat die ene functie doet. Laat de functie dus
+precies doen wat het apparaat nodig heeft, en niet meer.
+
+**Sleutels van andere systemen** (Stripe, Moneybird, een AI-dienst) staan als geheim bij
+Supabase. Die zet de owner van de organisatie: een nieuw extern systeem aansluiten is een
+architectuurbesluit. Na de overdracht doet de klant dat vanaf de beheeromgeving die Stage Two
+achterlaat, waar Claude Code bij Supabase is ingelogd.
+
 ## 4. De kwaliteitspoort
 
 Draait op elke pull request; alles groen voordat er gemerged kan worden. Wat elke

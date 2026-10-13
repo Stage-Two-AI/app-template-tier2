@@ -101,6 +101,20 @@ Een taak is klaar als, en alleen als:
 Niet eerder. Meld niet "het is af" bij een rode check of een ontbrekende preview;
 meld dan wat er nog mist.
 
+## Na de merge: Edge Functions live zetten
+
+Raakte de wijziging `supabase/functions/`, dan gaan de functies niet vanzelf live. Start na de
+merge de workflow in de beheer-repo van de organisatie en wacht op het resultaat:
+
+```bash
+gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer -f app=<naam van deze repo>
+gh run watch --repo <org>/stagetwo-beheer "$(gh run list --repo <org>/stagetwo-beheer --workflow functies-uitrollen.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+```
+
+Heet de beheer-repo bij deze organisatie nog `stack-beheer`, gebruik dan die naam. De functies
+gaan eerst naar de testdatabase en dan naar productie. Een preview van een PR ziet een nieuwe
+functie dus pas na de merge; zeg dat erbij als de gebruiker hem in de preview wil proberen.
+
 ## Als een check rood staat
 
 | Check | Wat het betekent |
