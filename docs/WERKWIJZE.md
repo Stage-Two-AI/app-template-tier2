@@ -257,7 +257,7 @@ mens. Ze krijgen een eigen apparaatsleutel:
 | Een apparaat toevoegen | `pnpm apparaat:nieuw <naam>`; de sleutel verschijnt één keer, zet hem op het apparaat |
 | Wat er in de repo komt | alleen de vingerafdruk, in `supabase/functions/_shared/apparaten.json`; die mag openbaar zijn |
 | Intrekken | `pnpm apparaat:nieuw -- --intrekken <naam>`, pull request, merge, functies uitrollen |
-| In de functie | `welkApparaat(request)` uit `_shared/apparaat.ts`, en `verify_jwt = false` in `supabase/config.toml` |
+| In de functie | `welkApparaat(request, ["<naam>"])` uit `_shared/apparaat.ts` met alleen de apparaten van die functie, en `verify_jwt = false` in `supabase/config.toml` |
 
 Een apparaatsleutel geeft alleen toegang tot wat die ene functie doet. Laat de functie dus
 precies doen wat het apparaat nodig heeft, en niet meer.
