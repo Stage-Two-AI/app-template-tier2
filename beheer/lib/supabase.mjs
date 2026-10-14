@@ -86,21 +86,34 @@ export function verschil(huidig, gewenst) {
   return uit;
 }
 
+/**
+ * SUPABASE_ORG_SLUG mag meerdere organisaties noemen, met komma's: `winco,plantas`. Een
+ * klant met meer dan één BV houdt zo per BV een eigen organisatie (en rekening), en de
+ * beheer-repo vindt de projecten in elk ervan. Een nieuw project komt altijd in de eerste.
+ */
+export function organisaties(orgSlug) {
+  return (orgSlug ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
+
 export function supabaseBeheer({ fetchFn = fetch, token, orgSlug, slaap = wacht }) {
   if (!token) throw new Error("SUPABASE_ACCESS_TOKEN ontbreekt");
   const s = (pad, opties) => vraag(fetchFn, `${SUPABASE_API}${pad}`, { token, ...opties });
+  const orgs = organisaties(orgSlug);
   return {
     async projecten() {
       const lijst = (await s("/projects")) ?? [];
       return lijst.filter(
-        (p) => p.status !== "REMOVED" && (!orgSlug || p.organization_slug === orgSlug),
+        (p) => p.status !== "REMOVED" && (!orgs.length || orgs.includes(p.organization_slug)),
       );
     },
     maakProject(naam, wachtwoord) {
-      if (!orgSlug) throw new Error("SUPABASE_ORG_SLUG ontbreekt");
+      if (!orgs.length) throw new Error("SUPABASE_ORG_SLUG ontbreekt");
       return s("/projects", {
         methode: "POST",
-        body: { name: naam, organization_slug: orgSlug, db_pass: wachtwoord, region: REGIO },
+        body: { name: naam, organization_slug: orgs[0], db_pass: wachtwoord, region: REGIO },
       });
     },
     /** Wacht tot het project gezond is; een nieuw project heeft daar een paar minuten voor nodig. */
