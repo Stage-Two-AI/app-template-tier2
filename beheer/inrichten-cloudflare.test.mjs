@@ -15,7 +15,7 @@ import {
   valideerVoorvoegsel,
   wachtOpDiscovery,
 } from "./lib/cloudflare.mjs";
-import { supabaseBeheer, uriAllowList } from "./lib/supabase.mjs";
+import { organisaties, supabaseBeheer, uriAllowList } from "./lib/supabase.mjs";
 import { magAanmelden } from "./lib/toegang.mjs";
 import { vraag } from "./lib/vraag.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
@@ -1453,4 +1453,67 @@ test("testdatabase: toegang bijwerken trekt ook in de testdatabase in", async ()
     w.aanroepen.some((a) => a.methode === "listUsers" && a.url.includes(testRef)),
     "gebruikers van de testdatabase nagelopen",
   );
+});
+
+// ---------------------------------------------------------------- meer dan één Supabase-organisatie
+
+function nepFetchOrgs(projecten, verzoeken = []) {
+  return async (url, init = {}) => {
+    verzoeken.push({
+      url,
+      methode: init.method ?? "GET",
+      body: init.body ? JSON.parse(init.body) : null,
+    });
+    const data = init.method === "POST" ? { ref: "nieuw" } : projecten;
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+const PROJECTEN_ORGS = [
+  { name: "wc-overzicht", organization_slug: "winco", status: "ACTIVE_HEALTHY" },
+  { name: "wc-plantas", organization_slug: "plantas", status: "ACTIVE_HEALTHY" },
+  { name: "vreemd", organization_slug: "ander", status: "ACTIVE_HEALTHY" },
+  { name: "wc-weg", organization_slug: "winco", status: "REMOVED" },
+];
+
+test("organisaties: één of meer, met komma's en spaties", () => {
+  assert.deepEqual(organisaties("winco"), ["winco"]);
+  assert.deepEqual(organisaties(" winco , plantas "), ["winco", "plantas"]);
+  assert.deepEqual(organisaties(""), []);
+  assert.deepEqual(organisaties(undefined), []);
+});
+
+test("projecten: alleen uit de genoemde organisaties", async () => {
+  const een = supabaseBeheer({
+    token: "t",
+    orgSlug: "winco",
+    fetchFn: nepFetchOrgs(PROJECTEN_ORGS),
+  });
+  assert.deepEqual(
+    (await een.projecten()).map((p) => p.name),
+    ["wc-overzicht"],
+  );
+  const twee = supabaseBeheer({
+    token: "t",
+    orgSlug: "winco,plantas",
+    fetchFn: nepFetchOrgs(PROJECTEN_ORGS),
+  });
+  assert.deepEqual(
+    (await twee.projecten()).map((p) => p.name),
+    ["wc-overzicht", "wc-plantas"],
+  );
+});
+
+test("maakProject: een nieuw project komt in de eerste organisatie", async () => {
+  const verzoeken = [];
+  const b = supabaseBeheer({
+    token: "t",
+    orgSlug: "winco,plantas",
+    fetchFn: nepFetchOrgs(PROJECTEN_ORGS, verzoeken),
+  });
+  await b.maakProject("wc-nieuw", "geheim");
+  assert.equal(verzoeken.at(-1).body.organization_slug, "winco");
 });
