@@ -21,15 +21,15 @@ import {
  * de harde grens; de plugin maakt hem alleen eerder merkbaar.
  *
  * Wat "van de template" is staat in .claude/stack-manifest.json, dezelfde lijst die
- * /stack-cloudflare:updaten gebruikt. Bij AGENTS.md telt alleen het deel tussen de markeringen:
+ * /stagetwo-tier2:updaten gebruikt. Bij AGENTS.md telt alleen het deel tussen de markeringen:
  * alles erboven is van het project.
  *
  * Ontsnappingsluik, expres zichtbaar: de regel `Bevestigd: templatebestanden gewijzigd`
- * in de PR-tekst. /stack-cloudflare:updaten zet die regel zelf in zijn pull requests.
+ * in de PR-tekst. /stagetwo-tier2:updaten zet die regel zelf in zijn pull requests.
  *
  * Wat deze check niet kan: zichzelf beschermen. Wie ci.yml wijzigt kan deze stap
  * weghalen. Dat staat zo in de PR-diff, de klant leest die vóór de merge, en de
- * volgende /stack-cloudflare:updaten meldt de afwijking. Het doel is de improviserende agent,
+ * volgende /stagetwo-tier2:updaten meldt de afwijking. Het doel is de improviserende agent,
  * niet de kwaadwillende mens.
  */
 const BEVESTIGING = /^\s*Bevestigd:\s*templatebestanden gewijzigd\s*$/im;
@@ -38,7 +38,7 @@ function git(args) {
   return execFileSync("git", args, { encoding: "utf8" });
 }
 
-// In de template zelf, in de Cloudflare-variant ervan, en in de spiegel daarvan bij
+// In de templates zelf (ook onder hun oude namen), en in de spiegel daarvan bij
 // een klant, is elke wijziging aan deze bestanden juist de bedoeling.
 const repo =
   process.env.GITHUB_REPOSITORY ??
@@ -49,7 +49,8 @@ const repo =
       return "";
     }
   })();
-if (/\/stack-template(?:-cloudflare)?(?:\.git)?$/.test(repo)) skip("dit is de template zelf");
+if (/\/(?:app-template-tier[12]|stack-template(?:-cloudflare|-light)?)(?:\.git)?$/.test(repo))
+  skip("dit is de template zelf");
 
 let manifest;
 try {
@@ -88,7 +89,7 @@ for (const file of files) {
   const naam = markeringen[file];
   if (!naam) continue;
   const oud = opBasis(file);
-  if (oud === null) continue; // nieuw bestand: dat regelt /stack-cloudflare:updaten of het opzetscript
+  if (oud === null) continue; // nieuw bestand: dat regelt /stagetwo-tier2:updaten of het opzetscript
   const nu = readFileSync(file, "utf8");
   const oudDeel = gemarkeerdDeel(oud, naam);
   const nuDeel = gemarkeerdDeel(nu, naam);
@@ -104,8 +105,8 @@ if (bevestigd) pass(`templatebestanden gewijzigd met expliciete bevestiging (${g
 fail("Deze PR wijzigt bestanden die van de gedeelde template zijn.", [
   ...geraakt.map((file) => `- ${file}`),
   "",
-  "Die bestanden komen uit stack-template en worden per project niet gewijzigd:",
-  "/stack-cloudflare:updaten brengt verbeteringen als pull request naar élk project, en meldt",
+  "Die bestanden komen uit de app-template van Stage Two en worden per project niet gewijzigd:",
+  "/stagetwo-tier2:updaten brengt verbeteringen als pull request naar élk project, en meldt",
   "een lokale afwijking bij de volgende update. Wat je hier verandert, geeft dit project",
   "andere afspraken dan de rest, en het komt bij elke update opnieuw ter sprake.",
   "",

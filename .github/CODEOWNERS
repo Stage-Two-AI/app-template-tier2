@@ -11,7 +11,7 @@
 #   - de check guard:template, die een PR op de gevoelige paden rood laat staan
 #   - de hook van de Stage Two-plugin, die Claude Code daar al bij de toetsaanslag
 #     tegenhoudt (ook bij dit bestand: het bepaalt wie een melding krijgt)
-#   - /stack-cloudflare:updaten, dat deze bestanden als pull request gelijk zet met de template
+#   - /stagetwo-tier2:updaten, dat deze bestanden als pull request gelijk zet met de template
 #
 # Bij het opzetten van een project vult bin/nieuw-project.sh hier het juiste account in.
 

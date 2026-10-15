@@ -2,7 +2,7 @@
 
 Deze map gaat niet mee naar afgeleide apps (`nietMeenemen` in
 `.claude/stack-manifest.json`). Een beheer-repo kan hem wel als zelfstandig pakket
-kopiëren (zie "Los van de template"); de nette plek wordt later `stack-beheer`.
+kopiëren (zie "Los van de template"); de nette plek is `beheer-template`.
 
 Wat erin zit:
 
@@ -251,7 +251,7 @@ node beheer/inrichten-cloudflare.mjs --voorvoegsel rp- --app richplant \
 `gh` gebruikt `GH_TOKEN`. In een beheer-repo is dat het kortlevende token van de GitHub
 App van de klant (`actions/create-github-app-token`), met rechten op secrets,
 variabelen, omgevingen en inhoud van de app-repo; zie
-`klant/.github/workflows/app-inrichten.yml` in stack-beheer.
+`klant/.github/workflows/app-inrichten.yml` in beheer-template.
 
 ## Lokaal testen
 

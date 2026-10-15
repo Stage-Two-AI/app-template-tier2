@@ -1,7 +1,7 @@
 {
   "$beschrijving": [
     "Keuzes die per app verschillen en waar de kwaliteitspoort naar luistert.",
-    "Dit bestand is van het project: /stack-cloudflare:updaten raakt het nooit aan.",
+    "Dit bestand is van het project: /stagetwo-tier2:updaten raakt het nooit aan.",
     "",
     "database: hoe komt deze app aan haar gegevens? Drie standen:",
     "",
@@ -23,7 +23,7 @@
     "",
     "Van false naar true of \"gedeeld\" is een wijziging van een regel; alles wat erbij",
     "hoort staat al klaar in deze repo. Zie docs/WERKWIJZE.md voor wanneer je hem omzet.",
-    "Geen of eigen kies je bij het beginnen van de app (/stack-cloudflare:nieuwe-app); gedeeld is een",
+    "Geen of eigen kies je bij het beginnen van de app (/stagetwo-tier2:nieuwe-app); gedeeld is een",
     "keuze van Stage Two.",
     "",
     "testdatabase (optioneel, alleen bij een app met database): een tweede Supabase-project,",
