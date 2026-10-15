@@ -19,3 +19,6 @@ blob-report/
 
 # Compound Engineering: tijdelijke werkbestanden van skills
 .context/compound-engineering/
+
+# Lokale toestand van wrangler (Cloudflare): nooit in git
+.wrangler/
