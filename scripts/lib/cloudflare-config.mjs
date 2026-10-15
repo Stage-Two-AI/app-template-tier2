@@ -7,18 +7,20 @@ import { readFileSync } from "node:fs";
  *
  *   - alleen de gebouwde bestanden, geen eigen Worker-code (`main`);
  *   - diepe links vallen terug op index.html (`single-page-application`);
- *   - precies één adres, en dat staat achter Access. Er zijn twee standen:
- *       standaard: een eigen domein (`routes` met `custom_domain: true`) en
- *                  `workers_dev: false`, zodat er geen tweede adres naast staat;
- *       tijdelijk: geen `routes` en `workers_dev: true`, zolang de klant nog geen
- *                  domein heeft. Access op de Worker zelf (zie `beheer/`) is dan de deur.
+ *   - elk adres staat achter Access. Er zijn twee standen:
+ *       standaard: een eigen domein (`routes` met `custom_domain: true`), met Access
+ *                  op dat domein;
+ *       tijdelijk: geen `routes`, zolang de klant nog geen domein heeft.
+ *     In beide standen staat `workers_dev: true`, met de Access op de Worker zelf (zie
+ *     `beheer/`) ervoor. Zonder workers.dev tonen de previews per pull request achter
+ *     Access alleen "There is nothing here yet" (vastgesteld bij finance, 15-10-2026).
  *   - alleen sleutels van de lijst hieronder, op het hoogste niveau en binnen elke
  *     `env.*`. Zo komt er geen opslag van Cloudflare in (D1, R2, KV, Durable Objects,
  *     of wat Cloudflare er later bij verzint): gegevens horen in Supabase.
  *
  * `preview_urls` staat aan voor de previews per pull request. Dat geldt voor de hele
  * Worker, dus ook voor elke productieversie; daarom zet de inrichting Access op de
- * Worker zelf (zie `beheer/`).
+ * Worker zelf (zie `beheer/`). Die dekt het workers.dev-adres en alle preview-adressen.
  */
 const TOEGESTAAN = new Set([
   "$schema",
@@ -61,8 +63,8 @@ const OPSLAG = new Set([
 ]);
 
 const STANDEN =
-  "Er zijn twee standen: de standaardstand (een route met `custom_domain: true` en `workers_dev: false`) " +
-  "en de tijdelijke stand, alleen zolang er nog geen eigen domein is (geen `routes` en `workers_dev: true`).";
+  "`workers_dev` staat altijd aan. Er zijn twee standen: de standaardstand (een route met `custom_domain: true`) " +
+  "en de tijdelijke stand, alleen zolang er nog geen eigen domein is (geen `routes`).";
 
 /** JSON met `//`- en `/* *\/`-commentaar, zoals wrangler.jsonc dat toestaat. */
 function leesJsonc(tekst) {
@@ -170,19 +172,14 @@ export function cloudflareConfig(pad = "wrangler.jsonc") {
 
   const routes = config.routes ?? [];
   if (!Array.isArray(routes)) fout("`routes` hoort een lijst te zijn.");
-  if (config.workers_dev === true) {
-    if (routes.length > 0) {
-      fout(
-        `\`workers_dev\` staat aan naast \`routes\`: dan heeft de app twee adressen. ${STANDEN}`,
-      );
-    }
-    return { worker: config.name, stand: "tijdelijk", hostname: null };
-  }
-  if (config.workers_dev !== false) {
+  if (config.workers_dev !== true) {
     fout(
-      `\`workers_dev\` ontbreekt; zonder die regel zet wrangler het workers.dev-adres aan. ${STANDEN}`,
+      config.workers_dev === false
+        ? `\`workers_dev\` staat uit. Dan tonen de previews per pull request achter Access alleen "There is nothing here yet". Zet hem op true; de Access op de Worker bewaakt dat adres. ${STANDEN}`
+        : `\`workers_dev\` ontbreekt; zet hem expliciet op true, zodat de previews werken. ${STANDEN}`,
     );
   }
+  if (routes.length === 0) return { worker: config.name, stand: "tijdelijk", hostname: null };
   if (routes.length > 1) {
     fout(
       `er staan ${routes.length} routes in, maar de standaardstand heeft precies één route: het eigen domein. ` +
