@@ -1,9 +1,10 @@
 # <projectnaam>
 
-> **Cloudflare-spoor van de Stage Two-stack.** Deze template hoort bij de plugin
-> `Stage-Two-AI/stack-plugin-cloudflare`: de app draait op Cloudflare, en Cloudflare is het
+> **Tier 2 van de Stage Two-stack.** Deze template hoort bij de plugin
+> `Stage-Two-AI/stagetwo-plugin-tier2`: de app draait op Cloudflare, en Cloudflare is het
 > enige punt waar inloggen en toegang geregeld worden. De gegevens staan bij Supabase.
-> Het Vercel-spoor is `Stage-Two-AI/stack-template` met de plugin `Stage-Two-AI/stack-plugin`.
+> Tier 1 (alleen Cloudflare, met D1 en R2) is `Stage-Two-AI/app-template-tier1` met de plugin
+> `Stage-Two-AI/stagetwo-plugin-tier1`.
 
 <!-- Vervang <projectnaam> en schrijf hieronder in één zin wat deze app doet,
      in gewone taal, vanuit de gebruiker. -->
@@ -39,10 +40,10 @@ docs/routes/verder-werken.md".
 
 **Werk je met Claude Code?** Dan vraagt Claude Code bij het openen van deze map of je de
 Stage Two-plugin wilt installeren. Zeg ja. Die plugin geeft je assistent vier commando's
-(`/stack-cloudflare:installatie`, `/stack-cloudflare:nieuwe-app`, `/stack-cloudflare:verder-werken` en `/stack-cloudflare:updaten`),
+(`/stagetwo-tier2:installatie`, `/stagetwo-tier2:nieuwe-app`, `/stagetwo-tier2:verder-werken` en `/stagetwo-tier2:updaten`),
 houdt hem tegen als hij aan de gedeelde werkwijze wil zitten, en meldt het als er een
-nieuwere versie van die werkwijze is; ophalen doe je dan zelf met `/stack-cloudflare:updaten`. Wat de plugin precies doet en hoe je
-hem installeert staat op [github.com/Stage-Two-AI/stack-plugin](https://github.com/Stage-Two-AI/stack-plugin).
+nieuwere versie van die werkwijze is; ophalen doe je dan zelf met `/stagetwo-tier2:updaten`. Wat de plugin precies doet en hoe je
+hem installeert staat op [github.com/Stage-Two-AI/stagetwo-plugin-tier2](https://github.com/Stage-Two-AI/stagetwo-plugin-tier2).
 Werk je met een andere assistent, dan mis je alleen die gemakken: de afspraken en de
 controles gelden voor iedereen.
 
@@ -92,7 +93,7 @@ haast hebt.
 
 - **Een wijziging aan deze app**: gewoon vragen; de route staat in
   `docs/routes/verder-werken.md`.
-- **Een compleet nieuwe app**: typ `/stack-cloudflare:nieuwe-app` in een lege map. Een nieuwe app
+- **Een compleet nieuwe app**: typ `/stagetwo-tier2:nieuwe-app` in een lege map. Een nieuwe app
   krijgt een eigen werkplaats, dus die kun je niet vanuit deze map beginnen.
 - **Iets aan de instellingen, toegang of een rekening**: dat regelt Stage Two.
 
@@ -105,8 +106,8 @@ haast hebt.
 
 ## Waar deze werkplaats vandaan komt
 
-Deze app is begonnen uit de **stack-template** van Stage Two:
-[github.com/Stage-Two-AI/stack-template](https://github.com/Stage-Two-AI/stack-template).
+Deze app is begonnen uit de **app-template (tier 2)** van Stage Two:
+[github.com/Stage-Two-AI/app-template-tier2](https://github.com/Stage-Two-AI/app-template-tier2).
 Die template is openbaar. Dat is een bewuste keuze: zo kan elke klant er zonder
 toestemming of sleutel van Stage Two nieuwe apps van maken en verbeteringen uit ophalen,
 ook lang nadat Stage Two vertrokken is. De template bevat alleen de bouwstenen en de
@@ -118,7 +119,7 @@ Verbetert Stage Two de werkwijze, dan krijgt deze app dat als versie erbij: een 
 de bestanden hier (de controles, de afspraken, de routes) komt uit de template en wordt
 in zijn geheel vervangen; alles wat van dit project is, blijft staan. Wat waarvan is,
 staat in `.claude/stack-manifest.json`. Ophalen doe je zelf, wanneer jij wilt, met
-`/stack-cloudflare:updaten` uit de Stage Two-plugin; het komt als pull request die jij bekijkt en
+`/stagetwo-tier2:updaten` uit de Stage Two-plugin; het komt als pull request die jij bekijkt en
 goedkeurt. De versie waar deze app op staat, staat in `.claude/stack-version`.
 
 ## De app op je eigen computer zien terwijl je bouwt (optioneel)

@@ -28,7 +28,7 @@ const ARG = {
   app: "cf-proef",
   hostname: "cf-proef.stagetwo.nl",
   worker: "cf-proef",
-  repo: "Stage-Two-AI/stack-template-cloudflare",
+  repo: "Stage-Two-AI/app-template-tier2",
   voorvoegsel: "cf-proef-",
   droogloop: false,
 };
@@ -160,12 +160,12 @@ test("argumenten: buiten de proef zijn --repo en --wrangler verplicht", () => {
 
 test("argumenten: de proef valt terug op GITHUB_REPOSITORY en wrangler.jsonc", () => {
   const a = leesArgumenten([...PROEF, "--app", "cf-proef"], {
-    GITHUB_REPOSITORY: "Stage-Two-AI/stack-template-cloudflare",
+    GITHUB_REPOSITORY: "Stage-Two-AI/app-template-tier2",
   });
-  assert.equal(a.repo, "Stage-Two-AI/stack-template-cloudflare");
+  assert.equal(a.repo, "Stage-Two-AI/app-template-tier2");
   assert.equal(a.wrangler, null, "het script leest dan wrangler.jsonc in de werkmap");
   const b = leesArgumenten([...PROEF, "--app", "cf-proef", "--repo", "Stage-Two-AI/ander"], {
-    GITHUB_REPOSITORY: "Stage-Two-AI/stack-template-cloudflare",
+    GITHUB_REPOSITORY: "Stage-Two-AI/app-template-tier2",
   });
   assert.equal(b.repo, "Stage-Two-AI/ander", "--repo gaat voor");
 });
@@ -374,7 +374,7 @@ test("voorvoegsel rp- en --repo: alles krijgt rp- en alles gaat naar die repo", 
   assert.ok(gh.length > 0);
   for (const a of gh) {
     assert.equal(a.args[a.args.indexOf("--repo") + 1], "Richplant-BV/richplant-start");
-    assert.equal(a.args.includes("Stage-Two-AI/stack-template-cloudflare"), false);
+    assert.equal(a.args.includes("Stage-Two-AI/app-template-tier2"), false);
   }
 });
 

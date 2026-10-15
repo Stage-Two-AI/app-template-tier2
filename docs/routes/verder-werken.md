@@ -107,11 +107,11 @@ Raakte de wijziging `supabase/functions/`, dan gaan de functies niet vanzelf liv
 merge de workflow in de beheer-repo van de organisatie en wacht op het resultaat:
 
 ```bash
-gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer -f app=<naam van deze repo>
-gh run watch --repo <org>/stagetwo-beheer "$(gh run list --repo <org>/stagetwo-beheer --workflow functies-uitrollen.yml --limit 1 --json databaseId -q '.[0].databaseId')"
+gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer-tier2 -f app=<naam van deze repo>
+gh run watch --repo <org>/stagetwo-beheer-tier2 "$(gh run list --repo <org>/stagetwo-beheer-tier2 --workflow functies-uitrollen.yml --limit 1 --json databaseId -q '.[0].databaseId')"
 ```
 
-Heet de beheer-repo bij deze organisatie nog `stack-beheer`, gebruik dan die naam. De functies
+Heet de beheer-repo bij deze organisatie nog `stagetwo-beheer` of `stack-beheer`, gebruik dan die naam. De functies
 gaan eerst naar de testdatabase en dan naar productie. Een preview van een PR ziet een nieuwe
 functie dus pas na de merge; zeg dat erbij als de gebruiker hem in de preview wil proberen.
 
@@ -126,7 +126,7 @@ functie dus pas na de merge; zeg dat erbij als de gebruiker hem in de preview wi
 | `guard:secrets` | er staat mogelijk een sleutel in de code of in de bundel. **Altijd zelf naar kijken**, dit is de gevaarlijkste |
 | `guard:rls` | er is een tabel zonder beveiliging |
 | `guard:migrations` | je migratie kan data vernietigen; lees de melding en bevestig bewust |
-| `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stack-cloudflare:updaten` |
+| `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stagetwo-tier2:updaten` |
 | `guard:cloudflare` | `wrangler.jsonc` vraagt om opslag van Cloudflare (D1, R2, KV, Durable Objects), Worker-code of een sleutel die niet op de lijst staat. Gegevens horen in Supabase: haal de sleutel weg |
 | `db:types:check` | de gegenereerde types lopen achter. `pnpm db:types` en committen |
 

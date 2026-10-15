@@ -23,7 +23,12 @@ describe("guard:template herkent de templates", () => {
     expect(draai("Stage-Two-AI/stack-template")).toContain("dit is de template zelf");
   });
 
-  it("slaat over in de Cloudflare-variant", () => {
+  it("slaat over in app-template-tier2 en app-template-tier1", () => {
+    expect(draai("Stage-Two-AI/app-template-tier2")).toContain("dit is de template zelf");
+    expect(draai("Stage-Two-AI/app-template-tier1")).toContain("dit is de template zelf");
+  });
+
+  it("slaat over onder de oude naam (doorverwijzing van GitHub)", () => {
     expect(draai("Stage-Two-AI/stack-template-cloudflare")).toContain("dit is de template zelf");
   });
 

@@ -1,7 +1,7 @@
 {
   "$beschrijving": [
     "Welke bestanden van de gedeelde template zijn en welke van dit project.",
-    "De skill /stack-cloudflare:updaten (Stage Two-plugin) en de beheerde run van Stage Two",
+    "De skill /stagetwo-tier2:updaten (Stage Two-plugin) en de beheerde run van Stage Two",
     "gebruiken dit om alleen de template-bestanden bij te werken, zonder ooit aan het",
     "werk van de klant te komen.",
     "",
@@ -22,10 +22,10 @@
     "",
     "nietMeenemen: paden die alleen voor de Cloudflare-proef in deze repo staan (de",
     "inrichting in beheer/ en de proef-workflows met de brede beheersleutels). Die gaan",
-    "nooit mee naar een afgeleide app; in U9 verhuizen ze naar stack-beheer."
+    "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 19,
+  "stackVersion": 20,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [

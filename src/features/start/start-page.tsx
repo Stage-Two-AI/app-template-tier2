@@ -10,7 +10,7 @@ export function StartPage() {
       <h1 className="text-2xl font-semibold">Welkom</h1>
       <p className="mt-3 text-sm text-muted-foreground">
         Deze app draait, maar heeft nog geen inhoud. Open de map van de app in Claude Code, typ{" "}
-        <code>/stack-cloudflare:verder-werken</code> en beschrijf wat de app moet doen.
+        <code>/stagetwo-tier2:verder-werken</code> en beschrijf wat de app moet doen.
       </p>
     </main>
   );

@@ -1,7 +1,7 @@
 # Werkwijze
 
 *Hoort bij de Stage Two-stack, versie 16. Dit bestand komt uit de gedeelde template en
-wordt bijgewerkt met `/stack-cloudflare:updaten`, als pull request; wijzig het niet per project.*
+wordt bijgewerkt met `/stagetwo-tier2:updaten`, als pull request; wijzig het niet per project.*
 
 Dit legt uit hóé er in dit project gewerkt wordt en vooral **waarom**. De korte,
 gebiedende versie voor dagelijks gebruik staat in `AGENTS.md`; dit is de achtergrond
@@ -172,7 +172,7 @@ RLS-guards, de typegeneratie en de deploy-workflow. Zet `database` op `true`, ma
 Supabase-project aan, zet de drie secrets, en de hele laag hieronder wordt wakker. Andersom
 kan ook, maar bedenk dat gegevens die er al in staan dan niet vanzelf meeverhuizen.
 
-**Welke stand het wordt, kies je bij het beginnen van de app** (`/stack-cloudflare:nieuwe-app`):
+**Welke stand het wordt, kies je bij het beginnen van de app** (`/stagetwo-tier2:nieuwe-app`):
 geen database of een eigen. De regel erachter is
 één app per verzameling gegevens: gaat het over gegevens die al in een app zitten, dan
 bouw je het in die app. De stand "gedeeld" (een aparte app op de database van een andere
@@ -372,7 +372,7 @@ tooling afdwingt, niet. Vandaar drie lagen, oplopend in sterkte:
    Code komt daar de Stage Two-plugin bij (`.claude/settings.json` kondigt hem aan,
    Claude Code biedt de installatie zelf aan): een hook die een tool-aanroep
    onderschept vóór hij wordt uitgevoerd en hem blokkeert met uitleg terug aan de
-   agent, `/stack-cloudflare:verder-werken` als aansluiting op de routes, en `/stack-cloudflare:updaten` om
+   agent, `/stagetwo-tier2:verder-werken` als aansluiting op de routes, en `/stagetwo-tier2:updaten` om
    een nieuwere template op te halen. Dat is dezelfde afspraak, alleen eerder merkbaar: bij de toetsaanslag in
    plaats van bij de check. Een aansluiting voor een agent mag nooit een afspraak
    bevatten die niet in `AGENTS.md` staat; zo betekent "klaar" voor elke agent

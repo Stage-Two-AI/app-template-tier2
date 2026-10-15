@@ -41,7 +41,7 @@ if (!existsSync(join("node_modules", "vite", "bin", "vite.js"))) {
   if (pnpm(["install"]).status !== 0) {
     stop([
       ROOD("✗ `pnpm install` mislukte."),
-      "Draai /stack-cloudflare:installatie, of vraag Stage Two.",
+      "Draai /stagetwo-tier2:installatie, of vraag Stage Two.",
     ]);
   }
 }

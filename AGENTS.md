@@ -1,7 +1,7 @@
 # <projectnaam>
 
 <!-- Vervang <projectnaam> en de regel hieronder bij het opzetten van een project.
-     Alles boven de markering hoort bij dít project en wordt bij /stack-cloudflare:updaten
+     Alles boven de markering hoort bij dít project en wordt bij /stagetwo-tier2:updaten
      nooit overschreven. -->
 
 <!-- Wat deze app doet, in één zin, vanuit de gebruiker geschreven. -->
@@ -12,8 +12,8 @@
      project en van het productieproject, zodat niemand ze verwart. -->
 
 <!-- stack:begin -->
-<!-- Alles hieronder komt uit stack-template en wordt bijgewerkt met
-     /stack-cloudflare:updaten, als pull request. Wijzig het niet hier; meld het bij Stage Two. -->
+<!-- Alles hieronder komt uit de app-template en wordt bijgewerkt met
+     /stagetwo-tier2:updaten, als pull request. Wijzig het niet hier; meld het bij Stage Two. -->
 
 Dit bestand geldt voor **elke** agent die in deze repo werkt: Claude Code, Codex, Cursor,
 Copilot of een mens zonder agent. Er is geen tweede set afspraken ergens anders.
@@ -104,7 +104,7 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   zijn niet uitwisselbaar tussen die twee, en die map valt buiten `tsconfig.json`.
 - **Edge Functions gaan live via de beheer-repo, niet vanaf deze computer.** Na de merge
   start je de workflow **Functies uitrollen** in de beheer-repo van de organisatie
-  (`gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer -f app=<naam>`); die zet
+  (`gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer-tier2 -f app=<naam>`); die zet
   de functies van `main` eerst op de testdatabase en dan op productie. Draai nooit zelf
   `supabase functions deploy` of `supabase secrets set`: op deze computer hoort geen
   Supabase-toegang.
@@ -162,18 +162,18 @@ je begint en loop de stappen in volgorde af, in plaats van te improviseren:
   en voor wie het met de hand doet.
 
 Een compleet nieuwe applicatie begin je niet vanuit deze map: die krijgt een eigen repo,
-via `/stack-cloudflare:nieuwe-app` in een lege map.
+via `/stagetwo-tier2:nieuwe-app` in een lege map.
 
-In Claude Code geeft de Stage Two-plugin vier commando's: `/stack-cloudflare:installatie` (een
-nieuwe computer klaarzetten), `/stack-cloudflare:nieuwe-app`, `/stack-cloudflare:verder-werken` (verwijst naar
-de routes hierboven, er is maar één tekst) en `/stack-cloudflare:updaten` (plugin, computer en apps
+In Claude Code geeft de Stage Two-plugin vier commando's: `/stagetwo-tier2:installatie` (een
+nieuwe computer klaarzetten), `/stagetwo-tier2:nieuwe-app`, `/stagetwo-tier2:verder-werken` (verwijst naar
+de routes hierboven, er is maar één tekst) en `/stagetwo-tier2:updaten` (plugin, computer en apps
 bijwerken, elke wijziging aan een app als pull request van de gebruiker zelf).
 
 ## Wat je niet aanpast
 
 `.github/workflows/`, `.claude/`, `scripts/`, `docs/WERKWIJZE.md`, `docs/routes/` en dit
 bestand onder de markering komen uit de gedeelde template en worden bijgewerkt met
-`/stack-cloudflare:updaten`, als pull request. De check `guard:template` laat een PR die eraan
+`/stagetwo-tier2:updaten`, als pull request. De check `guard:template` laat een PR die eraan
 komt rood staan; in Claude Code houdt de hook van de Stage Two-plugin de wijziging al
 bij de toetsaanslag tegen. Klopt er iets niet, meld het dan bij Stage Two: dan krijgt
 elk project de verbetering, in plaats van dit project alleen.
