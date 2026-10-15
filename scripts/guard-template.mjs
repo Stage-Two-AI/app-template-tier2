@@ -49,7 +49,8 @@ const repo =
       return "";
     }
   })();
-if (/\/(?:app-template-tier[12]|stack-template(?:-cloudflare|-light)?)(?:\.git)?$/.test(repo)) skip("dit is de template zelf");
+if (/\/(?:app-template-tier[12]|stack-template(?:-cloudflare|-light)?)(?:\.git)?$/.test(repo))
+  skip("dit is de template zelf");
 
 let manifest;
 try {
