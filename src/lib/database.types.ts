@@ -34,6 +34,7 @@ export type Database = {
           owner_id: string;
           title: string;
         };
+        ComputedFields: never;
         Insert: {
           created_at?: string;
           id?: string;
