@@ -25,7 +25,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 20,
+  "stackVersion": 21,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [

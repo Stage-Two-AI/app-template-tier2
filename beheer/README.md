@@ -124,7 +124,7 @@ gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=true
 # 2. echt inrichten
 gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=false
 
-# 3. alleen voor een app van vóór versie 20: Access op de Worker zelf alsnog zetten
+# 3. alleen voor een app van vóór versie 21: Access op de Worker zelf alsnog zetten
 gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=false -f tweede_doorgang=true
 ```
 
