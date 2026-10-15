@@ -3,7 +3,7 @@ import { cloudflareConfig } from "./lib/cloudflare-config.mjs";
 
 /**
  * Houdt `wrangler.jsonc` binnen de afspraken van de stack: alleen de gebouwde
- * bestanden, één adres achter Access, en geen opslag van Cloudflare zelf (D1, R2, KV,
+ * bestanden, elk adres achter Access, en geen opslag van Cloudflare zelf (D1, R2, KV,
  * Durable Objects of een sleutel die niet op de lijst staat). Gegevens staan in Supabase.
  *
  * De controle zelf staat in `scripts/lib/cloudflare-config.mjs`; de uitrol gebruikt
