@@ -39,7 +39,7 @@ describe("guard:cloudflare", () => {
     const config = {
       name: "app",
       assets: { directory: "./dist", not_found_handling: "single-page-application" },
-      workers_dev: false,
+      workers_dev: true,
       routes: [{ pattern: "app.klant.nl", custom_domain: true }],
       kv_namespaces: [{ binding: "X", id: "y" }],
     };

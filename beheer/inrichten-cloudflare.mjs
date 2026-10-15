@@ -27,14 +27,14 @@
  *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production
  *   3.6 GitHub-variabelen en -secrets per omgeving
  *
- * In de tijdelijke stand van wrangler.jsonc (`workers_dev: true`, geen routes; zie
+ * In de tijdelijke stand van wrangler.jsonc (geen routes; zie
  * scripts/lib/cloudflare-config.mjs) is er nog geen eigen domein. Dan is het adres
  * `<worker>.<subdomein>.workers.dev`, vervalt stap 3.5 en is de Access op de Worker
  * (stap 4) de enige deur. site_url en de redirect-lijst wijzen dan naar dat adres.
- * Bestaat de Worker dan nog niet, dan zet stap 4 eerst een placeholder-Worker neer (503)
- * en meteen de Access erop; de eerste echte uitrol overschrijft de placeholder en landt
- * zo direct achter de deur. In de standaardstand slaat stap 4 over zolang er niet is
- * uitgerold (de deur op het domein staat er dan al) en volgt hij met --tweede-doorgang.
+ * In beide standen staat workers.dev aan (anders werken de previews achter Access
+ * niet). Bestaat de Worker nog niet, dan zet stap 4 daarom altijd eerst een
+ * placeholder-Worker neer (503) en meteen de Access erop; de eerste echte uitrol
+ * overschrijft de placeholder en landt zo direct achter de deur.
  *
  * Elke stap is idempotent: wat al bestaat met het voorvoegsel wordt
  * hergebruikt, wat bestaat zónder voorvoegsel laat het script stoppen vóór er iets
@@ -408,16 +408,15 @@ export function standaardGh(env = process.env) {
 // ---------------------------------------------------------------- stap 4
 
 /**
- * Stap 4. In de tijdelijke stand is de Access op de Worker de enige deur; bestaat de
- * Worker nog niet, dan komt er eerst een placeholder, zodat die deur er staat vóór de
- * eerste uitrol (die de placeholder overschrijft). In de standaardstand staat de deur
- * op het domein en wacht deze stap op de uitrol.
+ * Stap 4. De Access op de Worker bewaakt het workers.dev-adres en de previews (in de
+ * tijdelijke stand is hij de enige deur). Bestaat de Worker nog niet, dan komt er eerst
+ * een placeholder, zodat die deur er staat vóór de eerste uitrol (die de placeholder
+ * overschrijft).
  */
 async function stapWorker(arg, d, v, policyIds) {
   const stap = "4 Access op de Worker";
   let placeholder = false;
   if (!(await d.cf.workerBestaat(arg.worker))) {
-    if (!v.tijdelijk) return { stap, actie: "overgeslagen: nog niet uitgerold", id: null };
     await d.cf.maakPlaceholder(arg.worker);
     placeholder = true;
   }
@@ -454,7 +453,7 @@ function geplandWorker(v, workerBestaat) {
   if (workerBestaat) {
     return v.workerAccess ? `bestaat al (${v.workerAccess.id})` : `gepland: ${v.namen.worker}`;
   }
-  return v.tijdelijk ? PLACEHOLDER_GEPLAND : "nog niet uitgerold: stap 4 volgt na de eerste uitrol";
+  return PLACEHOLDER_GEPLAND;
 }
 
 function geplandeStappen(arg, v, workerBestaat) {
@@ -717,9 +716,8 @@ export async function richtIn(arg, d) {
   } else stap("3.5 Access-app op de hostname", `hergebruikt (${deur.id})`);
 
   // 4 Access op de Worker, vóór 3.6: pas met de GitHub-variabelen kan er uitgerold
-  // worden, en dan moet de deur er al staan. In de tijdelijke stand zet deze stap zo
-  // nodig eerst een placeholder neer; in de standaardstand slaat hij over tot na de
-  // eerste uitrol (--tweede-doorgang), want daar bewaakt de deur op het domein al.
+  // worden, en dan moet de deur er al staan. Zo nodig zet deze stap eerst een
+  // placeholder neer, want workers.dev staat in beide standen aan.
   const w = await stapWorker(arg, d, v, policyIds);
   stap(w.stap, w.actie);
 
@@ -795,8 +793,8 @@ export async function richtIn(arg, d) {
 }
 
 /**
- * Alleen stap 4, na de eerste uitrol vanaf main. Nodig in de standaardstand, en voor
- * apps die zijn ingericht vóór de placeholder bestond.
+ * Alleen stap 4. Nodig voor apps die zijn ingericht vóór de placeholder in beide
+ * standen bestond.
  */
 export async function tweedeDoorgang(arg, d) {
   const v = await verken(arg, d, { schrijven: false });
@@ -809,9 +807,7 @@ export async function tweedeDoorgang(arg, d) {
   const policyIds = policyIdsVoorApp(v.t, arg.app, ids);
   if (arg.droogloop) {
     const bestaat = await d.cf.workerBestaat(arg.worker);
-    let melding = "nog niet uitgerold";
-    if (bestaat) melding = "gepland: Access op de Worker";
-    else if (v.tijdelijk) melding = PLACEHOLDER_GEPLAND;
+    const melding = bestaat ? "gepland: Access op de Worker" : PLACEHOLDER_GEPLAND;
     return { app: arg.app, melding };
   }
   const w = await stapWorker(arg, d, v, policyIds);
