@@ -60,3 +60,25 @@ describe("databasetypes opmaken (versie 16)", () => {
     expect(roep("zelfdeTypes", roep("formatteer", ONOPGEMAAKT), "export type = {")).toBe("false");
   });
 });
+
+describe("types uit het CI-log halen (versie 21, zonder Docker)", () => {
+  const T = "2026-10-16T10:00:00.1234567Z";
+  const log = [
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} ✗ loopt niet gelijk`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} ----- BEGIN GEGENEREERDE TYPES -----`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} // kop`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} export type Database = {`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T}   public: {};`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} };`,
+    `Database en end-to-end\tDatabasetypes lopen gelijk\t${T} ----- EINDE GEGENEREERDE TYPES -----`,
+  ].join("\n");
+
+  it("haalt het blok eruit, zonder job, stap en tijdstempel, met inspringing", () => {
+    expect(roep("typesUitLog", log)).toBe("// kop\nexport type Database = {\n  public: {};\n};\n");
+  });
+
+  it("geeft niets als het einde ontbreekt (een afgebroken log)", () => {
+    const afgebroken = log.split("\n").slice(0, -1).join("\n");
+    expect(roep("typesUitLog", afgebroken)).toBe("null");
+  });
+});

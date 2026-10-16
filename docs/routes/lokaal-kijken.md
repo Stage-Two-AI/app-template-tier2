@@ -15,7 +15,7 @@ verandert daar niets aan; hij komt ervóór.
 Werk je in het tabblad Code van de Claude-app, dan hoef je deze route niet te volgen.
 De app start de preview zelf, volgens `.claude/launch.json`: dat draait
 `scripts/preview.mjs`, en dat regelt de pakketten, zet `.env.local` op de testdatabase
-(variant B hieronder) en start de app. Je ziet hem in het venster naast het gesprek, en
+(zie hieronder) en start de app. Je ziet hem in het venster naast het gesprek, en
 de assistent kijkt daar zelf ook mee om zijn werk te controleren. De preview weigert te
 starten als `.env.local` naar een andere database wijst dan de testdatabase of een
 lokale Supabase.
@@ -34,7 +34,6 @@ installeren; vraag hem "controleer of ik lokaal kan kijken".
 | **Node** (versie 22 of nieuwer) | de app bouwen en draaien | `node --version` |
 | **pnpm** | de pakketten van de app beheren | `pnpm --version`, anders `npm install -g pnpm` |
 | **je AI-assistent** (Claude Code, Codex, Cursor, …) | de wijzigingen maken | die heb je al als je dit leest |
-| **Docker** | alleen voor variant A hieronder | `docker --version` |
 
 Daarna de code op je computer zetten en de pakketten ophalen:
 
@@ -53,34 +52,17 @@ De app heeft gegevens nodig om iets te laten zien. Kijk eerst in `stack.config.j
 naar `database`:
 
 - **`false`**: geen database. Sla dit hoofdstuk over en ga naar "Starten".
-- **`true`** of **`"gedeeld"`**: kies een van de twee varianten hieronder.
+- **`true`** of **`"gedeeld"`**: de app op je computer gebruikt de testdatabase van deze
+  app, zie hieronder. Docker is niet nodig.
 
-Wat je **nooit** doet: de app op je computer aan de productiedatabase hangen. Wat je
-lokaal aanklikt, opslaat en verwijdert, gebeurt dan echt. De sleutels van productie
-horen niet in `.env.local` en niet in een chat.
-
-### Variant A: eigen database op je computer (Docker)
-
-Een volledige, lege Supabase op je eigen computer, opgebouwd uit de migraties in deze
-repo. Werkt zonder internet, kan niets kapotmaken en is wat de CI ook gebruikt.
-
-```bash
-pnpm db:start      # eerste keer duurt even: Docker haalt de onderdelen op
-pnpm env:local     # schrijft .env.local en .env.test op basis van die database
-```
-
-Nadeel: hij is leeg. Voor een scherm dat gegevens toont, moet je die eerst zelf
-invoeren. Voor een app met `"database": "gedeeld"` werkt deze variant niet: de
-database is van een andere app en draait niet lokaal.
-
-### Variant B: de testdatabase van deze app (geen Docker)
+### De testdatabase van deze app
 
 Dezelfde database als waar de Cloudflare-preview naar wijst: een apart Supabase-project met
-testgegevens, los van productie. Dit is de snelste variant voor wie gewoon wil zien
-hoe een scherm eruitziet met echte-lijkende gegevens.
+testgegevens, los van productie. Zo zie je hoe een scherm eruitziet met echt lijkende
+gegevens.
 
 Welk project dat is, staat in `stack.config.json` onder `testdatabase`. Staat dat blok
-er niet, dan heeft deze app geen testdatabase: gebruik variant A, of vraag Stage Two.
+er niet, dan heeft deze app geen testdatabase: vraag Stage Two.
 
 ```bash
 pnpm env:test      # schrijft .env.local met de testdatabase erin
@@ -126,6 +108,6 @@ een assistent werk "oplevert".
   in de browser mee. Meld het adres één keer, niet bij elke wijziging.
 - Een lokale dev-server is **nooit** het antwoord op "is het klaar?". Klaar is: PR open,
   checks groen, preview-link in de beschrijving (zie `docs/routes/verder-werken.md`,
-  stap 7). Geef nooit een `localhost`-adres als opgeleverd resultaat.
-- Kom je bij variant B een `.env.local` tegen die naar productie wijst, stop dan en
+  stap 8). Geef nooit een `localhost`-adres als opgeleverd resultaat.
+- Kom je een `.env.local` tegen die naar productie wijst, stop dan en
   zeg het. Dat is een fout die je niet stil repareert.
