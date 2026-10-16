@@ -195,7 +195,7 @@ Wat erop draait:
   testomgeving is. Productie op `main` krijgt het productieproject en geen balk.
 - **Lokaal kijken op je eigen computer**, zonder Docker: de preview in de Claude-app
   zet `.env.local` zelf op de testdatabase (`pnpm env:test` doet hetzelfde met de hand;
-  route `docs/routes/lokaal-kijken.md`, variant B). Met de publieke sleutel in
+  route `docs/routes/lokaal-kijken.md`). Met de publieke sleutel in
   `stack.config.json` (`testdatabase.anon_key`) is daar geen login bij Supabase voor nodig.
 - **Migraties, als eerste.** Bij een merge past Actions de migraties eerst toe op de
   testdatabase (de canary) en pas daarna op productie. Faalt het op de testdatabase, dan
@@ -272,6 +272,18 @@ achterlaat, waar Claude Code bij Supabase is ingelogd.
 Draait op elke pull request; alles groen voordat er gemerged kan worden. Wat elke
 check bewaakt staat in de tabel in `README.md`.
 
+**Concept eerst, de volle poort bij klaar.** Een pull request begint als concept (draft).
+Dan draait bij elke push alleen de snelle check `Code` (een paar minuten) en wordt de preview
+bijgewerkt. De zware check `Database en end-to-end` draait pas als de PR op klaar wordt gezet
+(`gh pr ready`). Mergen kan alleen met de volle poort groen: een concept kan niet mergen, en
+op klaar zetten start alles opnieuw. Zo wacht niemand per tussenstap op een browsertest, en
+kost bouwen veel minder Actions-minuten.
+
+**Het vaste preview-adres.** Naast de preview per pull request (`pr-<nummer>-...`) heeft
+elke app één vast adres, `actueel-...`, dat altijd de laatst gepushte PR toont. Dat kan de
+gebruiker open laten staan en verversen. Staan er twee PR's tegelijk open, dan toont het
+vaste adres de laatste push; de PR-adressen blijven ieder hun eigen versie tonen.
+
 Twee dingen om te begrijpen over waaróm dit zo streng staat:
 
 **De tests zijn de reviewer.** Er is bewust geen verplichte goedkeuring van een mens
@@ -309,7 +321,9 @@ fouten in plaats van met bedachte scenario's.
    - raakt het aan inloggen, betalingen, omgevingsvariabelen of migraties?
    - staat er een sleutel of wachtwoord hardgecodeerd in?
 4. **Klik de Cloudflare-preview aan.** Kijken gaat boven hopen. Een preview-URL van de PR
-   is de enige geldige manier om werk te laten zien, nooit een dev-server op localhost.
+   is de enige geldige manier om werk te laten zien, nooit een dev-server op localhost. De
+   assistent opent hem zelf in de browser in de zijbalk van de Claude-app; de eerste keer
+   logt de gebruiker daar één keer in bij Cloudflare Access.
 5. **Deployen = mergen.** Nooit met de hand op een server of in een console ingrijpen.
 6. **Conventional Commits** (`feat:`, `fix:`, `chore:`).
 7. **Bug gefixt? Schrijf er een test bij.** Zo groeit het vangnet mee.

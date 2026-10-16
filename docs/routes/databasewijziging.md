@@ -72,41 +72,53 @@ rijen mag hij dan zien (`policy`). Vergeet je de grant, dan krijgt de app
 `permission denied for table` terwijl je policies kloppen. Dat is niet onveilig,
 maar wel stuk, en de RLS-test laat het meteen zien.
 
-## Stap 3: Draai hem lokaal
+## Stap 3: Schrijf de RLS-test
+
+Voor elke nieuwe tabel, in `tests/rls/`. Het patroon staat in `tests/rls/items.test.ts`:
+log in als gebruiker A, probeer bij de gegevens van B te komen, verwacht leeg.
+
+Die test draait in de Kwaliteitspoort (stap 4), in dezelfde eigen Supabase als je migraties.
+
+Er is geen andere test die een fout in je policies vangt. De app ziet er van buiten
+volstrekt normaal uit terwijl alle gegevens opvraagbaar zijn.
+
+## Stap 4: Laat GitHub hem draaien
+
+Een lokale database is niet nodig (en dus ook geen Docker). De Kwaliteitspoort start bij
+elke run een eigen, lege Supabase, draait daar al je migraties vanaf niets en in volgorde,
+en daarna de RLS-tests en de controle op de types. Dat is de echte test.
+
+Een pull request met een migratie open je daarom **niet** als concept, zodat die zware
+check meteen meedraait:
 
 ```bash
-pnpm db:start     # eerste keer duurt even
-pnpm db:reset     # gooit de lokale database weg en draait alle migraties opnieuw
+git push -u origin <branch>
+gh pr create
+gh pr checks --watch
 ```
 
-`db:reset` is de echte test: hij bewijst dat je migraties vanaf niets werken, in
-volgorde, zonder handmatige stappen.
+## Stap 5: Haal de types op en commit ze
 
-## Stap 4: Genereer de types en commit ze
+De eerste run is rood op `Databasetypes lopen gelijk met het schema`: jouw migratie
+verandert het schema, en de types in de repo lopen nog achter. Dat is de bedoeling. De
+check zet de nieuwe types in zijn log; haal ze op:
 
 ```bash
-pnpm env:local
-pnpm db:types
+pnpm db:types:uit-ci
+git add src/lib/database.types.ts
+git commit -m "chore: databasetypes bijwerken"
+git push
 ```
 
 Dit werkt `src/lib/database.types.ts` bij. **Commit dat bestand.** De CI genereert
 ze opnieuw en faalt als jouw versie afwijkt; zo kan de code nooit stilletjes uit de
 pas lopen met de database.
 
+(Heeft deze computer Docker, dan kan het ook lokaal: `pnpm db:start`, `pnpm db:reset`,
+`pnpm env:local` en `pnpm db:types`. Voor bouwers is dat niet nodig.)
+
 Verzin nooit zelf een type voor een tabel. Als TypeScript klaagt dat een kolom niet
-bestaat, is het antwoord `pnpm db:types`, niet een `any`.
-
-## Stap 5: Schrijf de RLS-test
-
-Voor elke nieuwe tabel, in `tests/rls/`. Het patroon staat in `tests/rls/items.test.ts`:
-log in als gebruiker A, probeer bij de gegevens van B te komen, verwacht leeg.
-
-```bash
-pnpm test:rls
-```
-
-Er is geen andere test die een fout in je policies vangt. De app ziet er van buiten
-volstrekt normaal uit terwijl alle gegevens opvraagbaar zijn.
+bestaat, is het antwoord `pnpm db:types:uit-ci`, niet een `any`.
 
 ## Stap 6: Gaat er iets weg? Stop even
 

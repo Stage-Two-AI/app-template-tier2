@@ -227,6 +227,17 @@ describe("preview-uitrollen.yml: de upload vanaf main", () => {
     expect(stap?.env?.CLOUDFLARE_API_TOKEN).toBe(gh("secrets.CLOUDFLARE_API_TOKEN"));
   });
 
+  it("zet dezelfde code ook op het vaste adres van de app (actueel-...)", () => {
+    const stap = stappen.find((s) => s.run?.includes("versions upload"));
+    const run = stap?.run ?? "";
+    expect(run).toContain("--preview-alias actueel");
+    expect(run.match(/wrangler versions upload/g)).toHaveLength(2);
+    expect(run).toContain('echo "vast=');
+    const reactie = stappen.find((s) => s.run?.includes("<!-- cloudflare-preview -->"));
+    expect(reactie?.env?.VAST).toBe(gh("steps.upload.outputs.vast"));
+    expect(reactie?.run).toContain("Vast adres van deze app");
+  });
+
   it("laat een mislukte upload de stap laten falen, ondanks de pipe naar tee", () => {
     const stap = stappen.find((s) => s.run?.includes("versions upload"));
     expect(stap?.shell).toBe("bash");
@@ -280,5 +291,25 @@ describe("sleutels per omgeving, in alle workflows", () => {
         if (env !== undefined) expect(env, `${naam}/${jobNaam}`).toBe("preview");
       }
     }
+  });
+});
+
+describe("kwaliteitspoort", () => {
+  const ci = lees("ci.yml");
+  const typen = (ci.on.pull_request as { types: string[] }).types;
+
+  it("draait opnieuw als een concept-PR op klaar wordt gezet", () => {
+    expect(typen).toEqual(["opened", "synchronize", "reopened", "ready_for_review"]);
+  });
+
+  it("draait de snelle job altijd, de zware alleen buiten een concept-PR", () => {
+    expect(job("checks", ci).if).toBeUndefined();
+    expect(job("database", ci).if).toBe("${{ !github.event.pull_request.draft }}");
+  });
+
+  it("bewaart de browser van Playwright tussen runs", () => {
+    const cache = job("database", ci).steps.find((s) => s.uses?.startsWith("actions/cache"));
+    expect(cache?.with?.path).toBe("~/.cache/ms-playwright");
+    expect(String(cache?.with?.key)).toContain("steps.playwright.outputs.versie");
   });
 });

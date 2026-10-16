@@ -33,6 +33,7 @@
     "db:reset": "supabase db reset",
     "db:types": "node scripts/write-db-types.mjs",
     "db:types:check": "node scripts/check-types-in-sync.mjs",
+    "db:types:uit-ci": "node scripts/types-uit-ci.mjs",
     "env:local": "node scripts/write-local-env.mjs",
     "env:test": "node scripts/write-test-env.mjs",
     "apparaat:nieuw": "node scripts/apparaat-nieuw.mjs"
