@@ -1,21 +1,69 @@
-MIT License
+Gebruiksrecht Stage Two
 
-Copyright (c) 2026 Stage Two
+Rechthebbende: Stage Two, de eenmanszaak van Christijn van Gelder, ingeschreven bij de
+Kamer van Koophandel onder nummer 42074310. Alle rechten op de software in deze
+repository, zoals de plugin voor de AI-assistent en de template voor nieuwe apps, liggen
+bij Stage Two, behalve op onderdelen van derden (punt 6).
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Voor wie
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Dit gebruiksrecht geldt voor de klant: een organisatie die een overeenkomst met Stage Two
+heeft of heeft gehad en deze software op grond daarvan heeft ontvangen. Wie geen
+overeenkomst met Stage Two heeft, krijgt met deze tekst geen recht om de software te
+gebruiken, te kopiëren of aan te passen. Dat de software openbaar te zien is, in een
+repository van Stage Two of van een klant, verandert daar niets aan.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Wat de klant mag
+
+De klant mag de software gebruiken, kopiëren en aanpassen om er apps mee te maken, te
+onderhouden en te gebruiken voor zijn eigen organisatie, ook als mensen van buiten zijn
+organisatie die apps gebruiken. Hij mag dat ook laten doen door mensen of bedrijven die in
+zijn opdracht werken. Dit recht is niet-exclusief en blijft gelden na het einde van een
+abonnement, voor de versies die de klant tot dan toe heeft ontvangen.
+
+3. Wat de klant niet mag
+
+De klant mag de software niet, los van een eigen app, aan anderen doorgeven, ter
+beschikking stellen, verkopen of verhuren, er sublicenties op verlenen of hem als eigen
+product of dienst aanbieden. Hij mag er geen apps mee maken voor andere organisaties.
+
+4. Apps die uit de template zijn gemaakt
+
+Dit bestand gaat mee in elke app die uit de template van Stage Two wordt gemaakt. In zo'n
+app geldt deze tekst alleen voor de onderdelen die uit de template of de plugin komen. Wat
+specifiek voor de app is gemaakt, zoals schermen, functies, servercode, databaseopzet en
+teksten, is van de klant; voor wat Stage Two daarvan voor de klant heeft gemaakt, geldt
+artikel 13 van de algemene voorwaarden. De klant mag naast dit bestand een eigen licentie
+of copyrightvermelding voor zijn eigen code opnemen. Draagt de klant een app over, zoals
+bij verkoop van de app of van zijn bedrijf, dan gaan de verwerkte onderdelen van Stage Two
+mee, alleen voor het gebruik van die app.
+
+5. Eerdere versies onder MIT
+
+Deze tekst geldt voor elke versie die met dit licentiebestand wordt gepubliceerd. Versies
+die Stage Two eerder met een MIT-licentiebestand heeft gepubliceerd, blijven onder de
+MIT-licentie vallen; die trekt Stage Two niet in. De laatste versies onder MIT zijn:
+
+- template tier 1 (app-template-tier1): tag stack-v24;
+- template tier 2 (app-template-tier2): tag stack-v21;
+- plugin tier 1 (stagetwo-plugin-tier1): versie 2.3.0, commit a2c7bde;
+- plugin tier 2 (stagetwo-plugin-tier2): versie 2.2.0, commit 20fc886.
+
+Een app die eerder uit de template is gemaakt, kan nog een MIT-licentiebestand bevatten.
+Dat geldt alleen voor de onderdelen uit de versie waarmee die app is gemaakt; wat via een
+latere versie in de app komt, valt onder deze tekst.
+
+6. Onderdelen van derden en de naam Stage Two
+
+Onderdelen van derden, zoals open-sourcebibliotheken, vallen onder hun eigen licenties. De
+naam Stage Two en de huisstijl vallen niet onder dit gebruiksrecht.
+
+7. Algemene voorwaarden
+
+Op dit gebruiksrecht zijn de algemene voorwaarden van Stage Two van toepassing
+(stagetwo.nl/voorwaarden), waaronder de bepalingen over intellectuele eigendom en
+aansprakelijkheid. Bij verschil tussen deze tekst en de overeenkomst met de klant gaat de
+overeenkomst voor. Op dit gebruiksrecht is Nederlands recht van toepassing.
+
+Wie de software op een andere manier wil gebruiken, vraagt Stage Two vooraf schriftelijk
+om toestemming via info@stagetwo.nl.
