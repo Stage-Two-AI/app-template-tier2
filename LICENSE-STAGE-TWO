@@ -65,7 +65,8 @@ versie 24 en de template tier 2 tot en met versie 21. Een app die eerder uit de 
 is gemaakt, kan nog een MIT-licentiebestand van Stage Two bevatten. Dat geldt alleen voor
 de onderdelen uit de versie waarmee die app is gemaakt; wat via een latere versie in de
 app komt, valt onder deze tekst. Voor de scripts van de beheer-repo geldt deze tekst voor
-elke versie.
+versies die Stage Two vanaf 18 oktober 2026 uitbrengt; eerder onder MIT uitgebrachte
+scripts blijven MIT.
 
 6. Onderdelen van derden en de naam Stage Two
 
