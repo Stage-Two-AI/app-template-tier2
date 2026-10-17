@@ -135,17 +135,19 @@ nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken. Het a
 houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je bedrijf. Niet in
 het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer werk aan je
 apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
-btw. Veiligheidsupdates van pakketten van derden stelt Dependabot, een dienst van GitHub, als
-pull request voor in je eigen repository's, ook zonder abonnement; een bouwer keurt ze goed.
+btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
+ook zonder abonnement, als pull request die een bouwer goedkeurt; de versies van de
+GitHub-workflows komen met een nieuwe templateversie.
 
 Na de overdracht heeft Stage Two geen toegang tot je apps en geen eigen account of
 beheerrechten in de GitHub-organisatie van je bedrijf; voor het abonnement is dat ook niet
-nodig. Nieuwe versies komen binnen via de GitHub App `stagetwo-levering`, die je bedrijf zelf
-installeert. Die app heeft alleen schrijfrecht op de twee kopieën, `app-template-tier2` en
-`stagetwo-plugin-tier2`, en niet op je apps. Een nieuwe versie van de beheer-repo zet Stage
+nodig. Nieuwe versies komen binnen via de GitHub App `stagetwo-levering`. Stage Two
+installeert die bij de start namens je bedrijf, op alleen de twee kopieën, `app-template-tier2`
+en `stagetwo-plugin-tier2` ("Only select repositories"); je bedrijf kan hem altijd zelf
+verwijderen. Die app heeft alleen daar schrijfrecht, niet op je apps. Een nieuwe versie van de beheer-repo zet Stage
 Two op verzoek klaar: de owner van je organisatie geeft Stage Two daarvoor tijdelijk toegang
 en haalt die daarna weer weg. Zeg je op, dan haalt Stage Two je bedrijf uit de lijst van
-abonnees; de app verwijderen kan je bedrijf ook zelf. Meer staat op
+abonnees. Meer staat op
 [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 
 Onder welke voorwaarden je de onderdelen van Stage Two mag gebruiken, staat in het bestand

@@ -26,10 +26,10 @@ De uitgangspunten waar alles uit volgt:
   bouwer keurt het goed. Het abonnement houdt de omgeving niet bij: beheer en werking blijven
   na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
   aan je apps (op verzoek, op nacalculatie tegen €120 per uur exclusief btw) vallen erbuiten.
-  Dependabot, een dienst van GitHub, stelt veiligheidsupdates van pakketten voor als pull
-  request, ook zonder abonnement; de versies van de GitHub Actions in `.github/workflows/`
-  komen niet via Dependabot maar met een nieuwe versie van de template, omdat die workflows
-  van de template zijn. Zie [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+  Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor, als
+  pull request, ook zonder abonnement; de versies van de GitHub-workflows in
+  `.github/workflows/` komen met een nieuwe templateversie, omdat die workflows van de
+  template zijn. Zie [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 
@@ -389,14 +389,15 @@ accounts en de rekeningen. Oplevering en overdracht zijn hetzelfde moment: het e
 het project. Dan haalt Stage Two zijn eigen toegang weg: Stage Two houdt geen persoonlijk
 account en geen beheerrechten in je organisatie, en heeft ook geen toegang tot je apps nodig.
 Zolang het abonnement loopt, zet Stage Two nieuwe versies van deze werkwijze in de kopie in je
-eigen GitHub, via de GitHub App `stagetwo-levering`, die je organisatie zelf installeert en
-die alleen schrijfrecht heeft op de kopieën van template en plugin, niet op je apps. De plugin
+eigen GitHub, via de GitHub App `stagetwo-levering`. Stage Two installeert die bij de start
+namens je organisatie, op alleen de twee kopieën van template en plugin ("Only select
+repositories"); je organisatie kan hem altijd zelf verwijderen. Hij heeft alleen daar
+schrijfrecht, niet op je apps. De plugin
 op je computer werkt zichzelf bij uit die kopie. Je apps veranderen alleen via een
 update-voorstel dat de plugin met `/stagetwo-tier2:updaten` klaarzet en dat een bouwer
 goedkeurt. Een nieuwe versie van de beheer-repo zet Stage Two op verzoek klaar, met tijdelijke
 toegang die de owner van je organisatie geeft en daarna weer intrekt. Bij opzeggen haalt
-Stage Two je organisatie uit de lijst van abonnees; de app verwijderen kan je organisatie ook
-zelf. Wil je na de overdracht de inrichting zelf aanpassen, dan kan dat met een beheerserver
+Stage Two je organisatie uit de lijst van abonnees. Wil je na de overdracht de inrichting zelf aanpassen, dan kan dat met een beheerserver
 (optioneel): een server van je organisatie met Claude Code, die Stage Two bij de overdracht
 kan achterlaten.
 
