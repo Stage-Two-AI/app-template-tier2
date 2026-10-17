@@ -1,4 +1,7 @@
 version: 2
+# Alleen npm-pakketten. De GitHub Actions in .github/workflows/ staan er bewust niet in: die
+# workflows zijn van de template, dus een voorstel van Dependabot zou de verplichte check
+# "Code" (guard:template) rood maken. Nieuwe Actions-versies komen met een nieuwe templateversie.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -10,8 +13,3 @@ updates:
       # Eén PR voor alle kleine updates: minder ruis, één keer checks draaien.
       kleine-updates:
         update-types: [minor, patch]
-
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: monthly

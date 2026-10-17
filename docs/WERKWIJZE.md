@@ -14,9 +14,10 @@ De uitgangspunten waar alles uit volgt:
   oog van de bouwer.
 - Het werk moet **overdraagbaar** zijn aan een ingehuurde programmeur. Geen
   zelfbedachte workflows, alleen bewezen industriepraktijk.
-- Je moet **zonder Stage Two verder kunnen**: wat je hebt, is van jou en blijft werken.
+- Je moet **zonder Stage Two verder kunnen**: wat je bouwt en je gegevens zijn van jou;
+  plugin en template mag je blijven gebruiken en ze blijven werken, ook zonder Stage Two.
   Zolang je bedrijf een abonnement heeft, zet Stage Two nieuwe versies van deze werkwijze in
-  de kopie in je eigen GitHub, nadat Stage Two ze op zijn eigen apps heeft getest; stopt het,
+  de kopie die Stage Two bij de start in je eigen GitHub klaarzet, nadat Stage Two ze op zijn eigen apps heeft getest; stopt het,
   dan blijft die kopie op de laatste versie staan. Het abonnement kost €150 per maand per
   bedrijf, ongeacht het aantal apps, exclusief btw, en is per maand opzegbaar, met een
   opzegtermijn van één kalendermaand. Het levert nieuwe versies van template en plugin, een
@@ -25,7 +26,10 @@ De uitgangspunten waar alles uit volgt:
   bouwer keurt het goed. Het abonnement houdt de omgeving niet bij: beheer en werking blijven
   na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
   aan je apps (op verzoek, op nacalculatie tegen €120 per uur exclusief btw) vallen erbuiten.
-  Zie [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+  Dependabot, een dienst van GitHub, stelt veiligheidsupdates van pakketten voor als pull
+  request, ook zonder abonnement; de versies van de GitHub Actions in `.github/workflows/`
+  komen niet via Dependabot maar met een nieuwe versie van de template, omdat die workflows
+  van de template zijn. Zie [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 

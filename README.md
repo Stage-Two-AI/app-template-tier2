@@ -1,8 +1,8 @@
 # <projectnaam>
 
 > **Tier 2 van de Stage Two-stack.** Deze template hoort bij de plugin
-> `stagetwo-plugin-tier2`, die net als de template als kopie in de GitHub van je eigen
-> organisatie staat: de app draait op Cloudflare, en Cloudflare is het enige punt waar
+> `stagetwo-plugin-tier2`, die Stage Two bij de start net als de template als kopie in de
+> GitHub van je eigen organisatie klaarzet: de app draait op Cloudflare, en Cloudflare is het enige punt waar
 > inloggen en toegang geregeld worden. De gegevens staan bij Supabase. Tier 1 (alleen
 > Cloudflare, met D1 en R2) is `app-template-tier1` met de plugin `stagetwo-plugin-tier1`;
 > welke variant je organisatie heeft, spreekt Stage Two bij de start met je af.
@@ -114,13 +114,14 @@ haast hebt.
 
 ## Waar deze werkplaats vandaan komt
 
-Deze app is begonnen uit de **app-template (tier 2)** van Stage Two. Je organisatie heeft
-daarvan een eigen kopie in je eigen GitHub: de repository `app-template-tier2`, met daarnaast
-`stagetwo-plugin-tier2` voor de plugin. De template bevat alleen de bouwstenen en de
+Deze app is begonnen uit de **app-template (tier 2)** van Stage Two. Bij de start zet Stage
+Two daarvan een eigen kopie klaar in de GitHub van je organisatie: de repository
+`app-template-tier2`, met daarnaast `stagetwo-plugin-tier2` voor de plugin. De template bevat alleen de bouwstenen en de
 afspraken; er staan geen geheimen, sleutels of klantgegevens in, en de checks die hier
 draaien lezen hun secrets uit je eigen organisatie.
 
-Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang je bedrijf een
+Wat je bouwt en je gegevens zijn van jou. Plugin en template mag je blijven gebruiken en ze
+blijven werken, ook zonder Stage Two (zie `LICENSE-STAGE-TWO`). Zolang je bedrijf een
 abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
 kopie in je eigen GitHub. Stage Two test elke versie eerst op de eigen apps van Stage Two.
 Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er komt alleen niets
