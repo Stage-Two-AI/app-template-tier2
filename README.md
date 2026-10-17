@@ -120,16 +120,29 @@ daarvan een eigen kopie in je eigen GitHub: de repository `app-template-tier2`, 
 afspraken; er staan geen geheimen, sleutels of klantgegevens in, en de checks die hier
 draaien lezen hun secrets uit je eigen organisatie.
 
-Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang het abonnement bij
-Stage Two loopt, zet Stage Two nieuwe versies van template en plugin in die kopie in je
-eigen GitHub. Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er
-komt alleen niets nieuws bij. Het abonnement kost €150 per maand per klant, ongeacht het
-aantal apps, exclusief btw en maandelijks opzegbaar. Daarin zitten nieuwe versies van
-template en plugin, de update-voorstellen die Stage Two klaarzet en nakijkt, tijdig
-ingrijpen als er van buitenaf iets verandert, en vragen en meedenken; niet daarin zitten
-systeembeheer, een uptimegarantie en meer werk aan je apps (dat doet Stage Two op
-nacalculatie, €120 per uur exclusief btw). Veiligheidsupdates van pakketten komen via
-Dependabot in je eigen repository's, ook zonder abonnement. Meer staat op
+Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang je bedrijf een
+abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
+kopie in je eigen GitHub, en zet Stage Two voor elke app en voor de beheer-repo een
+update-voorstel klaar. Stopt het abonnement, dan blijft die kopie op de laatste versie staan;
+er komt alleen niets nieuws bij.
+
+Het abonnement kost €150 per maand per bedrijf, ongeacht het aantal apps, exclusief btw. Het
+loopt vanaf de oplevering, het moment waarop Stage Two de omgeving aan je bedrijf overdraagt,
+en is per maand opzegbaar, met een opzegtermijn van één kalendermaand. Daarin zitten nieuwe
+versies van template, plugin en beheer-repo, de update-voorstellen die Stage Two klaarzet en
+nakijkt, een nieuwe versie als een leverancier iets verandert, en vragen en meedenken. Het
+abonnement houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je
+bedrijf. Niet in het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer
+werk aan je apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur
+exclusief btw. Veiligheidsupdates van pakketten van derden stelt Dependabot, een dienst van
+GitHub, als pull request voor in je eigen repository's, ook zonder abonnement; een bouwer keurt
+ze goed.
+
+Na de overdracht heeft Stage Two geen eigen account en geen beheerrechten meer in de
+GitHub-organisatie van je bedrijf. Met een abonnement komen nieuwe versies en
+update-voorstellen binnen via de GitHub App `stagetwo-levering`, die je bedrijf zelf
+installeert op alleen de repo's die daarvoor nodig zijn. Zeg je op, dan haalt Stage Two je
+bedrijf uit de lijst van abonnees; de app verwijderen kan je bedrijf ook zelf. Meer staat op
 [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 Onder welke voorwaarden je de template mag gebruiken, staat in het bestand `LICENSE` in
 die kopie.
