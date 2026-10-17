@@ -14,7 +14,10 @@ De uitgangspunten waar alles uit volgt:
   oog van de bouwer.
 - Het werk moet **overdraagbaar** zijn aan een ingehuurde programmeur. Geen
   zelfbedachte workflows, alleen bewezen industriepraktijk.
-- Je moet **zonder Stage Two verder kunnen**.
+- Je moet **zonder Stage Two verder kunnen**: wat je hebt, is van jou en blijft werken.
+  Nieuwe versies van deze werkwijze zet Stage Two in de kopie in je eigen GitHub, zolang
+  het abonnement loopt; stopt het, dan blijft die kopie op de laatste versie staan. Zie
+  [het aanbod van Stage Two](https://github.com/Stage-Two-AI/Stack/blob/main/AANBOD.md).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 
