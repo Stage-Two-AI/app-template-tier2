@@ -1,10 +1,11 @@
 # <projectnaam>
 
 > **Tier 2 van de Stage Two-stack.** Deze template hoort bij de plugin
-> `Stage-Two-AI/stagetwo-plugin-tier2`: de app draait op Cloudflare, en Cloudflare is het
-> enige punt waar inloggen en toegang geregeld worden. De gegevens staan bij Supabase.
-> Tier 1 (alleen Cloudflare, met D1 en R2) is `Stage-Two-AI/app-template-tier1` met de plugin
-> `Stage-Two-AI/stagetwo-plugin-tier1`.
+> `stagetwo-plugin-tier2`, die net als de template als kopie in de GitHub van je eigen
+> organisatie staat: de app draait op Cloudflare, en Cloudflare is het enige punt waar
+> inloggen en toegang geregeld worden. De gegevens staan bij Supabase. Tier 1 (alleen
+> Cloudflare, met D1 en R2) is `app-template-tier1` met de plugin `stagetwo-plugin-tier1`;
+> welke variant je organisatie heeft, spreekt Stage Two bij de start met je af.
 
 <!-- Vervang <projectnaam> en schrijf hieronder in één zin wat deze app doet,
      in gewone taal, vanuit de gebruiker. -->
@@ -42,8 +43,9 @@ docs/routes/verder-werken.md".
 Stage Two-plugin wilt installeren. Zeg ja. Die plugin geeft je assistent vier commando's
 (`/stagetwo-tier2:installatie`, `/stagetwo-tier2:nieuwe-app`, `/stagetwo-tier2:verder-werken` en `/stagetwo-tier2:updaten`),
 houdt hem tegen als hij aan de gedeelde werkwijze wil zitten, en meldt het als er een
-nieuwere versie van die werkwijze is; ophalen doe je dan zelf met `/stagetwo-tier2:updaten`. Wat de plugin precies doet en hoe je
-hem installeert staat op [github.com/Stage-Two-AI/stagetwo-plugin-tier2](https://github.com/Stage-Two-AI/stagetwo-plugin-tier2).
+nieuwere versie van die werkwijze is; die komt als pull request (zie onderaan). Wat de
+plugin precies doet en hoe je hem installeert, staat in de README van de repository
+`stagetwo-plugin-tier2` in de GitHub van je eigen organisatie.
 Werk je met een andere assistent, dan mis je alleen die gemakken: de afspraken en de
 controles gelden voor iedereen.
 
@@ -93,9 +95,15 @@ haast hebt.
 
 - **Een wijziging aan deze app**: gewoon vragen; de route staat in
   `docs/routes/verder-werken.md`.
+- **Iemand toegang geven**: dat mag je zelf, in `toegang.json` van de beheer-repo van je
+  organisatie; je assistent weet hoe.
+- **Een sleutel van een ander systeem** (Stripe, Moneybird, een AI-dienst): die zet de owner
+  van je organisatie, niet de bouwer.
 - **Een compleet nieuwe app**: typ `/stagetwo-tier2:nieuwe-app` in een lege map. Een nieuwe app
   krijgt een eigen werkplaats, dus die kun je niet vanuit deze map beginnen.
-- **Iets aan de instellingen, toegang of een rekening**: dat regelt Stage Two.
+- **Iets aan de accounts, het domein of een rekening** (GitHub, Cloudflare, Supabase,
+  Sentry): die staan op naam van je organisatie en zijn van jou; de owner van je organisatie
+  regelt ze. In de projectfase richt Stage Two ze namens je in en helpt daarbij.
 
 ## Voor wie het naadje van de kous wil
 
@@ -106,21 +114,45 @@ haast hebt.
 
 ## Waar deze werkplaats vandaan komt
 
-Deze app is begonnen uit de **app-template (tier 2)** van Stage Two:
-[github.com/Stage-Two-AI/app-template-tier2](https://github.com/Stage-Two-AI/app-template-tier2).
-Die template is openbaar. Dat is een bewuste keuze: zo kan elke klant er zonder
-toestemming of sleutel van Stage Two nieuwe apps van maken en verbeteringen uit ophalen,
-ook lang nadat Stage Two vertrokken is. De template bevat alleen de bouwstenen en de
+Deze app is begonnen uit de **app-template (tier 2)** van Stage Two. Je organisatie heeft
+daarvan een eigen kopie in je eigen GitHub: de repository `app-template-tier2`, met daarnaast
+`stagetwo-plugin-tier2` voor de plugin. De template bevat alleen de bouwstenen en de
 afspraken; er staan geen geheimen, sleutels of klantgegevens in, en de checks die hier
-draaien lezen hun secrets uit je eigen organisatie. Onder welke voorwaarden je de
-template mag gebruiken staat in het bestand `LICENSE` in die repository.
+draaien lezen hun secrets uit je eigen organisatie.
 
-Verbetert Stage Two de werkwijze, dan krijgt deze app dat als versie erbij: een deel van
-de bestanden hier (de controles, de afspraken, de routes) komt uit de template en wordt
-in zijn geheel vervangen; alles wat van dit project is, blijft staan. Wat waarvan is,
-staat in `.claude/stack-manifest.json`. Ophalen doe je zelf, wanneer jij wilt, met
-`/stagetwo-tier2:updaten` uit de Stage Two-plugin; het komt als pull request die jij bekijkt en
-goedkeurt. De versie waar deze app op staat, staat in `.claude/stack-version`.
+Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang je bedrijf een
+abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
+kopie in je eigen GitHub, en zet Stage Two voor elke app en voor de beheer-repo een
+update-voorstel klaar. Stopt het abonnement, dan blijft die kopie op de laatste versie staan;
+er komt alleen niets nieuws bij.
+
+Het abonnement kost €150 per maand per bedrijf, ongeacht het aantal apps, exclusief btw. Het
+loopt vanaf de oplevering, het moment waarop Stage Two de omgeving aan je bedrijf overdraagt,
+en is per maand opzegbaar, met een opzegtermijn van één kalendermaand. Daarin zitten nieuwe
+versies van template, plugin en beheer-repo, de update-voorstellen die Stage Two klaarzet en
+nakijkt, een nieuwe versie als een leverancier iets verandert, en vragen en meedenken. Het
+abonnement houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je
+bedrijf. Niet in het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer
+werk aan je apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur
+exclusief btw. Veiligheidsupdates van pakketten van derden stelt Dependabot, een dienst van
+GitHub, als pull request voor in je eigen repository's, ook zonder abonnement; een bouwer keurt
+ze goed.
+
+Na de overdracht heeft Stage Two geen eigen account en geen beheerrechten meer in de
+GitHub-organisatie van je bedrijf. Met een abonnement komen nieuwe versies en
+update-voorstellen binnen via de GitHub App `stagetwo-levering`, die je bedrijf zelf
+installeert op alleen de repo's die daarvoor nodig zijn. Zeg je op, dan haalt Stage Two je
+bedrijf uit de lijst van abonnees; de app verwijderen kan je bedrijf ook zelf. Meer staat op
+[stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+Onder welke voorwaarden je de template mag gebruiken, staat in het bestand `LICENSE` in
+die kopie.
+
+Een nieuwe versie komt als pull request op deze app: een deel van de bestanden hier (de
+controles, de afspraken, de routes) komt uit de template en wordt in zijn geheel
+vervangen; alles wat van dit project is, blijft staan. Wat waarvan is, staat in
+`.claude/stack-manifest.json`. Stage Two zet die pull request klaar en kijkt hem na; jij
+bekijkt hem en keurt hem goed. Zelf ophalen kan ook, met `/stagetwo-tier2:updaten` uit de
+Stage Two-plugin. De versie waar deze app op staat, staat in `.claude/stack-version`.
 
 ## De app op je eigen computer zien terwijl je bouwt (optioneel)
 
