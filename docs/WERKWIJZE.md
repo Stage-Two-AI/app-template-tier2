@@ -404,7 +404,8 @@ op je computer werkt zichzelf bij uit die kopie. Je apps veranderen alleen via e
 update-voorstel dat de plugin met `/stagetwo-tier2:updaten` klaarzet en dat een bouwer
 goedkeurt. Een nieuwe versie van de beheer-repo zet Stage Two op verzoek klaar, met tijdelijke
 toegang die de owner van je organisatie geeft en daarna weer intrekt. Bij opzeggen haalt
-Stage Two je organisatie uit de lijst van abonnees. Wil je na de overdracht de inrichting zelf aanpassen, dan kan dat met een beheerserver
+Stage Two je organisatie uit de lijst van abonnees en de App `stagetwo-levering` uit je
+organisatie. Wil je na de overdracht de inrichting zelf aanpassen, dan kan dat met een beheerserver
 (optioneel): een server van je organisatie met Claude Code, die Stage Two bij de overdracht
 kan achterlaten.
 

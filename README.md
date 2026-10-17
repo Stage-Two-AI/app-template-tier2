@@ -146,14 +146,15 @@ beheerrechten in de GitHub-organisatie van je bedrijf; voor het abonnement is da
 nodig. Je apps veranderen nooit vanzelf. De plugin wel: dat is software van Stage Two die op
 de computers van je bouwers draait met hun rechten en zichzelf bijwerkt uit de kopie. Wil je
 dat zelf bepalen, vraag je assistent dan om het uit te zetten; daarna werk je de plugin bij
-met `/stagetwo-tier2:updaten`. Nieuwe versies komen binnen via de GitHub App
+met `/stagetwo-tier2:updaten`. In de Claude-app werken dan ook andere plugins op die computer
+zich niet meer vanzelf bij. Nieuwe versies komen binnen via de GitHub App
 `stagetwo-levering`. Stage Two
 installeert die bij de start namens je bedrijf, op alleen de twee kopieën, `app-template-tier2`
 en `stagetwo-plugin-tier2` ("Only select repositories"); je bedrijf kan hem altijd zelf
 verwijderen. Die app heeft alleen daar schrijfrecht, niet op je apps. Een nieuwe versie van de beheer-repo zet Stage
 Two op verzoek klaar: de owner van je organisatie geeft Stage Two daarvoor tijdelijk toegang
 en haalt die daarna weer weg. Zeg je op, dan haalt Stage Two je bedrijf uit de lijst van
-abonnees. Meer staat op
+abonnees en haalt het de App `stagetwo-levering` uit je organisatie. Meer staat op
 [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 
 Onder welke voorwaarden je de onderdelen van Stage Two mag gebruiken, staat in het bestand
