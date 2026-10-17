@@ -182,10 +182,10 @@ die je nooit hebt geschreven.
 - **bestanden** zonder onderlinge relaties: foto's, audio, uploads. Die horen in Supabase Storage,
   en dat vraagt dus wel een database
 - een beetje **staat** die af en toe wordt bijgewerkt: een wachtrij, een cache, een teller.
-  Ook Blob
+  Daarvoor volstaat een app op tier 1
 - **terugkerende taken**: die draaien met `pg_cron` in Supabase, dus ook die vragen een database
 
-Merk je dat je in Blob een database aan het namaken bent, met verwijzingen tussen bestanden
+Merk je dat je in losse bestanden een database aan het namaken bent, met verwijzingen tussen bestanden
 of met zoeken over inhoud, dan is dat het signaal om om te schakelen. Niet doormodderen.
 
 **Omschakelen is één regel.** Alles wat erbij hoort staat al in de repo: de migratiemap, de
@@ -193,8 +193,9 @@ RLS-guards, de typegeneratie en de deploy-workflow. Zet `database` op `true`, ma
 Supabase-project aan, zet de drie secrets, en de hele laag hieronder wordt wakker. Andersom
 kan ook, maar bedenk dat gegevens die er al in staan dan niet vanzelf meeverhuizen.
 
-**Welke stand het wordt, kies je bij het beginnen van de app** (`/stagetwo-tier2:nieuwe-app`):
-geen database of een eigen. De regel erachter is
+**Bij het beginnen met `/stagetwo-tier2:nieuwe-app` krijgt elke app een eigen database.** Een app
+zonder database (een site, een rekenhulp) start je op tier 1; de afweging hierboven helpt vooral bij
+de keuze tussen tier 1 en tier 2. De regel erachter is
 één app per verzameling gegevens: gaat het over gegevens die al in een app zitten, dan
 bouw je het in die app. De stand "gedeeld" (een aparte app op de database van een andere
 app, bijvoorbeeld een portaal voor mensen van buiten) is een keuze van Stage Two, omdat
