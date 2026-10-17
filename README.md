@@ -1,10 +1,11 @@
 # <projectnaam>
 
 > **Tier 2 van de Stage Two-stack.** Deze template hoort bij de plugin
-> `Stage-Two-AI/stagetwo-plugin-tier2`: de app draait op Cloudflare, en Cloudflare is het
-> enige punt waar inloggen en toegang geregeld worden. De gegevens staan bij Supabase.
-> Tier 1 (alleen Cloudflare, met D1 en R2) is `Stage-Two-AI/app-template-tier1` met de plugin
-> `Stage-Two-AI/stagetwo-plugin-tier1`.
+> `stagetwo-plugin-tier2`, die net als de template als kopie in de GitHub van je eigen
+> organisatie staat: de app draait op Cloudflare, en Cloudflare is het enige punt waar
+> inloggen en toegang geregeld worden. De gegevens staan bij Supabase. Tier 1 (alleen
+> Cloudflare, met D1 en R2) is `app-template-tier1` met de plugin `stagetwo-plugin-tier1`;
+> welke variant je organisatie heeft, spreekt Stage Two bij de start met je af.
 
 <!-- Vervang <projectnaam> en schrijf hieronder in één zin wat deze app doet,
      in gewone taal, vanuit de gebruiker. -->
@@ -94,9 +95,15 @@ haast hebt.
 
 - **Een wijziging aan deze app**: gewoon vragen; de route staat in
   `docs/routes/verder-werken.md`.
+- **Iemand toegang geven**: dat mag je zelf, in `toegang.json` van de beheer-repo van je
+  organisatie; je assistent weet hoe.
+- **Een sleutel van een ander systeem** (Stripe, Moneybird, een AI-dienst): die zet de owner
+  van je organisatie, niet de bouwer.
 - **Een compleet nieuwe app**: typ `/stagetwo-tier2:nieuwe-app` in een lege map. Een nieuwe app
   krijgt een eigen werkplaats, dus die kun je niet vanuit deze map beginnen.
-- **Iets aan de instellingen, toegang of een rekening**: dat regelt Stage Two.
+- **Iets aan de accounts, het domein of een rekening** (GitHub, Cloudflare, Supabase,
+  Sentry): die staan op naam van je organisatie en zijn van jou; de owner van je organisatie
+  regelt ze. In de projectfase richt Stage Two ze namens je in en helpt daarbij.
 
 ## Voor wie het naadje van de kous wil
 
@@ -116,8 +123,14 @@ draaien lezen hun secrets uit je eigen organisatie.
 Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang het abonnement bij
 Stage Two loopt, zet Stage Two nieuwe versies van template en plugin in die kopie in je
 eigen GitHub. Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er
-komt alleen niets nieuws bij. Wat het abonnement wel en niet levert, staat in
-[het aanbod van Stage Two](https://github.com/Stage-Two-AI/Stack/blob/main/AANBOD.md).
+komt alleen niets nieuws bij. Het abonnement kost €150 per maand per klant, ongeacht het
+aantal apps, exclusief btw en maandelijks opzegbaar. Daarin zitten nieuwe versies van
+template en plugin, de update-voorstellen die Stage Two klaarzet en nakijkt, tijdig
+ingrijpen als er van buitenaf iets verandert, en vragen en meedenken; niet daarin zitten
+systeembeheer, een uptimegarantie en meer werk aan je apps (dat doet Stage Two op
+nacalculatie, €120 per uur exclusief btw). Veiligheidsupdates van pakketten komen via
+Dependabot in je eigen repository's, ook zonder abonnement. Meer staat op
+[stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 Onder welke voorwaarden je de template mag gebruiken, staat in het bestand `LICENSE` in
 die kopie.
 

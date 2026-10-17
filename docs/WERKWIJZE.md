@@ -16,8 +16,12 @@ De uitgangspunten waar alles uit volgt:
   zelfbedachte workflows, alleen bewezen industriepraktijk.
 - Je moet **zonder Stage Two verder kunnen**: wat je hebt, is van jou en blijft werken.
   Nieuwe versies van deze werkwijze zet Stage Two in de kopie in je eigen GitHub, zolang
-  het abonnement loopt; stopt het, dan blijft die kopie op de laatste versie staan. Zie
-  [het aanbod van Stage Two](https://github.com/Stage-Two-AI/Stack/blob/main/AANBOD.md).
+  het abonnement loopt; stopt het, dan blijft die kopie op de laatste versie staan. Het
+  abonnement kost €150 per maand per klant, ongeacht het aantal apps, exclusief btw en
+  maandelijks opzegbaar. Het levert nieuwe versies, update-voorstellen die Stage Two
+  klaarzet en nakijkt, en vragen en meedenken; systeembeheer, een uptimegarantie en meer
+  werk aan je apps (op nacalculatie, €120 per uur exclusief btw) vallen erbuiten. Zie
+  [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 
@@ -338,15 +342,17 @@ fouten in plaats van met bedachte scenario's.
 
 ## 6. Wie mag wat
 
-|  | Stage Two (bouwer) | Klant (mede-bouwer) |
+|  | Bouwer (iemand van de klant) | Owner (eigenaar van de organisatie bij de klant) |
 |---|---|---|
-| GitHub-repo | Admin | **Write** |
-| Direct pushen naar `main` | nee, geblokkeerd | **nee** |
-| Branch aanmaken en PR openen | ja | **ja** |
-| Eigen PR mergen | ja | **ja**, zodra alle checks groen zijn |
-| Supabase-console | ja | niet nodig, zie hoofdstuk 3 |
-| Cloudflare-console | ja | niet nodig, deployen is mergen en toegang staat in de beheer-repo |
-| Sentry | ja | ja, meelezen |
+| GitHub-repo | **Write** | Admin |
+| Direct pushen naar `main` | **nee** | nee, geblokkeerd |
+| Branch aanmaken en PR openen | **ja** | ja |
+| Eigen PR mergen | **ja**, zodra alle checks groen zijn | ja, zodra alle checks groen zijn |
+| Mensen toegang geven | **ja**, met een PR op `toegang.json` in de beheer-repo | ja |
+| Een sleutel van een ander systeem zetten | nee | ja, zie hoofdstuk 3 |
+| Supabase-console | niet nodig, zie hoofdstuk 3 | ja, voor het account en de rekening |
+| Cloudflare-console | niet nodig, deployen is mergen en toegang staat in de beheer-repo | ja, voor het account en de rekening |
+| Sentry | ja, meelezen | ja |
 
 **De merge-knop is de enige knop die je nodig hebt.** Je kunt met je eigen
 AI-assistent bouwen, een pull request openen en die zelf mergen, maar alleen langs de
@@ -359,13 +365,19 @@ belooft. Een verplichte review is niet overdraagbaar.
 
 Wat er dan wel voor zorgt dat het goed gaat: de checks blokkeren de merge als er iets
 stuk is, een destructieve migratie vraagt een expliciete bevestiging in de PR-tekst, een
-wijziging aan de poort zelf ook, en Stage Two krijgt een melding bij
-een wijziging aan de database, aan het inloggen of aan de poort zelf (zie
-`.github/CODEOWNERS`, dat blokkeert niets maar informeert wel).
+wijziging aan de poort zelf ook, en wie in `.github/CODEOWNERS` staat (tijdens het project
+Stage Two) krijgt een melding bij een wijziging aan de database, aan het inloggen of aan de
+poort zelf (dat blokkeert niets maar informeert wel).
 
-Alle accounts (GitHub, Cloudflare, Supabase, Sentry) staan op naam van de klant, met
-Stage Two als lid met adminrechten. Bij oplevering hoeft er dus niets overgedragen te
-worden: de toegang van Stage Two wordt verwijderd en de rest blijft staan.
+**Wie doet wat.** Je bouwt zelf: de bouwers zijn mensen van je eigen organisatie, met hun
+eigen AI-assistent. Alle accounts (GitHub, Cloudflare, Supabase, Sentry) staan vanaf het begin op naam van je
+organisatie en zijn van jou. In de projectfase richt Stage Two die accounts in en beheert
+ze namens je, en begeleidt de bouwers. Bij de overdracht hoeft er dus niets te verhuizen:
+je organisatie is en blijft eigenaar, en is vanaf dan zelf verantwoordelijk voor de
+accounts en de rekeningen. Na de overdracht zet Stage Two, zolang het abonnement loopt, de
+update-voorstellen (pull requests) voor nieuwe versies van deze werkwijze klaar en kijkt ze
+na; mergen doe je zelf. Welke toegang Stage Two daarvoor na de overdracht houdt, spreken je
+organisatie en Stage Two samen af.
 
 ---
 
