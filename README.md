@@ -122,37 +122,47 @@ draaien lezen hun secrets uit je eigen organisatie.
 
 Wat je hebt, is van jou en blijft werken, ook zonder Stage Two. Zolang je bedrijf een
 abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
-kopie in je eigen GitHub, en zet Stage Two voor elke app en voor de beheer-repo een
-update-voorstel klaar. Stopt het abonnement, dan blijft die kopie op de laatste versie staan;
-er komt alleen niets nieuws bij.
+kopie in je eigen GitHub. Stage Two test elke versie eerst op de eigen apps van Stage Two.
+Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er komt alleen niets
+nieuws bij.
 
 Het abonnement kost €150 per maand per bedrijf, ongeacht het aantal apps, exclusief btw. Het
 loopt vanaf de oplevering, het moment waarop Stage Two de omgeving aan je bedrijf overdraagt,
 en is per maand opzegbaar, met een opzegtermijn van één kalendermaand. Daarin zitten nieuwe
-versies van template, plugin en beheer-repo, de update-voorstellen die Stage Two klaarzet en
-nakijkt, een nieuwe versie als een leverancier iets verandert, en vragen en meedenken. Het
-abonnement houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je
-bedrijf. Niet in het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer
-werk aan je apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur
-exclusief btw. Veiligheidsupdates van pakketten van derden stelt Dependabot, een dienst van
-GitHub, als pull request voor in je eigen repository's, ook zonder abonnement; een bouwer keurt
-ze goed.
+versies van template en plugin, een nieuwe versie als een leverancier iets verandert, een
+nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken. Het abonnement
+houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je bedrijf. Niet in
+het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer werk aan je
+apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
+btw. Veiligheidsupdates van pakketten van derden stelt Dependabot, een dienst van GitHub, als
+pull request voor in je eigen repository's, ook zonder abonnement; een bouwer keurt ze goed.
 
-Na de overdracht heeft Stage Two geen eigen account en geen beheerrechten meer in de
-GitHub-organisatie van je bedrijf. Met een abonnement komen nieuwe versies en
-update-voorstellen binnen via de GitHub App `stagetwo-levering`, die je bedrijf zelf
-installeert op alleen de repo's die daarvoor nodig zijn. Zeg je op, dan haalt Stage Two je
-bedrijf uit de lijst van abonnees; de app verwijderen kan je bedrijf ook zelf. Meer staat op
+Na de overdracht heeft Stage Two geen toegang tot je apps en geen eigen account of
+beheerrechten in de GitHub-organisatie van je bedrijf; voor het abonnement is dat ook niet
+nodig. Nieuwe versies komen binnen via de GitHub App `stagetwo-levering`, die je bedrijf zelf
+installeert. Die app heeft alleen schrijfrecht op de twee kopieën, `app-template-tier2` en
+`stagetwo-plugin-tier2`, en niet op je apps. Een nieuwe versie van de beheer-repo zet Stage
+Two op verzoek klaar: de owner van je organisatie geeft Stage Two daarvoor tijdelijk toegang
+en haalt die daarna weer weg. Zeg je op, dan haalt Stage Two je bedrijf uit de lijst van
+abonnees; de app verwijderen kan je bedrijf ook zelf. Meer staat op
 [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
-Onder welke voorwaarden je de template mag gebruiken, staat in het bestand `LICENSE` in
-die kopie.
 
-Een nieuwe versie komt als pull request op deze app: een deel van de bestanden hier (de
-controles, de afspraken, de routes) komt uit de template en wordt in zijn geheel
-vervangen; alles wat van dit project is, blijft staan. Wat waarvan is, staat in
-`.claude/stack-manifest.json`. Stage Two zet die pull request klaar en kijkt hem na; jij
-bekijkt hem en keurt hem goed. Zelf ophalen kan ook, met `/stagetwo-tier2:updaten` uit de
-Stage Two-plugin. De versie waar deze app op staat, staat in `.claude/stack-version`.
+Onder welke voorwaarden je de onderdelen van Stage Two mag gebruiken, staat in het bestand
+`LICENSE-STAGE-TWO`; de licentie van de eigen code van deze app staat in `LICENSE`.
+
+Een nieuwe versie raakt twee dingen, en die gaan apart:
+
+- **Het gereedschap op je computer.** De plugin werkt zichzelf bij uit de kopie in je eigen
+  GitHub.
+- **Je apps.** Die veranderen alleen via een voorstel dat een bouwer goedkeurt. Is er een
+  nieuwe versie, dan meldt de plugin dat bij het openen van een sessie. Met
+  `/stagetwo-tier2:updaten` zet de plugin voor deze app het update-voorstel klaar, als pull
+  request: een deel van de bestanden hier (de controles, de afspraken, de routes) komt uit de
+  template en wordt in zijn geheel vervangen; alles wat van dit project is, blijft staan. Wat
+  waarvan is, staat in `.claude/stack-manifest.json`. De bouwer keurt het voorstel goed of
+  laat het liggen.
+
+De versie waar deze app op staat, staat in `.claude/stack-version`.
 
 ## De app op je eigen computer zien terwijl je bouwt (optioneel)
 
