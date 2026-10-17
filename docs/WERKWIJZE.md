@@ -1,7 +1,9 @@
 # Werkwijze
 
-*Hoort bij de Stage Two-stack, versie 16. Dit bestand komt uit de gedeelde template en
-wordt bijgewerkt met `/stagetwo-tier2:updaten`, als pull request; wijzig het niet per project.*
+*Hoort bij tier 2 van de Stage Two-stack. Welke versie deze app heeft, staat in
+`.claude/stack-version`; in de template is elke versie een tag `stack-v<nummer>`. Dit bestand
+komt uit de gedeelde template en wordt bijgewerkt met `/stagetwo-tier2:updaten`, als pull
+request; wijzig het niet per project.*
 
 Dit legt uit hóé er in dit project gewerkt wordt en vooral **waarom**. De korte,
 gebiedende versie voor dagelijks gebruik staat in `AGENTS.md`; dit is de achtergrond
@@ -29,7 +31,9 @@ De uitgangspunten waar alles uit volgt:
   Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor, als
   pull request, ook zonder abonnement; de versies van de GitHub-workflows in
   `.github/workflows/` komen met een nieuwe templateversie, omdat die workflows van de
-  template zijn. Zie [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+  template zijn. Een beveiligingsupdate van Dependabot die alleen de versie van een GitHub
+  Action in die workflows ophoogt, laat de controle op templatebestanden wel door. Zie
+  [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 
@@ -388,6 +392,9 @@ je organisatie is en blijft eigenaar, en is vanaf dan zelf verantwoordelijk voor
 accounts en de rekeningen. Oplevering en overdracht zijn hetzelfde moment: het einde van
 het project. Dan haalt Stage Two zijn eigen toegang weg: Stage Two houdt geen persoonlijk
 account en geen beheerrechten in je organisatie, en heeft ook geen toegang tot je apps nodig.
+Je apps veranderen nooit vanzelf; de plugin wel: dat is software van Stage Two die met de
+rechten van de bouwer op zijn computer draait en zichzelf bijwerkt. Dat bijwerken kan uit
+(vraag je assistent erom), en dan werk je de plugin zelf bij met `/stagetwo-tier2:updaten`.
 Zolang het abonnement loopt, zet Stage Two nieuwe versies van deze werkwijze in de kopie in je
 eigen GitHub, via de GitHub App `stagetwo-levering`. Stage Two installeert die bij de start
 namens je organisatie, op alleen de twee kopieën van template en plugin ("Only select

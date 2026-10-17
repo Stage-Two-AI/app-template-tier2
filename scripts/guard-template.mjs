@@ -99,6 +99,39 @@ for (const file of files) {
 
 if (geraakt.length === 0) pass("geen bestanden van de gedeelde template gewijzigd");
 
+/**
+ * Uitzondering voor Dependabot. App inrichten zet de beveiligingsupdates van Dependabot aan,
+ * en die kunnen ook de versie van een GitHub Action in .github/workflows/ ophogen. Zo'n
+ * voorstel zou hier rood blijven, terwijl het juist een lek dicht. Een pull request van
+ * dependabot[bot] mag daarom zonder bevestigingsregel, maar alleen als hij in de
+ * templatebestanden niets anders wijzigt dan `uses:`-regels in .github/workflows/. Zet
+ * iemand anders er een commit bij, dan is de actor niet meer Dependabot en geldt de gewone
+ * regel weer.
+ */
+const USES_REGEL = /^\s*(?:-\s+)?uses:\s*\S+\s*(?:#.*)?$/;
+
+/** Wijzigt deze pull request in `pad` alleen `uses:`-regels van een workflow? */
+function alleenUsesRegels(pad) {
+  if (!/^\.github\/workflows\/[^/]+\.ya?ml$/.test(pad)) return false;
+  let diff;
+  try {
+    diff = git(["diff", "-U0", resolveBase(), "HEAD", "--", pad]);
+  } catch {
+    return false;
+  }
+  const regels = diff.split("\n");
+  const eersteHunk = regels.findIndex((r) => r.startsWith("@@"));
+  if (eersteHunk === -1) return false;
+  const gewijzigd = regels.slice(eersteHunk).filter((r) => r.startsWith("+") || r.startsWith("-"));
+  return gewijzigd.length > 0 && gewijzigd.every((r) => USES_REGEL.test(r.slice(1)));
+}
+
+if (process.env.GITHUB_ACTOR === "dependabot[bot]" && geraakt.every(alleenUsesRegels)) {
+  pass(
+    `voorstel van Dependabot dat alleen de versie van GitHub Actions ophoogt (${geraakt.length})`,
+  );
+}
+
 const bevestigd = BEVESTIGING.test(pullRequestBody());
 if (bevestigd) pass(`templatebestanden gewijzigd met expliciete bevestiging (${geraakt.length})`);
 
