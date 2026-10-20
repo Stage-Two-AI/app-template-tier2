@@ -29,11 +29,11 @@ De uitgangspunten waar alles uit volgt:
   na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
   aan je apps (op verzoek, op nacalculatie tegen €120 per uur exclusief btw) vallen erbuiten.
   Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor, als
-  pull request, ook zonder abonnement; de versies van de GitHub-workflows in
-  `.github/workflows/` komen met een nieuwe templateversie, omdat die workflows van de
-  template zijn. Een beveiligingsupdate van Dependabot die alleen de versie van een GitHub
-  Action in die workflows ophoogt, laat de controle op templatebestanden wel door. Zie
-  [stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+  pull request, ook zonder abonnement. De versies van de GitHub-workflows in
+  `.github/workflows/` komen met een nieuwe versie van de template, omdat die workflows van de
+  template zijn; alleen een beveiligingsupdate kan Dependabot tussendoor voorstellen. Hoogt die
+  alleen de versie van een GitHub Action in die workflows op, dan laat de controle op
+  templatebestanden hem door. Zie [stagetwo.nl/#aanbod](https://stagetwo.nl/#aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 

@@ -137,9 +137,9 @@ het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer wer
 apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
 btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
 ook zonder abonnement, als pull request die een bouwer goedkeurt; de versies van de
-GitHub-workflows komen met een nieuwe templateversie. Een beveiligingsupdate van Dependabot
-die alleen de versie van een GitHub Action ophoogt, laat de controle op templatebestanden
-wel door.
+GitHub-workflows komen met een nieuwe versie van de template; alleen een beveiligingsupdate kan
+Dependabot tussendoor voorstellen. Hoogt die alleen de versie van een GitHub Action op, dan laat
+de controle op templatebestanden hem door.
 
 Na de overdracht heeft Stage Two zelf geen toegang tot je apps en geen eigen account of
 beheerrechten in de GitHub-organisatie van je bedrijf; voor het abonnement is dat ook niet
@@ -151,11 +151,11 @@ zich niet meer vanzelf bij. Nieuwe versies komen binnen via de GitHub App
 `stagetwo-levering`. Stage Two
 installeert die bij de start namens je bedrijf, op alleen de twee kopieën, `app-template-tier2`
 en `stagetwo-plugin-tier2` ("Only select repositories"); je bedrijf kan hem altijd zelf
-verwijderen. Die app heeft alleen daar schrijfrecht, niet op je apps. Een nieuwe versie van de beheer-repo zet Stage
-Two op verzoek klaar: de owner van je organisatie geeft Stage Two daarvoor tijdelijk toegang
+verwijderen. Die app heeft alleen daar schrijfrecht, niet op je apps. Heeft de beheer-repo een nieuwe
+versie nodig, dan vraag je Stage Two erom; de owner geeft Stage Two daarvoor tijdelijk toegang
 en haalt die daarna weer weg. Zeg je op, dan haalt Stage Two je bedrijf uit de lijst van
 abonnees en haalt het de App `stagetwo-levering` uit je organisatie. Meer staat op
-[stagetwo.nl/aanbod](https://stagetwo.nl/aanbod).
+[stagetwo.nl/#aanbod](https://stagetwo.nl/#aanbod).
 
 Onder welke voorwaarden je de onderdelen van Stage Two mag gebruiken, staat in het bestand
 `LICENSE-STAGE-TWO`; de licentie van de eigen code van deze app staat in `LICENSE`.
