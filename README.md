@@ -123,7 +123,7 @@ draaien lezen hun secrets uit je eigen organisatie.
 Wat je bouwt en je gegevens zijn van jou. Plugin en template mag je blijven gebruiken en ze
 blijven werken, ook zonder Stage Two (zie `LICENSE-STAGE-TWO`). Zolang je bedrijf een
 abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
-kopie in je eigen GitHub. Stage Two test elke versie eerst op de eigen apps van Stage Two.
+kopie in je eigen GitHub. Stage Two past elke versie eerst toe op de eigen apps van Stage Two.
 Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er komt alleen niets
 nieuws bij.
 

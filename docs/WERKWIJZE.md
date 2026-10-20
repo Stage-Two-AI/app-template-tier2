@@ -19,7 +19,7 @@ De uitgangspunten waar alles uit volgt:
 - Je moet **zonder Stage Two verder kunnen**: wat je bouwt en je gegevens zijn van jou;
   plugin en template mag je blijven gebruiken en ze blijven werken, ook zonder Stage Two.
   Zolang je bedrijf een abonnement heeft, zet Stage Two nieuwe versies van deze werkwijze in
-  de kopie die Stage Two bij de start in je eigen GitHub klaarzet, nadat Stage Two ze op zijn eigen apps heeft getest; stopt het,
+  de kopie die Stage Two bij de start in je eigen GitHub klaarzet, nadat Stage Two ze op zijn eigen apps heeft toegepast; stopt het,
   dan blijft die kopie op de laatste versie staan. Het abonnement kost €150 per maand per
   bedrijf, ongeacht het aantal apps, exclusief btw, en is per maand opzegbaar, met een
   opzegtermijn van één kalendermaand. Het levert nieuwe versies van template en plugin, een

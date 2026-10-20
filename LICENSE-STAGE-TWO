@@ -51,22 +51,18 @@ workflows van Stage Two, niet over de eigen instellingen van de klant, zoals toe
 
 5. Eerdere versies onder MIT
 
-Deze tekst geldt vanaf de volgende versies, en voor elke latere versie:
-
-- plugin tier 1 (stagetwo-plugin-tier1): versie 2.4.0;
-- plugin tier 2 (stagetwo-plugin-tier2): versie 2.3.0;
-- template tier 1 (app-template-tier1): versie 25, tag stack-v25;
-- template tier 2 (app-template-tier2): versie 22, tag stack-v22.
+Plugin, template en beheer-repo dragen vanaf versie 26 hetzelfde versienummer. Deze tekst
+geldt voor versie 26 en elke latere versie, en voor elke versie die Stage Two vanaf 18
+oktober 2026 uitbrengt.
 
 Versies die Stage Two eerder met een MIT-licentiebestand heeft gepubliceerd, blijven onder
 de MIT-licentie vallen; die trekt Stage Two niet in. Dat zijn de plugin tier 1 tot en met
 versie 2.3.0, de plugin tier 2 tot en met versie 2.2.0, de template tier 1 tot en met
-versie 24 en de template tier 2 tot en met versie 21. Een app die eerder uit de template
-is gemaakt, kan nog een MIT-licentiebestand van Stage Two bevatten. Dat geldt alleen voor
-de onderdelen uit de versie waarmee die app is gemaakt; wat via een latere versie in de
-app komt, valt onder deze tekst. Voor de scripts van de beheer-repo geldt deze tekst voor
-versies die Stage Two vanaf 18 oktober 2026 uitbrengt; eerder onder MIT uitgebrachte
-scripts blijven MIT.
+versie 24, de template tier 2 tot en met versie 21 en de scripts van de beheer-repo van
+vóór versie 26. Een app die eerder uit de template is gemaakt, kan nog een
+MIT-licentiebestand van Stage Two bevatten. Dat geldt alleen voor de onderdelen uit de
+versie waarmee die app is gemaakt; wat via een latere versie in de app komt, valt onder
+deze tekst.
 
 6. Onderdelen van derden en de naam Stage Two
 
