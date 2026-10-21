@@ -33,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 27,
+  "stackVersion": 28,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -71,6 +71,7 @@
       "scripts/preview.mjs",
       "scripts/apparaat-nieuw.mjs",
       "supabase/functions/_shared/apparaat.ts",
+      "supabase/functions/_shared/apparaat-kern.ts",
       "docs/WERKWIJZE.md",
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",

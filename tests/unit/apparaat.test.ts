@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { KOP, vingerafdruk, welkApparaat } from "../../supabase/functions/_shared/apparaat";
+import { KOP, vingerafdruk, welkApparaat } from "../../supabase/functions/_shared/apparaat-kern";
 
 const SCRIPT = resolve("scripts/apparaat-nieuw.mjs");
 const SLEUTEL = "a".repeat(43);
