@@ -54,6 +54,7 @@
       "scripts/guard-cloudflare.mjs",
       "scripts/check-types-in-sync.mjs",
       "scripts/write-db-types.mjs",
+      "scripts/types-uit-ci.mjs",
       "scripts/db-url.mjs",
       "scripts/write-local-env.mjs",
       "scripts/write-test-env.mjs",

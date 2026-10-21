@@ -87,3 +87,23 @@ export function stripHeader(text) {
   }
   return lines.slice(start).join("\n").trim();
 }
+
+const BEGIN = "----- BEGIN GEGENEREERDE TYPES -----";
+const EINDE = "----- EINDE GEGENEREERDE TYPES -----";
+
+/**
+ * Haalt de gegenereerde types uit het log van de check "Databasetypes lopen gelijk met het
+ * schema" (`gh run view <id> --log-failed`). Elke regel daar begint met de job, de stap en
+ * een tijdstempel; die gaan eraf. Geeft null als het blok er niet (helemaal) in staat.
+ */
+export function typesUitLog(log) {
+  const regels = log.split("\n").map((r) => r.replace(/^[^\t]*\t[^\t]*\t\S+Z ?/, ""));
+  const begin = regels.findIndex((r) => r.trimEnd() === BEGIN);
+  if (begin < 0) return null;
+  const einde = regels.findIndex((r, i) => i > begin && r.trimEnd() === EINDE);
+  if (einde < 0) return null;
+  return `${regels
+    .slice(begin + 1, einde)
+    .join("\n")
+    .trimEnd()}\n`;
+}

@@ -7,7 +7,12 @@ on:
     # dat in oktober 2026 meer dan de helft van de Actions-minuten. Drie guards lezen een
     # bevestigingsregel uit de PR-tekst; die halen de tekst live op (stap "PR-tekst
     # ophalen"), dus komt zo'n regel er later bij, dan is "Re-run failed jobs" genoeg.
-    types: [opened, synchronize, reopened]
+    #
+    # `ready_for_review`: een concept-PR (draft) krijgt alleen de snelle job "Code"; de
+    # zware job "Database en end-to-end" draait pas als de PR op klaar wordt gezet. Zo
+    # wacht niemand per tussenstap op Supabase en de browsertest, terwijl mergen zonder die
+    # test niet kan: een concept kan niet mergen, en "op klaar zetten" start de hele poort.
+    types: [opened, synchronize, reopened, ready_for_review]
   # Geen run meer na een merge op `main`: de ruleset eist dat de branch bij is met main,
   # dus de PR-run heeft precies deze code al getest. Een tweede run kostte bij Richplant
   # een kwart van de Actions-minuten (oktober 2026). Uitrollen heeft zijn eigen workflow.
@@ -111,10 +116,13 @@ jobs:
   #              de repo die de database bezit
   #   false      geen database: alleen de browsertest
   #
-  # De job zelf draait altijd: hij staat als verplichte check in de ruleset, en een
-  # job die in zijn geheel wordt overgeslagen laat die check hangen.
+  # De job draait voor elke databasestand: hij staat als verplichte check in de ruleset.
+  # Alleen bij een concept-PR slaat hij over (zie `ready_for_review` bovenaan). Een job die
+  # met `if` wordt overgeslagen telt voor GitHub als geslaagd; dat is veilig, want een
+  # concept kan niet mergen, en op klaar zetten start een nieuwe run die alles doet.
   database:
     name: Database en end-to-end
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -170,9 +178,29 @@ jobs:
         if: steps.stack.outputs.modus == 'eigen'
         run: pnpm test:rls
 
-      - name: Browser installeren
+      # De browser van Playwright bewaren tussen runs (sleutel: de Playwright-versie uit de
+      # lockfile). Bij een treffer zijn alleen de systeempakketten nog nodig.
+      - name: Playwright-versie bepalen
+        id: playwright
         if: steps.stack.outputs.modus != 'gedeeld'
+        # Uit het pakket zelf, niet via `pnpm exec`: pnpm 11 zet soms "Already up to date" op stdout.
+        run: echo "versie=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Browser uit de cache
+        id: browser-cache
+        if: steps.stack.outputs.modus != 'gedeeld'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.versie }}
+
+      - name: Browser installeren
+        if: steps.stack.outputs.modus != 'gedeeld' && steps.browser-cache.outputs.cache-hit != 'true'
         run: pnpm exec playwright install --with-deps chromium
+
+      - name: Systeempakketten voor de browser
+        if: steps.stack.outputs.modus != 'gedeeld' && steps.browser-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
 
       # Een app met een gedeelde database heeft geen omgeving om tegen te testen die
       # in de CI mag draaien: haar gegevens staan in het project van een andere app.

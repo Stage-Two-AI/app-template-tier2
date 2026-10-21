@@ -20,9 +20,18 @@ Copilot of een mens zonder agent. Er is geen tweede set afspraken ergens anders.
 
 ## Klaar is
 
-Een taak is klaar als: er een pull request open staat, **álle** checks groen zijn, en
-de Cloudflare-preview-link in de PR staat (de workflow `Preview uitrollen` zet hem er als reactie bij). Niet eerder. Staat er een check
-rood, meld dan wat er nog mist in plaats van "het is af".
+Een taak is klaar als: er een pull request open staat die geen concept (draft) meer is,
+**álle** checks groen zijn, en de Cloudflare-preview-link in de PR staat (de workflow
+`Preview uitrollen` zet hem er als reactie bij). Niet eerder. Staat er een check rood, dan
+repareer je hem zelf en wacht je opnieuw; meld pas daarna "het is af", of meld wat er nog
+mist als het echt niet lukt.
+
+Het ritme (zie `docs/routes/verder-werken.md`): een PR begint als concept, waarop alleen de
+snelle checks draaien en de preview wordt bijgewerkt; de gebruiker kijkt mee op het vaste
+adres van de app (`actueel-...`). Is de gebruiker tevreden, dan zet je hem op klaar
+(`gh pr ready`), wacht je op alle checks (`gh pr checks --watch`) en repareer je wat rood is.
+Een PR met een migratie begint niet als concept. Docker is nergens voor nodig: de
+databasetests draaien in GitHub, en `pnpm db:types:uit-ci` haalt de types daar op.
 
 ## Stack
 
@@ -59,7 +68,8 @@ eigen computer dus nooit. Zet nooit de sleutels van productie in `.env.local`.
 | `pnpm check` | typecontrole, lint, unittests en guards in één keer |
 | `pnpm build` | productiebuild |
 | `pnpm test` | unittests |
-| `pnpm db:start` | lokale Supabase starten (eerste keer duurt even) |
+| `pnpm db:types:uit-ci` | databasetypes ophalen uit de laatste run van de Kwaliteitspoort (geen Docker nodig) |
+| `pnpm db:start` | lokale Supabase starten; vraagt Docker, alleen voor Stage Two |
 | `pnpm env:local` | `.env.local` en `.env.test` schrijven op basis van die database |
 | `pnpm env:test` | `.env.local` laten wijzen naar de testdatabase van de app (geen Docker nodig) |
 | `pnpm db:reset` | lokale database opnieuw opbouwen uit alle migraties |
