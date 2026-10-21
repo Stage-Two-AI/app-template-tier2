@@ -1,7 +1,9 @@
 # Werkwijze
 
-*Hoort bij de Stage Two-stack, versie 16. Dit bestand komt uit de gedeelde template en
-wordt bijgewerkt met `/stagetwo-tier2:updaten`, als pull request; wijzig het niet per project.*
+*Hoort bij tier 2 van de Stage Two-stack. Welke versie deze app heeft, staat in
+`.claude/stack-version`; in de template is elke versie een tag `stack-v<nummer>`. Dit bestand
+komt uit de gedeelde template en wordt bijgewerkt met `/stagetwo-tier2:updaten`, als pull
+request; wijzig het niet per project.*
 
 Dit legt uit hóé er in dit project gewerkt wordt en vooral **waarom**. De korte,
 gebiedende versie voor dagelijks gebruik staat in `AGENTS.md`; dit is de achtergrond
@@ -14,7 +16,25 @@ De uitgangspunten waar alles uit volgt:
   oog van de bouwer.
 - Het werk moet **overdraagbaar** zijn aan een ingehuurde programmeur. Geen
   zelfbedachte workflows, alleen bewezen industriepraktijk.
-- Je moet **zonder Stage Two verder kunnen**.
+- Je moet **zonder Stage Two verder kunnen**: wat je bouwt en je gegevens zijn van jou;
+  plugin en template mag je blijven gebruiken en ze blijven werken, ook zonder Stage Two.
+  Zolang je bedrijf een abonnement heeft, zet Stage Two nieuwe versies van deze werkwijze in
+  de kopie die Stage Two bij de start in je eigen GitHub klaarzet, nadat Stage Two ze op zijn eigen apps heeft toegepast; stopt het,
+  dan blijft die kopie op de laatste versie staan. Het abonnement kost €150 per maand per
+  bedrijf, ongeacht het aantal apps, exclusief btw, en is per maand opzegbaar, met een
+  opzegtermijn van één kalendermaand. Het levert nieuwe versies van template en plugin, een
+  nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken, tot ongeveer een
+  uur per maand (meer tijd op afspraak). De plugin meldt
+  een nieuwe versie en zet met `/stagetwo-tier2:updaten` per app het update-voorstel klaar; een
+  bouwer keurt het goed. Het abonnement houdt de omgeving niet bij: beheer en werking blijven
+  na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
+  aan je apps (op verzoek, op nacalculatie tegen €120 per uur exclusief btw) vallen erbuiten.
+  Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor, als
+  pull request, ook zonder abonnement. De versies van de GitHub-workflows in
+  `.github/workflows/` komen met een nieuwe versie van de template, omdat die workflows van de
+  template zijn; alleen een beveiligingsupdate kan Dependabot tussendoor voorstellen. Hoogt die
+  alleen de versie van een GitHub Action in die workflows op, dan laat de controle op
+  templatebestanden hem door. Zie [stagetwo.nl/#aanbod](https://stagetwo.nl/#aanbod).
 - De afspraken hangen niet aan één AI-assistent. Met Claude Code, Codex of een andere
   agent, of zonder agent, gelden dezelfde regels en dezelfde poort.
 
@@ -84,8 +104,9 @@ dekt het workers.dev-adres al, dus er komt geen open deur bij.
 
 In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
-lange termijn: is het domein er, dan komt de route erbij. Dat overstappen doet Stage
-Two, met de inrichting in de beheer-repo.
+lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de
+inrichting in de beheer-repo: tijdens het project door Stage Two, na de overdracht door de
+owner van je organisatie, of op verzoek door Stage Two.
 
 **Geen opslag bij Cloudflare.** Gegevens staan in Supabase. `wrangler.jsonc` mag alleen
 sleutels bevatten die op de lijst van `scripts/lib/cloudflare-config.mjs` staan, bovenaan
@@ -142,7 +163,7 @@ In de code is de koppeling één omgevingsvariabele: `VITE_SUPABASE_SCHEMA=api` 
 `api` in plaats van `public`; `pnpm env:local` doet bij deze stand niets, want er draait
 geen lokale database. De waarden van de eigenaar zet je één keer met de hand in `.env.local`.
 
-(In `stack-template` zelf staat hij bewust op `true`: die repo moet zijn eigen databaselaag
+(In de template zelf staat hij bewust op `true`: die repo moet zijn eigen databaselaag
 blijven testen, anders verrot het onderdeel dat jij straks aanzet.)
 
 Dat is geen zuinigheid om de zuinigheid. Cloudflare rekent voor het uitserveren van
@@ -167,10 +188,10 @@ die je nooit hebt geschreven.
 - **bestanden** zonder onderlinge relaties: foto's, audio, uploads. Die horen in Supabase Storage,
   en dat vraagt dus wel een database
 - een beetje **staat** die af en toe wordt bijgewerkt: een wachtrij, een cache, een teller.
-  Ook Blob
+  Daarvoor volstaat een app op tier 1
 - **terugkerende taken**: die draaien met `pg_cron` in Supabase, dus ook die vragen een database
 
-Merk je dat je in Blob een database aan het namaken bent, met verwijzingen tussen bestanden
+Merk je dat je in losse bestanden een database aan het namaken bent, met verwijzingen tussen bestanden
 of met zoeken over inhoud, dan is dat het signaal om om te schakelen. Niet doormodderen.
 
 **Omschakelen is één regel.** Alles wat erbij hoort staat al in de repo: de migratiemap, de
@@ -178,8 +199,9 @@ RLS-guards, de typegeneratie en de deploy-workflow. Zet `database` op `true`, ma
 Supabase-project aan, zet de drie secrets, en de hele laag hieronder wordt wakker. Andersom
 kan ook, maar bedenk dat gegevens die er al in staan dan niet vanzelf meeverhuizen.
 
-**Welke stand het wordt, kies je bij het beginnen van de app** (`/stagetwo-tier2:nieuwe-app`):
-geen database of een eigen. De regel erachter is
+**Bij het beginnen met `/stagetwo-tier2:nieuwe-app` krijgt elke app een eigen database.** Een app
+zonder database (een site, een rekenhulp) start je op tier 1; de afweging hierboven helpt vooral bij
+de keuze tussen tier 1 en tier 2. De regel erachter is
 één app per verzameling gegevens: gaat het over gegevens die al in een app zitten, dan
 bouw je het in die app. De stand "gedeeld" (een aparte app op de database van een andere
 app, bijvoorbeeld een portaal voor mensen van buiten) is een keuze van Stage Two, omdat
@@ -272,8 +294,8 @@ precies doen wat het apparaat nodig heeft, en niet meer.
 
 **Sleutels van andere systemen** (Stripe, Moneybird, een AI-dienst) staan als geheim bij
 Supabase. Die zet de owner van de organisatie: een nieuw extern systeem aansluiten is een
-architectuurbesluit. Na de overdracht doet de klant dat vanaf de beheeromgeving die Stage Two
-achterlaat, waar Claude Code bij Supabase is ingelogd.
+architectuurbesluit. Na de overdracht doet je organisatie dat zelf, bijvoorbeeld vanaf een
+beheerserver (optioneel): een server waar Claude Code bij Supabase is ingelogd.
 
 ## 4. De kwaliteitspoort
 
@@ -343,15 +365,17 @@ fouten in plaats van met bedachte scenario's.
 
 ## 6. Wie mag wat
 
-|  | Stage Two (bouwer) | Klant (mede-bouwer) |
+|  | Bouwer (iemand van de klant) | Owner (eigenaar van de organisatie bij de klant) |
 |---|---|---|
-| GitHub-repo | Admin | **Write** |
-| Direct pushen naar `main` | nee, geblokkeerd | **nee** |
-| Branch aanmaken en PR openen | ja | **ja** |
-| Eigen PR mergen | ja | **ja**, zodra alle checks groen zijn |
-| Supabase-console | ja | niet nodig, zie hoofdstuk 3 |
-| Cloudflare-console | ja | niet nodig, deployen is mergen en toegang staat in de beheer-repo |
-| Sentry | ja | ja, meelezen |
+| GitHub-repo | **Write** | Admin |
+| Direct pushen naar `main` | **nee** | nee, geblokkeerd |
+| Branch aanmaken en PR openen | **ja** | ja |
+| Eigen PR mergen | **ja**, zodra alle checks groen zijn | ja, zodra alle checks groen zijn |
+| Mensen toegang geven | **ja**, met een PR op `toegang.json` in de beheer-repo | ja |
+| Een sleutel van een ander systeem zetten | nee | ja, zie hoofdstuk 3 |
+| Supabase-console | niet nodig, zie hoofdstuk 3 | ja, voor het account en de rekening |
+| Cloudflare-console | niet nodig, deployen is mergen en toegang staat in de beheer-repo | ja, voor het account en de rekening |
+| Sentry | ja, meelezen | ja |
 
 **De merge-knop is de enige knop die je nodig hebt.** Je kunt met je eigen
 AI-assistent bouwen, een pull request openen en die zelf mergen, maar alleen langs de
@@ -364,13 +388,36 @@ belooft. Een verplichte review is niet overdraagbaar.
 
 Wat er dan wel voor zorgt dat het goed gaat: de checks blokkeren de merge als er iets
 stuk is, een destructieve migratie vraagt een expliciete bevestiging in de PR-tekst, een
-wijziging aan de poort zelf ook, en Stage Two krijgt een melding bij
-een wijziging aan de database, aan het inloggen of aan de poort zelf (zie
-`.github/CODEOWNERS`, dat blokkeert niets maar informeert wel).
+wijziging aan de poort zelf ook, en wie in `.github/CODEOWNERS` staat krijgt een melding
+bij een wijziging aan de database, aan het inloggen of aan de poort zelf (dat blokkeert
+niets maar informeert wel). Dat is de bouwer die de app heeft aangemaakt:
+`/stagetwo-tier2:nieuwe-app` zet hem erin. Stage Two staat er niet in.
 
-Alle accounts (GitHub, Cloudflare, Supabase, Sentry) staan op naam van de klant, met
-Stage Two als lid met adminrechten. Bij oplevering hoeft er dus niets overgedragen te
-worden: de toegang van Stage Two wordt verwijderd en de rest blijft staan.
+**Wie doet wat.** Je bouwt zelf: de bouwers zijn mensen van je eigen organisatie, met hun
+eigen AI-assistent. Alle accounts (GitHub, Cloudflare, Supabase, Sentry) staan vanaf het begin op naam van je
+organisatie en zijn van jou. In de projectfase richt Stage Two die accounts in en beheert
+ze namens je, en begeleidt de bouwers. Bij de overdracht hoeft er dus niets te verhuizen:
+je organisatie is en blijft eigenaar, en is vanaf dan zelf verantwoordelijk voor de
+accounts en de rekeningen. Oplevering en overdracht zijn hetzelfde moment: het einde van
+het project. Dan haalt Stage Two zijn eigen toegang weg: Stage Two houdt geen persoonlijk
+account en geen beheerrechten in je organisatie, tenzij je organisatie dat wil; die toegang kan
+je organisatie altijd zelf intrekken. Toegang tot je apps heeft Stage Two niet nodig.
+Je apps veranderen nooit vanzelf; de plugin wel: dat is software van Stage Two die met de
+rechten van de bouwer op zijn computer draait en zichzelf bijwerkt. Dat bijwerken kan uit
+(vraag je assistent erom), en dan werk je de plugin zelf bij met `/stagetwo-tier2:updaten`.
+Zolang het abonnement loopt, zet Stage Two nieuwe versies van deze werkwijze in de kopie in je
+eigen GitHub, via de GitHub App `stagetwo-levering`. Stage Two installeert die bij de start
+namens je organisatie, op alleen de twee kopieën van template en plugin ("Only select
+repositories"); je organisatie kan hem altijd zelf verwijderen. Hij heeft alleen daar
+schrijfrecht, niet op je apps. De plugin
+op je computer werkt zichzelf bij uit die kopie. Je apps veranderen alleen via een
+update-voorstel dat de plugin met `/stagetwo-tier2:updaten` klaarzet en dat een bouwer
+goedkeurt. Een nieuwe versie van de beheer-repo zet Stage Two op verzoek klaar, met tijdelijke
+toegang die de owner van je organisatie geeft en daarna weer intrekt. Bij opzeggen haalt
+Stage Two je organisatie uit de lijst van abonnees en de App `stagetwo-levering` uit je
+organisatie. Wil je na de overdracht de inrichting zelf aanpassen, dan kan dat met een beheerserver
+(optioneel): een server van je organisatie met Claude Code, die Stage Two bij de overdracht
+kan achterlaten.
 
 ---
 
@@ -422,6 +469,7 @@ De namen zitten op verschillende verdiepingen; het zijn geen concurrenten van el
 | **Edge Function** | klein stukje code dat bij Supabase op een server draait, voor dingen met een geheime sleutel |
 | **Deno** | de omgeving waarin Edge Functions draaien. Geldt voor iedereen die Supabase gebruikt, niet projectspecifiek |
 | **Migratie** | een genummerd SQL-bestand dat één databasewijziging vastlegt, zodat de historie navolgbaar is |
+| **Beheerserver** | optioneel: een server van je organisatie met Claude Code, waarmee je na de overdracht zelf de inrichting aanpast |
 | **PR (pull request)** | het voorstel om wijzigingen naar `main` te brengen. De plek waar diff, checks en preview samenkomen |
 | **Diff** | het verschil tussen oud en nieuw: precies wat er gewijzigd is |
 | **CI** | de machine die bij elke PR je checks draait en nee kan zeggen |

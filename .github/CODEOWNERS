@@ -13,7 +13,9 @@
 #     tegenhoudt (ook bij dit bestand: het bepaalt wie een melding krijgt)
 #   - /stagetwo-tier2:updaten, dat deze bestanden als pull request gelijk zet met de template
 #
-# Bij het opzetten van een project vult bin/nieuw-project.sh hier het juiste account in.
+# In de template zelf staat hier @StageTwoAI. Bij een nieuwe app vervangt
+# /stagetwo-tier2:nieuwe-app dat door de bouwer die de app aanmaakt: hij is de reviewer.
+# Stage Two staat niet in CODEOWNERS van een app van de klant.
 
 # Alles wat de database onomkeerbaar kan wijzigen.
 /supabase/migrations/       @StageTwoAI

@@ -1,8 +1,8 @@
 {
   "$beschrijving": [
     "Welke bestanden van de gedeelde template zijn en welke van dit project.",
-    "De skill /stagetwo-tier2:updaten (Stage Two-plugin) en de beheerde run van Stage Two",
-    "gebruiken dit om alleen de template-bestanden bij te werken, zonder ooit aan het",
+    "De skill /stagetwo-tier2:updaten (Stage Two-plugin) gebruikt dit om alleen de",
+    "template-bestanden bij te werken, zonder ooit aan het",
     "werk van de klant te komen.",
     "",
     "Dit werkt omdat niemand deze paden per project aanpast, en dat wordt op drie",
@@ -14,8 +14,11 @@
     "AGENTS.md is de kern: de afspraken voor elke agent. Alleen het deel tussen de",
     "markeringen is van de template; de projectnaam en omschrijving erboven zijn van",
     "het project. CLAUDE.md is niets dan een import van AGENTS.md en wordt in zijn",
-    "geheel vervangen. .github/CODEOWNERS is van het project (het opzetscript vult het",
-    "in), maar de plugin-hook beschermt het wel: het bepaalt wie een melding krijgt.",
+    "geheel vervangen. .github/CODEOWNERS is van het project (/stagetwo-tier2:nieuwe-app",
+    "zet er de bouwer in), maar de plugin-hook beschermt het wel: het bepaalt wie een melding krijgt.",
+    "LICENSE is van het project (de licentie van de eigen code van de klant);",
+    "LICENSE-STAGE-TWO is het gebruiksrecht voor de onderdelen van Stage Two en komt",
+    "met elke versie mee.",
     "",
     "manifestFormaat zegt welke vorm dit bestand heeft; een oudere plugin stopt bij een",
     "nieuwer formaat in plaats van half werk te doen.",
@@ -25,7 +28,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 21,
+  "stackVersion": 26,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -35,6 +38,7 @@
       ".claude/stack-manifest.json",
       ".claude/stack-version",
       "CLAUDE.md",
+      "LICENSE-STAGE-TWO",
       ".github/workflows/ci.yml",
       ".github/workflows/deploy-db.yml",
       ".github/workflows/uitrollen.yml",
@@ -83,6 +87,7 @@
     "tests/**",
     "e2e/**",
     "README.md",
+    "LICENSE",
     ".env.example",
     ".github/CODEOWNERS",
     "index.html",
