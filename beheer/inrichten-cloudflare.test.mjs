@@ -271,7 +271,7 @@ test("auth-config: e-mail uit, disable_signup onaangeroerd, redirects zonder wil
   assert.equal(patch.site_url, "https://cf-proef.stagetwo.nl");
   assert.equal(
     patch.uri_allow_list,
-    "https://cf-proef.stagetwo.nl/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**",
+    "https://cf-proef.stagetwo.nl/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**,https://actueel-cf-proef.stagetwo-acc.workers.dev/**",
   );
 });
 
@@ -624,7 +624,7 @@ test("tijdelijke stand: site_url en redirect-lijst op het workers.dev-adres plus
   assert.equal(patch.site_url, `https://${WORKERS_DEV}`);
   assert.equal(
     patch.uri_allow_list,
-    `https://${WORKERS_DEV}/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**`,
+    `https://${WORKERS_DEV}/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**,https://actueel-cf-proef.stagetwo-acc.workers.dev/**`,
   );
   assert.deepEqual(r.uri_allow_list, patch.uri_allow_list.split(","));
 });
