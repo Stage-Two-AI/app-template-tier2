@@ -11,7 +11,26 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
  * test draait die controle zoals CI dat doet: als los Node-proces in een map.
  */
 const LIB = resolve(__dirname, "../../scripts/lib/cloudflare-config.mjs");
-const TEMPLATE = readFileSync(resolve(__dirname, "../../wrangler.jsonc"), "utf8");
+/** De eigen wrangler.jsonc van deze repo: in de template de tijdelijke stand, in een app vaak de standaardstand. */
+const EIGEN = readFileSync(resolve(__dirname, "../../wrangler.jsonc"), "utf8");
+
+/** wrangler.jsonc met commentaar, zoals de template hem levert: de tijdelijke stand. */
+const TIJDELIJK_JSONC = `// Hoe deze app op Cloudflare draait.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cf-proef",
+  "compatibility_date": "2026-09-01",
+  // Alleen de gebouwde bestanden; een onbekend pad valt terug op index.html.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "workers_dev": true,
+  "preview_urls": true
+  // Standaardstand, zodra er een eigen domein is:
+  // "routes": [{ "pattern": "<app>.<domein>", "custom_domain": true }]
+}
+`;
 
 let map: string;
 
@@ -145,14 +164,23 @@ describe("cloudflareConfig: de twee standen", () => {
     expect(r.uitvoer).toContain("single-page-application");
   });
 
-  it("keurt de wrangler.jsonc van deze repo zelf goed", () => {
-    schrijf(TEMPLATE);
-    expect(controleer().code).toBe(0);
+  it("keurt de wrangler.jsonc van deze repo zelf goed, in welke stand die ook staat", () => {
+    schrijf(EIGEN);
+    const r = controleer();
+    expect(r.code, r.uitvoer).toBe(0);
+    expect(["tijdelijk", "standaard"]).toContain(JSON.parse(r.uitvoer).stand);
   });
 
-  it("keurt de wrangler.jsonc van deze repo goed in de standaardstand", () => {
+  it("keurt een wrangler.jsonc met commentaar goed in de tijdelijke stand", () => {
+    schrijf(TIJDELIJK_JSONC);
+    const r = controleer();
+    expect(r.code, r.uitvoer).toBe(0);
+    expect(JSON.parse(r.uitvoer).stand).toBe("tijdelijk");
+  });
+
+  it("keurt een wrangler.jsonc met commentaar goed in de standaardstand", () => {
     // De voorbeeldroute uit het commentaar aanzetten; workers_dev blijft aan.
-    const standaard = TEMPLATE.replace(/^(\s*"preview_urls": true)$/m, "$1,").replace(
+    const standaard = TIJDELIJK_JSONC.replace(/^(\s*"preview_urls": true)$/m, "$1,").replace(
       /^(\s*)\/\/ ("routes": \[\{ "pattern": )"<app>\.<domein>"/m,
       '$1$2"cf-proef.stagetwo.nl"',
     );
@@ -161,16 +189,6 @@ describe("cloudflareConfig: de twee standen", () => {
     const r = controleer();
     expect(r.code, r.uitvoer).toBe(0);
     expect(JSON.parse(r.uitvoer).stand).toBe("standaard");
-  });
-
-  it("keurt de wrangler.jsonc van deze repo goed in de tijdelijke stand", () => {
-    const tijdelijk = TEMPLATE;
-    expect(tijdelijk).toMatch(/^\s*"workers_dev": true/m);
-    expect(tijdelijk).not.toMatch(/^\s*"routes":/m);
-    schrijf(tijdelijk);
-    const r = controleer();
-    expect(r.code, r.uitvoer).toBe(0);
-    expect(JSON.parse(r.uitvoer).stand).toBe("tijdelijk");
   });
 
   it("meldt duidelijk dat het bestand ontbreekt", () => {

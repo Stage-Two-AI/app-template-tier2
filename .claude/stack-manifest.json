@@ -20,6 +20,11 @@
     "LICENSE-STAGE-TWO is het gebruiksrecht voor de onderdelen van Stage Two en komt",
     "met elke versie mee.",
     "",
+    "De tests in tests/unit/ testen de scripts van de template (guards, workflows,",
+    "cloudflare-config) en gaan daarom mee met elke versie; tests/** is verder van het",
+    "project. Eigen tests van de app horen naast de code in src/; een eigen test in",
+    "tests/unit/ onder een naam die de template niet kent, blijft gewoon staan.",
+    "",
     "manifestFormaat zegt welke vorm dit bestand heeft; een oudere plugin stopt bij een",
     "nieuwer formaat in plaats van half werk te doen.",
     "",
@@ -28,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 26,
+  "stackVersion": 27,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -70,7 +75,17 @@
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",
       "docs/routes/lokaal-kijken.md",
-      "biome.json"
+      "biome.json",
+      "tests/unit/apparaat.test.ts",
+      "tests/unit/cloudflare-config.test.ts",
+      "tests/unit/database-stand.test.ts",
+      "tests/unit/db-types.test.ts",
+      "tests/unit/db-url.test.ts",
+      "tests/unit/deploy-db-workflow.test.ts",
+      "tests/unit/guard-cloudflare.test.ts",
+      "tests/unit/guard-secrets.test.ts",
+      "tests/unit/guard-template.test.ts",
+      "tests/unit/uitrollen-workflow.test.ts"
     ],
     "sleutelsSamenvoegen": {
       "package.json": ["scripts", "devDependencies"]
