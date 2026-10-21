@@ -182,8 +182,10 @@ die een eigen beveiligingsopzet vraagt.
 ### De testdatabase: preview en lokaal kijken raken nooit productie
 
 Een app met een database krijgt er bij het opzetten standaard een tweede Supabase-project
-naast: de **testdatabase**. Zelfde schema, andere gegevens (verzonnen, of een oude kopie),
-los van productie. Alleen voor apps die echt met Supabase praten; een app zonder database
+naast: de **testdatabase**. Zelfde schema, los van productie. De gegevens zijn een kopie
+van productie: de workflow **Testdatabase verversen** in de beheer-repo zet ze er elke
+nacht opnieuw in (alleen het schema `public`, geen gebruikers of bestanden). Wat je in
+een preview invoert, is de volgende ochtend dus weer weg. Alleen voor apps die echt met Supabase praten; een app zonder database
 heeft er niets aan, en een app op een gedeelde database gebruikt de testdatabase van de
 eigenaar.
 
