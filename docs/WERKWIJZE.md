@@ -23,7 +23,8 @@ De uitgangspunten waar alles uit volgt:
   dan blijft die kopie op de laatste versie staan. Het abonnement kost €150 per maand per
   bedrijf, ongeacht het aantal apps, exclusief btw, en is per maand opzegbaar, met een
   opzegtermijn van één kalendermaand. Het levert nieuwe versies van template en plugin, een
-  nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken. De plugin meldt
+  nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken, tot ongeveer een
+  uur per maand (meer tijd op afspraak). De plugin meldt
   een nieuwe versie en zet met `/stagetwo-tier2:updaten` per app het update-voorstel klaar; een
   bouwer keurt het goed. Het abonnement houdt de omgeving niet bij: beheer en werking blijven
   na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
@@ -392,7 +393,8 @@ ze namens je, en begeleidt de bouwers. Bij de overdracht hoeft er dus niets te v
 je organisatie is en blijft eigenaar, en is vanaf dan zelf verantwoordelijk voor de
 accounts en de rekeningen. Oplevering en overdracht zijn hetzelfde moment: het einde van
 het project. Dan haalt Stage Two zijn eigen toegang weg: Stage Two houdt geen persoonlijk
-account en geen beheerrechten in je organisatie, en heeft ook geen toegang tot je apps nodig.
+account en geen beheerrechten in je organisatie, tenzij je organisatie dat wil; die toegang kan
+je organisatie altijd zelf intrekken. Toegang tot je apps heeft Stage Two niet nodig.
 Je apps veranderen nooit vanzelf; de plugin wel: dat is software van Stage Two die met de
 rechten van de bouwer op zijn computer draait en zichzelf bijwerkt. Dat bijwerken kan uit
 (vraag je assistent erom), en dan werk je de plugin zelf bij met `/stagetwo-tier2:updaten`.

@@ -131,7 +131,8 @@ Het abonnement kost €150 per maand per bedrijf, ongeacht het aantal apps, excl
 loopt vanaf de oplevering, het moment waarop Stage Two de omgeving aan je bedrijf overdraagt,
 en is per maand opzegbaar, met een opzegtermijn van één kalendermaand. Daarin zitten nieuwe
 versies van template en plugin, een nieuwe versie als een leverancier iets verandert, een
-nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken. Het abonnement
+nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken, tot ongeveer een
+uur per maand (meer tijd op afspraak). Het abonnement
 houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je bedrijf. Niet in
 het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer werk aan je
 apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
@@ -142,8 +143,8 @@ Dependabot tussendoor voorstellen. Hoogt die alleen de versie van een GitHub Act
 de controle op templatebestanden hem door.
 
 Na de overdracht heeft Stage Two zelf geen toegang tot je apps en geen eigen account of
-beheerrechten in de GitHub-organisatie van je bedrijf; voor het abonnement is dat ook niet
-nodig. Je apps veranderen nooit vanzelf. De plugin wel: dat is software van Stage Two die op
+beheerrechten in de GitHub-organisatie van je bedrijf, tenzij je bedrijf dat wil; die toegang
+kan je bedrijf altijd zelf intrekken. Voor het abonnement is die toegang niet nodig. Je apps veranderen nooit vanzelf. De plugin wel: dat is software van Stage Two die op
 de computers van je bouwers draait met hun rechten en zichzelf bijwerkt uit de kopie. Wil je
 dat zelf bepalen, vraag je assistent dan om het uit te zetten; daarna werk je de plugin bij
 met `/stagetwo-tier2:updaten`. In de Claude-app werken dan ook andere plugins op die computer
