@@ -33,7 +33,8 @@ export function callbackAdres(ref) {
  * van elk account toelaten, en daarmee een token naar een vreemde site sturen.
  *
  * `hostname` is het eigen domein, of in de tijdelijke stand van wrangler.jsonc het
- * workers.dev-adres van de Worker (`<worker>.<subdomein>.workers.dev`).
+ * workers.dev-adres van de Worker (`<worker>.<subdomein>.workers.dev`). Daarnaast de
+ * previews: per PR (`pr-<nummer>-<worker>`) en het vaste adres (`actueel-<worker>`).
  */
 export function uriAllowList({ hostname, worker, subdomein }) {
   if (!subdomein || !/^[a-z0-9-]+$/i.test(subdomein)) {
@@ -42,7 +43,12 @@ export function uriAllowList({ hostname, worker, subdomein }) {
     );
   }
   if (!/^[a-z0-9-]+$/.test(worker ?? "")) throw new Error(`de Worker-naam "${worker}" is ongeldig`);
-  return [`https://${hostname}/**`, `https://pr-*-${worker}.${subdomein}.workers.dev/**`];
+  return [
+    `https://${hostname}/**`,
+    `https://pr-*-${worker}.${subdomein}.workers.dev/**`,
+    // Het vaste preview-adres (label `actueel`, zie Preview uitrollen).
+    `https://actueel-${worker}.${subdomein}.workers.dev/**`,
+  ];
 }
 
 /**

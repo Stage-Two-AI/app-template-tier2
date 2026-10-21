@@ -124,26 +124,25 @@ gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=true
 # 2. echt inrichten
 gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=false
 
-# 3. alleen in de standaardstand, na de eerste uitrol vanaf main: Access op de Worker zelf
+# 3. alleen voor een app van vóór versie 21: Access op de Worker zelf alsnog zetten
 gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=false -f tweede_doorgang=true
 ```
 
 De workflow geeft `--voorvoegsel cf-proef-` mee. Alleen met dat voorvoegsel valt het
 script terug op deze repo (`GITHUB_REPOSITORY`) en op `wrangler.jsonc` in de werkmap.
 
-In de tijdelijke stand (`workers_dev: true`, geen routes) is stap 3 niet nodig. Staat
-de Worker er nog niet, dan zet de inrichting eerst een placeholder-Worker neer die op
+Stap 3 is normaal niet nodig. `workers_dev` staat in beide standen aan (anders tonen de
+previews achter Access niets), dus de Access op de Worker moet er vóór de eerste uitrol
+staan. Staat de Worker er nog niet, dan zet de inrichting eerst een placeholder-Worker neer die op
 elk verzoek 503 "Deze app wordt ingericht." geeft, en meteen de Access op de Worker. Dat
 gebeurt vóór de GitHub-variabelen, die de uitrol pas mogelijk maken. De eerste echte
 uitrol (`wrangler deploy`) overschrijft de placeholder en landt zo meteen achter de
 deur: er is geen moment waarop de app zonder Access op workers.dev staat. Dat werkt
 ook als de inrichting in een andere repo draait dan de app.
 
-In de standaardstand bewaakt de deur op het eigen domein de app al vóór de uitrol; daar
-slaat de inrichting stap 4 over zolang er niet is uitgerold ("nog niet uitgerold") en
-zet stap 3 hierboven daarna de Access op de versie- en preview-adressen. Stap 3 zit ook
-in elke gewone run. Voor een app die is ingericht voordat de placeholder bestond, zet
-stap 3 de ontbrekende Access op de Worker alsnog.
+In de standaardstand komt daarnaast de deur op het eigen domein. Stap 4 zit ook in elke
+gewone run: voor een app die is ingericht voordat de placeholder bestond, zet die de
+ontbrekende Access op de Worker alsnog.
 
 Het resultaat staat in het logboek als één regel die begint met `INRICHTING`. Geheimen
 staan daar nooit leesbaar in.

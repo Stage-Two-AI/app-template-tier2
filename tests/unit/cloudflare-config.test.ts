@@ -27,7 +27,7 @@ const GOED = {
   name: "cf-proef",
   compatibility_date: "2026-09-01",
   assets: { directory: "./dist", not_found_handling: "single-page-application" },
-  workers_dev: false,
+  workers_dev: true,
   preview_urls: true,
   routes: [{ pattern: "cf-proef.stagetwo.nl", custom_domain: true }],
 };
@@ -84,20 +84,19 @@ describe("cloudflareConfig: de twee standen", () => {
     expect(JSON.parse(r.uitvoer).stand).toBe("tijdelijk");
   });
 
-  it("weigert workers_dev aan naast een eigen domein, met een melding die beide standen noemt", () => {
-    const r = controleerConfig({ ...GOED, workers_dev: true });
+  it("weigert workers_dev uit naast een eigen domein: dan tonen de previews achter Access niets", () => {
+    const r = controleerConfig({ ...GOED, workers_dev: false });
     expect(r.code).not.toBe(0);
     expect(r.uitvoer).toContain("workers_dev");
+    expect(r.uitvoer).toContain("There is nothing here yet");
     expect(r.uitvoer).toContain("standaard");
     expect(r.uitvoer).toContain("tijdelijk");
   });
 
-  it("weigert workers_dev uit zonder routes: dan heeft de app geen adres", () => {
-    const r = controleerConfig({ ...GOED, routes: [] });
+  it("weigert workers_dev uit zonder routes", () => {
+    const r = controleerConfig({ ...TIJDELIJK, workers_dev: false });
     expect(r.code).not.toBe(0);
-    expect(r.uitvoer).toContain("custom_domain");
-    expect(r.uitvoer).toContain("standaard");
-    expect(r.uitvoer).toContain("tijdelijk");
+    expect(r.uitvoer).toContain("workers_dev");
   });
 
   it("weigert een config zonder workers_dev: wrangler zet het dan stilletjes aan", () => {
@@ -151,12 +150,21 @@ describe("cloudflareConfig: de twee standen", () => {
     expect(controleer().code).toBe(0);
   });
 
+  it("keurt de wrangler.jsonc van deze repo goed in de standaardstand", () => {
+    // De voorbeeldroute uit het commentaar aanzetten; workers_dev blijft aan.
+    const standaard = TEMPLATE.replace(/^(\s*"preview_urls": true)$/m, "$1,").replace(
+      /^(\s*)\/\/ ("routes": \[\{ "pattern": )"<app>\.<domein>"/m,
+      '$1$2"cf-proef.stagetwo.nl"',
+    );
+    expect(standaard).toMatch(/^\s*"routes":/m);
+    schrijf(standaard);
+    const r = controleer();
+    expect(r.code, r.uitvoer).toBe(0);
+    expect(JSON.parse(r.uitvoer).stand).toBe("standaard");
+  });
+
   it("keurt de wrangler.jsonc van deze repo goed in de tijdelijke stand", () => {
-    // Alleen de sleutelregels, niet het commentaar dat beide standen uitlegt.
-    const tijdelijk = TEMPLATE.replace(
-      /^(\s*)"workers_dev": false/m,
-      '$1"workers_dev": true',
-    ).replace(/^\s*"routes":.*$/m, "");
+    const tijdelijk = TEMPLATE;
     expect(tijdelijk).toMatch(/^\s*"workers_dev": true/m);
     expect(tijdelijk).not.toMatch(/^\s*"routes":/m);
     schrijf(tijdelijk);

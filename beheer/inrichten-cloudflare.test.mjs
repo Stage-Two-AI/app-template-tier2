@@ -189,7 +189,7 @@ test("droogloop: maakt niets aan en toont de volledige lijst geplande stappen", 
       "3.6 GitHub-variabelen en -secrets",
     ],
   );
-  assert.ok(r.stappen.every((s) => /gepland|bestaat al|nog niet uitgerold/.test(s.actie)));
+  assert.ok(r.stappen.every((s) => /gepland|bestaat al/.test(s.actie)));
 });
 
 // ---------------------------------------------------------------- volledige run
@@ -211,14 +211,17 @@ test("volledige run: de schrijfacties volgen de volgorde van het ontwerp", async
     `PATCH sb/projects/${ref}/config/auth`,
     "POST cf/access/apps self_hosted",
   ]);
+  // workers.dev staat ook in de standaardstand aan: eerst placeholder en Access op de Worker
+  assert.deepEqual(schrijf.slice(8, 11), [
+    "PUT cf/workers/scripts/cf-proef",
+    "POST cf/workers/scripts/cf-proef/subdomain",
+    "POST cf/access/apps self_hosted",
+  ]);
   assert.ok(
-    schrijf.slice(8).every((s) => s.startsWith("gh ")),
+    schrijf.slice(11).every((s) => s.startsWith("gh ")),
     "daarna alleen nog GitHub",
   );
-  assert.equal(
-    r.stappen.find((s) => s.stap === "4 Access op de Worker").actie,
-    "overgeslagen: nog niet uitgerold",
-  );
+  assert.match(r.stappen.find((s) => s.stap === "4 Access op de Worker").actie, /placeholder/);
   assert.equal(r.supabase.ref, ref);
   assert.equal(r.issuer, "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/sso/oidc/cid-3");
 });
@@ -271,7 +274,7 @@ test("auth-config: e-mail uit, disable_signup onaangeroerd, redirects zonder wil
   assert.equal(patch.site_url, "https://cf-proef.stagetwo.nl");
   assert.equal(
     patch.uri_allow_list,
-    "https://cf-proef.stagetwo.nl/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**",
+    "https://cf-proef.stagetwo.nl/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**,https://actueel-cf-proef.stagetwo-acc.workers.dev/**",
   );
 });
 
@@ -475,7 +478,8 @@ test("tweede run met alles al aanwezig maakt niets dubbel aan", async () => {
   const r = await richtIn(ARG, d);
   assert.deepEqual(w.schrijfacties(), []);
   assert.equal(w.staat.projecten.length, 1);
-  assert.equal(w.staat.apps.length, 2);
+  // inlog, deur en de Access op de Worker (die er via de placeholder meteen is)
+  assert.equal(w.staat.apps.length, 3);
   assert.equal(w.staat.policies.length, 1);
   assert.equal(w.staat.providers.length, 1);
   assert.ok(
@@ -561,13 +565,14 @@ test("SaaS-app: een lege lijst inlogmethoden is een fout, ook vóór er iets wor
 
 // ---------------------------------------------------------------- tweede doorgang
 
-test("tweede doorgang zonder Worker: meldt 'nog niet uitgerold' en wijzigt niets", async () => {
+test("tweede doorgang zonder Worker, droogloop: plant placeholder en Access, wijzigt niets", async () => {
   const w = nepWolk();
   const d = opzet(w);
   await richtIn(ARG, d);
+  w.staat.workerBestaat = false;
   w.aanroepen.length = 0;
-  const r = await tweedeDoorgang(ARG, d);
-  assert.match(r.melding, /nog niet uitgerold/);
+  const r = await tweedeDoorgang({ ...ARG, droogloop: true }, d);
+  assert.equal(r.melding, "gepland: placeholder en Access op de Worker");
   assert.deepEqual(w.schrijfacties(), []);
 });
 
@@ -624,7 +629,7 @@ test("tijdelijke stand: site_url en redirect-lijst op het workers.dev-adres plus
   assert.equal(patch.site_url, `https://${WORKERS_DEV}`);
   assert.equal(
     patch.uri_allow_list,
-    `https://${WORKERS_DEV}/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**`,
+    `https://${WORKERS_DEV}/**,https://pr-*-cf-proef.stagetwo-acc.workers.dev/**,https://actueel-cf-proef.stagetwo-acc.workers.dev/**`,
   );
   assert.deepEqual(r.uri_allow_list, patch.uri_allow_list.split(","));
 });
@@ -679,15 +684,16 @@ test("tijdelijke stand, Worker bestaat al: geen placeholder", async () => {
   assert.ok(w.staat.apps.some((a) => a.name === "cf-proef-cf-proef-worker"));
 });
 
-test("standaardstand, Worker bestaat niet: geen placeholder, stap 4 overgeslagen", async () => {
+test("standaardstand, Worker bestaat niet: ook hier eerst placeholder en Access op workers.dev", async () => {
   const w = nepWolk();
   const r = await richtIn(ARG, opzet(w));
-  assert.ok(!w.schrijfacties().some((s) => s.includes("workers/scripts")));
-  assert.equal(
-    r.stappen.find((s) => s.stap === "4 Access op de Worker").actie,
-    "overgeslagen: nog niet uitgerold",
-  );
-  assert.ok(!w.staat.apps.some((a) => a.name === "cf-proef-cf-proef-worker"));
+  const schrijf = w.schrijfacties();
+  const placeholder = schrijf.indexOf("PUT cf/workers/scripts/cf-proef");
+  const eersteVariabele = schrijf.findIndex((s) => s.startsWith("gh variable set"));
+  assert.ok(placeholder >= 0 && placeholder < eersteVariabele, JSON.stringify(schrijf));
+  assert.match(r.stappen.find((s) => s.stap === "4 Access op de Worker").actie, /placeholder/);
+  const worker = w.staat.apps.find((a) => a.name === "cf-proef-cf-proef-worker");
+  assert.equal(worker.domain, WORKERS_DEV);
 });
 
 test("tijdelijke stand zonder uitrol, droogloop: niets geschreven, placeholder en Access gepland", async () => {
@@ -909,6 +915,7 @@ test("--opruimen: een 404 bij het verwijderen van het Worker-script is geen fout
   const w = nepWolk();
   const d = opzet(w);
   await richtIn(ARG, d);
+  w.staat.workerBestaat = false;
   const r = await ruimOp(ARG, d);
   assert.ok(w.schrijfacties().includes("DELETE cf/workers/scripts/cf-proef"));
   assert.ok(!r.verwijderd.some((v) => v.soort === "Worker-script"));
