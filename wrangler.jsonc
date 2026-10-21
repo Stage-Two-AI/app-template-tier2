@@ -3,11 +3,13 @@
 // scripts/lib/cloudflare-config.mjs (check guard:cloudflare). Alleen sleutels van de
 // lijst daar mogen erin; opslag van Cloudflare (D1, R2, KV, Durable Objects) niet.
 //
-// Twee standen, zie docs/WERKWIJZE.md:
-//   standaard  "workers_dev": false plus een route met "custom_domain": true (hieronder).
-//   tijdelijk  "workers_dev": true en geen "routes", alleen zolang er nog geen eigen
-//              domein is. De app staat dan op <name>.<subdomein>.workers.dev, achter
-//              de Access op de Worker zelf. Is het domein er, dan terug naar standaard.
+// "workers_dev" staat altijd aan: zonder dat adres tonen de previews per pull request
+// achter Access alleen "There is nothing here yet". De Access op de Worker zelf bewaakt
+// het workers.dev-adres en alle preview-adressen. Twee standen, zie docs/WERKWIJZE.md:
+//   standaard  een route met "custom_domain": true (hieronder), met Access op dat domein.
+//   tijdelijk  geen "routes", alleen zolang er nog geen eigen domein is. De app staat
+//              dan alleen op <name>.<subdomein>.workers.dev. Is het domein er, dan
+//              komt de route erbij.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cf-proef",
@@ -17,11 +19,10 @@
     "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
-  // Tijdelijke stand: nog geen eigen domein, dus alleen het workers.dev-adres, achter de
-  // Access op de Worker zelf. Komt er een domein: false, plus de route hieronder terug.
+  // Altijd aan, achter de Access op de Worker zelf (zie boven).
   "workers_dev": true,
   // Previews per pull request. Access op de Worker zelf dekt ook deze adressen.
   "preview_urls": true
-  // Standaardstand, zodra er een eigen domein is:
+  // Standaardstand, zodra er een eigen domein is (nu tijdelijk: nog geen domein):
   // "routes": [{ "pattern": "<app>.<domein>", "custom_domain": true }]
 }

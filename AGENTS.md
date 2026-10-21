@@ -142,10 +142,12 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   opslag van Cloudflare zelf (D1, KV, R2, Durable Objects): Cloudflare serveert alleen
   de app en regelt de toegang. `guard:cloudflare` laat alleen de sleutels in
   `wrangler.jsonc` door die op de lijst staan en blokkeert de rest.
-- **De app heeft één adres, en dat staat achter Access.** Normaal is dat het eigen domein
-  (`routes` met `custom_domain: true`, `workers_dev: false`). Alleen zolang de klant nog
-  geen domein heeft, mag de tijdelijke stand: geen `routes` en `workers_dev: true`. Zet
-  die stand niet op eigen houtje aan of uit; `docs/WERKWIJZE.md` zegt wanneer hij mag.
+- **Elk adres van de app staat achter Access.** Normaal is dat het eigen domein
+  (`routes` met `custom_domain: true`). Alleen zolang de klant nog geen domein heeft,
+  mag de tijdelijke stand: geen `routes`. `workers_dev` staat in beide standen op `true`,
+  achter de Access op de Worker zelf; zonder dat adres tonen de previews alleen "There
+  is nothing here yet". Zet geen stand op eigen houtje aan of uit; `docs/WERKWIJZE.md`
+  zegt wanneer hij mag.
 - **Wie code wijzigt, wijzigt ook een test.** Bugfix? Eerst een test die de bug
   reproduceert, dan de reparatie.
 - **Eén PR = één onderwerp.** Beschrijf wat je gewijzigd hebt en waarom.

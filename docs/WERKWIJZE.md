@@ -65,21 +65,27 @@ in het bestand dat de bezoeker downloadt.
 Twee checks bewaken dit automatisch: één die de repo doorzoekt, en één die de
 gebouwde bundel doorzoekt. Die tweede is de belangrijkste van allemaal.
 
-**Eén adres, en dat staat achter Access.** Cloudflare Access is de deur: wie niet op de
-lijst staat, ziet de app niet. Dat werkt alleen als er geen tweede adres is om omheen te
-gaan. `wrangler.jsonc` kent daarom twee standen, en `scripts/lib/cloudflare-config.mjs`
+**Elk adres staat achter Access.** Cloudflare Access is de deur: wie niet op de lijst
+staat, ziet de app niet. Dat werkt alleen als er geen adres is om omheen te gaan. Er
+zijn er twee soorten: het eigen domein, met een Access-app op dat domein, en de adressen
+op workers.dev (het hoofdadres en de previews per pull request), met de Access op de
+Worker zelf. `wrangler.jsonc` kent twee standen, en `scripts/lib/cloudflare-config.mjs`
 weigert elke andere combinatie:
 
 | Stand | In `wrangler.jsonc` | Wanneer |
 |---|---|---|
-| standaard | een route met `custom_domain: true` en `workers_dev: false` | altijd, zodra de app een eigen domein heeft |
-| tijdelijk | geen `routes` en `workers_dev: true` | alleen zolang de klant nog geen domein heeft gekozen |
+| standaard | een route met `custom_domain: true`, en `workers_dev: true` | altijd, zodra de app een eigen domein heeft |
+| tijdelijk | geen `routes`, en `workers_dev: true` | alleen zolang de klant nog geen domein heeft gekozen |
 
-In de tijdelijke stand draait de app op `<worker>.<subdomein>.workers.dev`. De inrichting
-zet dan Access op de Worker zelf, en die dekt dat adres en de preview-adressen; een
+`workers_dev` staat in beide standen aan. Staat hij uit, dan tonen de previews achter
+Access alleen een lege pagina van Cloudflare ("There is nothing here yet"), ook met
+`preview_urls: true`; dat bleek bij finance op 15-10-2026. De Access op de Worker zelf
+dekt het workers.dev-adres al, dus er komt geen open deur bij.
+
+In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
-lange termijn: is het domein er, dan gaat de app terug naar de standaardstand en gaat
-workers.dev weer uit. Dat overstappen doet Stage Two, met de inrichting in de beheer-repo.
+lange termijn: is het domein er, dan komt de route erbij. Dat overstappen doet Stage
+Two, met de inrichting in de beheer-repo.
 
 **Geen opslag bij Cloudflare.** Gegevens staan in Supabase. `wrangler.jsonc` mag alleen
 sleutels bevatten die op de lijst van `scripts/lib/cloudflare-config.mjs` staan, bovenaan
