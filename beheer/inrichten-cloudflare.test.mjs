@@ -1524,3 +1524,88 @@ test("maakProject: een nieuw project komt in de eerste organisatie", async () =>
   await b.maakProject("wc-nieuw", "geheim");
   assert.equal(verzoeken.at(-1).body.organization_slug, "winco");
 });
+
+test("--opruimen van één app laat een policy staan die andere apps nog gebruiken", async () => {
+  // Het geval Winco (23-10-2026): drie apps delen de groep kernteam. Opruimen van
+  // alleen overzicht mag die policy niet weghalen, want pilot en intern hangen eraan.
+  // De groep solo gebruikt alleen overzicht; die policy mag wel weg.
+  const toegang = {
+    groepen: {
+      kernteam: { adressen: ["info@stagetwo.nl"] },
+      plantas: { domeinen: ["plantas.nl"] },
+      solo: { adressen: ["solo@stagetwo.nl"] },
+    },
+    apps: {
+      pilot: ["kernteam"],
+      intern: ["kernteam", "plantas"],
+      overzicht: ["kernteam", "solo"],
+    },
+  };
+  const w = nepWolk();
+  const d = opzet(w, { toegang });
+  const argVoor = (app) => ({
+    ...ARG,
+    app,
+    hostname: `${app}.winco.nl`,
+    worker: app,
+    repo: `Winco-Holland-B-V/${app}`,
+    voorvoegsel: "wc-",
+  });
+  for (const app of Object.keys(toegang.apps)) await richtIn(argVoor(app), d);
+  const policyNamen = () => w.staat.policies.map((p) => p.name).sort();
+  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-plantas", "wc-solo"]);
+
+  const droog = await ruimOp({ ...argVoor("overzicht"), droogloop: true }, d);
+  const droogPolicies = droog.verwijderd.filter((v) => v.soort === "Access-policy");
+  assert.deepEqual(
+    droogPolicies.map((v) => v.naam),
+    ["wc-solo"],
+  );
+  assert.match(
+    droog.waarschuwingen.join(" "),
+    /wc-kernteam blijft staan \(gebruikt door pilot, intern\)/,
+  );
+
+  const r = await ruimOp(argVoor("overzicht"), d);
+  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-plantas"]);
+  assert.match(
+    r.waarschuwingen.join(" "),
+    /wc-kernteam blijft staan \(gebruikt door pilot, intern\)/,
+  );
+  assert.ok(!w.staat.apps.some((a) => a.name.startsWith("wc-overzicht")));
+  assert.ok(w.staat.apps.some((a) => a.name.startsWith("wc-pilot")));
+  assert.ok(w.staat.apps.some((a) => a.name.startsWith("wc-intern")));
+});
+
+test("--opruimen laat een policy staan die nog aan een andere Access-app hangt", async () => {
+  // De app oud staat niet meer in toegang.json; zijn groepen zijn dan onbekend. De policy
+  // wc-kernteam hangt nog aan de Access-app van pilot, die niet in toegang.json staat.
+  const w = nepWolk({
+    policies: [
+      { id: "pol-kern", name: "wc-kernteam", decision: "allow", include: [] },
+      { id: "pol-los", name: "wc-los", decision: "allow", include: [] },
+    ],
+    apps: [
+      { id: "app-oud", name: "wc-oud", type: "self_hosted", policies: [{ id: "pol-kern" }] },
+      { id: "app-pilot", name: "pilot", type: "self_hosted", policies: [{ id: "pol-kern" }] },
+    ],
+  });
+  const toegang = {
+    groepen: { kernteam: { adressen: ["info@stagetwo.nl"] }, los: { adressen: ["x@y.nl"] } },
+    apps: {},
+  };
+  const arg = { ...ARG, app: "oud", worker: undefined, repo: undefined, voorvoegsel: "wc-" };
+  const r = await ruimOp(arg, opzet(w, { toegang }));
+  assert.deepEqual(
+    w.staat.policies.map((p) => p.name),
+    ["wc-kernteam"],
+  );
+  assert.deepEqual(
+    w.staat.apps.map((a) => a.name),
+    ["pilot"],
+  );
+  assert.match(
+    r.waarschuwingen.join(" "),
+    /wc-kernteam blijft staan \(gebruikt door Access-app pilot\)/,
+  );
+});
