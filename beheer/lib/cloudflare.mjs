@@ -143,7 +143,7 @@ export function deurApp({ naam, hostname, policyIds, idps }) {
     // NAGAAN (U7): `destinations` naast `domain`; nieuwere API-versies gebruiken alleen destinations.
     destinations: [{ type: "public", uri: hostname }],
     app_launcher_visible: false,
-    session_duration: "24h",
+    session_duration: "720h", // 30 dagen: ook een app op het beginscherm blijft ingelogd
     ...inlogmethoden(idps),
     policies: policyLijst(policyIds),
   };
@@ -193,7 +193,7 @@ export function workerApp({ naam, worker, subdomein, policyIds, idps }) {
       { type: "public", uri: `*-${basis}` },
     ],
     app_launcher_visible: false,
-    session_duration: "24h",
+    session_duration: "720h", // 30 dagen: ook een app op het beginscherm blijft ingelogd
     ...inlogmethoden(idps),
     policies: policyLijst(policyIds),
   };
