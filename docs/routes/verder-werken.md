@@ -59,13 +59,15 @@ beoordelaar van je werk, dus wat de tests niet dekken, dekt niemand.
 
 De CI blokkeert een PR die productiecode wijzigt zonder één enkele test aan te raken.
 
-## Stap 5: Draai de poort lokaal
+## Stap 5: Snel controleren voor je pusht
 
 ```bash
-pnpm check
+pnpm typecheck
 ```
 
-Dat is typecontrole, lint, unittests en de guards in één keer. Alles groen? Door. Rood?
+Dat duurt seconden en vangt de fouten die de preview stukmaken. Meer hoeft niet voor een
+concept: de snelle check `Code` in GitHub draait bij elke push toch al lint, unittests en de
+guards, en de volledige poort draai je pas als de gebruiker het goed vindt (stap 7). Rood?
 Repareren, niet omzeilen.
 
 ## Stap 6: Open een concept-PR en laat de gebruiker meekijken
@@ -113,9 +115,12 @@ openen en hij bewijst niet dat de gebouwde versie werkt. Lokaal kijken voor jeze
 Zegt de gebruiker dat het goed is ("prima", "zo laten", "zet maar live"), dan:
 
 ```bash
+pnpm check         # typecontrole, lint, unittests en guards in één keer, eerst lokaal
 gh pr ready        # nu draait de volledige poort, ook Database en end-to-end
 gh pr checks --watch
 ```
+
+Is `pnpm check` rood, repareer en push dat eerst; pas als hij groen is gaat de PR op klaar.
 
 De RLS-tests, de databasetypes en de browsertest draaien in GitHub, met een eigen Supabase.
 Op je eigen computer is daar niets voor nodig (geen Docker).

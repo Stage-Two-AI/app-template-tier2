@@ -92,6 +92,7 @@ Een pull request met een migratie open je daarom **niet** als concept, zodat die
 check meteen meedraait:
 
 ```bash
+pnpm check
 git push -u origin <branch>
 gh pr create
 gh pr checks --watch
