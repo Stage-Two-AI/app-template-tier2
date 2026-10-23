@@ -62,6 +62,7 @@ import {
   issuerVoor,
   metGewenst,
   PROEF_VOORVOEGSEL,
+  policyIdsVanApp,
   valideerVoorvoegsel,
   wachtOpDiscovery,
   workerApp,
@@ -866,9 +867,11 @@ export async function vangnet(arg, d) {
  * Verwijdert wat dit script voor deze app(s) met dit voorvoegsel maakt, in omgekeerde
  * volgorde van de inrichting, en meldt wat er stond. Dat zijn alleen de exacte namen:
  * voor de Access-apps en het Supabase-project die uit appNamen (de app van --app, of
- * anders elke app in toegang.json), voor de policies het voorvoegsel plus elke groep
- * in toegang.json. Een andere naam met het voorvoegsel ervoor blijft staan, met een
- * waarschuwing; alles zonder voorvoegsel ook. Het Worker-script gaat alleen weg met de
+ * anders elke app in toegang.json), voor de policies het voorvoegsel plus een groep in
+ * toegang.json. Met --app zijn dat alleen de groepen van die app, en een policy die een
+ * andere app in toegang.json nog gebruikt of die nog aan een blijvende Access-app hangt,
+ * blijft staan, met een waarschuwing. Een andere naam met het voorvoegsel ervoor blijft
+ * staan, met een waarschuwing; alles zonder voorvoegsel ook. Het Worker-script gaat alleen weg met de
  * exacte naam uit wrangler.jsonc (`arg.worker`), na de Access-apps; zonder die naam blijft
  * elk script staan. De eigen-domeinroute hoort bij de Worker en gaat met hem mee.
  */
@@ -886,13 +889,35 @@ export async function ruimOp(arg, d) {
     ...testNamen.map((n) => n.testInlog),
   ]);
   const projectNamen = new Set([...namen.map((n) => n.project), ...testNamen.map((n) => n.test)]);
-  const policyNamen = new Set(Object.keys(d.toegang?.groepen ?? {}).map((g) => policyNaam(g, vv)));
+  // De policies zijn herbruikbaar: een groep kan aan meer apps hangen. Bij één app gaan
+  // alleen de groepen van die app mee (staat hij niet meer in toegang.json, dan elke groep),
+  // en daarvan alleen wat geen andere app in toegang.json nog gebruikt.
+  const groepen = Object.keys(d.toegang?.groepen ?? {});
+  const kandidaten = arg.app ? (d.toegang?.apps?.[arg.app] ?? groepen) : groepen;
+  const gebruiktDoor = (groep) =>
+    Object.entries(d.toegang?.apps ?? {})
+      .filter(([app, gekozen]) => !appsUitBestand.includes(app) && gekozen.includes(groep))
+      .map(([app]) => app);
+  const policyNamen = new Set(kandidaten.map((g) => policyNaam(g, vv)));
 
   const alleApps = await cf.apps();
   const allePolicies = await cf.policies();
   const alleProjecten = await supabase.projecten();
   const apps = alleApps.filter((a) => appNamenSet.has(a.name));
-  const policies = allePolicies.filter((p) => policyNamen.has(p.name));
+  // Hangt een policy nog aan een Access-app die blijft staan, dan blijft hij ook staan.
+  const hangtAan = (policy) =>
+    alleApps
+      .filter((a) => !apps.includes(a) && policyIdsVanApp(a).includes(policy.id))
+      .map((a) => a.name);
+  const blijvendePolicies = [];
+  const policies = allePolicies.filter((p) => {
+    if (!policyNamen.has(p.name)) return false;
+    const groep = kandidaten.find((g) => policyNaam(g, vv) === p.name);
+    const andereApps = gebruiktDoor(groep);
+    const door = andereApps.length ? andereApps : hangtAan(p).map((naam) => `Access-app ${naam}`);
+    if (door.length) blijvendePolicies.push({ policy: p, door });
+    return door.length === 0;
+  });
   const projecten = alleProjecten.filter((p) => projectNamen.has(p.name));
   const workerApps = apps.filter((a) => namen.some((n) => n.worker === a.name));
   const saasApps = apps.filter((a) => !workerApps.includes(a) && a.type === "saas");
@@ -903,12 +928,23 @@ export async function ruimOp(arg, d) {
 
   const blijft = [
     ...alleApps.filter((a) => a.name?.startsWith(vv) && !apps.includes(a)),
-    ...allePolicies.filter((p) => p.name?.startsWith(vv) && !policies.includes(p)),
+    ...allePolicies.filter(
+      (p) =>
+        p.name?.startsWith(vv) &&
+        !policies.includes(p) &&
+        !blijvendePolicies.some((b) => b.policy === p),
+    ),
     ...alleProjecten.filter((p) => p.name?.startsWith(vv) && !projecten.includes(p)),
   ].map((x) => x.name);
   if (blijft.length) {
     waarschuwingen.push(
       `blijft staan (begint met ${vv}, maar hoort niet bij ${appsUitBestand.join(", ") || "een app"} of de groepen in toegang.json): ${blijft.join(", ")}`,
+    );
+  }
+
+  for (const { policy, door } of blijvendePolicies) {
+    waarschuwingen.push(
+      `Access-policy ${policy.name} blijft staan (gebruikt door ${door.join(", ")})`,
     );
   }
 
