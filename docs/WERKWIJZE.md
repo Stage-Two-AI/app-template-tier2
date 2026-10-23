@@ -113,6 +113,32 @@ sleutels bevatten die op de lijst van `scripts/lib/cloudflare-config.mjs` staan,
 en binnen elke `env.*`. D1, R2, KV, Durable Objects, eigen Worker-code (`main`) en elke
 onbekende sleutel houdt de check `guard:cloudflare` tegen, zodat zo'n PR niet kan mergen.
 
+**Installeerbaar als app, niet offline.** Elke app is via "Zet op beginscherm" (iPhone) of
+"Installeren" (Android, Chrome, Edge) als app te zetten: met een eigen icoon en zonder
+adresbalk. Daarvoor zijn er drie onderdelen, allemaal van het project: het manifest
+`public/manifest.webmanifest` (naam, kleur, icoontjes), de icoontjes in `public/` en een
+paar regels in `index.html`. Het eigen logo van de klant vervangt de icoontjes van Stage
+Two (192 en 512 pixels, en 180 voor de iPhone, met het logo binnen het middelste
+tachtig procent, want Android snijdt de randen af).
+
+Twee dingen zijn bewust zo:
+
+- Het manifest wordt opgehaald met `crossorigin="use-credentials"`. Zonder die regel
+  vraagt de browser het op zonder het inlogkoekje, houdt Access het tegen en is de app
+  niet te installeren. Lokaal merk je dat niet; `tests/unit/installeerbaar.test.ts`
+  bewaakt het.
+- Er is geen service worker (de code die een app offline laat werken). Die bewaart oude
+  versies op het toestel, waardoor een gebruiker na een update nog de oude app of oude
+  gegevens kan zien. Installeren werkt zonder. Komen er ooit pushmeldingen, dan komt er
+  alleen daarvoor een kleine service worker bij, die niets bewaart.
+
+Een geïnstalleerde app op de iPhone heeft een eigen opslag, los van Safari: daar log je
+één keer apart in bij Access, en daarna weer zodra de sessie van Access verloopt.
+
+Een app van vóór versie 31 krijgt dit niet vanzelf met `/stagetwo-tier2:updaten`, omdat
+`index.html` en `public/` van het project zijn. Neem dan de drie onderdelen en de test
+over uit de template, als een gewone wijziging via `/stagetwo-tier2:verder-werken`.
+
 ---
 
 ## 3. Databasewijzigingen lopen via GitHub
