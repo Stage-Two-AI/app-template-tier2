@@ -87,6 +87,7 @@ supabase/migrations/   elke databasewijziging, in volgorde
 supabase/functions/    Edge Functions (Deno) voor alles met een geheime sleutel
 tests/rls/             beveiligingstests
 e2e/                   end-to-end tests
+public/                manifest en icoontjes: de app is installeerbaar op telefoon en computer
 scripts/               de guards uit de kwaliteitspoort
 docs/routes/           de vaste routes, stap voor stap (zie Werkwijzen)
 docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, werkwijzen, patronen), per categorie, met YAML-frontmatter (module, tags, problem_type)

@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stack Template</title>
+    <!-- Installeerbaar als app op telefoon en computer (zie docs/WERKWIJZE.md). Het manifest
+         gaat met het inlogkoekje mee (use-credentials), anders houdt Access het tegen. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="apple-mobile-web-app-title" content="Stack Template" />
   </head>
   <body>
     <div id="root"></div>
