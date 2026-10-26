@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
@@ -65,7 +66,7 @@ function schrijf(inhoud: string): void {
 }
 
 function controleer(): { code: number | null; uitvoer: string } {
-  const code = `import(${JSON.stringify(LIB)}).then((m) => console.log(JSON.stringify(m.cloudflareConfig())))`;
+  const code = `import(${JSON.stringify(pathToFileURL(LIB).href)}).then((m) => console.log(JSON.stringify(m.cloudflareConfig())))`;
   const r = spawnSync("node", ["--input-type=module", "-e", code], { cwd: map, encoding: "utf8" });
   return { code: r.status, uitvoer: `${r.stdout}${r.stderr}` };
 }

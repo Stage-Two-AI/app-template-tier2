@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
@@ -27,7 +28,7 @@ function config(inhoud: unknown): void {
 }
 
 function vraag(expressie: string): string {
-  const code = `import(${JSON.stringify(join(SCRIPTS, "lib/stack-config.mjs"))}).then((m) => console.log(${expressie}))`;
+  const code = `import(${JSON.stringify(pathToFileURL(join(SCRIPTS, "lib/stack-config.mjs")).href)}).then((m) => console.log(${expressie}))`;
   return execFileSync("node", ["--input-type=module", "-e", code], {
     cwd: map,
     encoding: "utf8",

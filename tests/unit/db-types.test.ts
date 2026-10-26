@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -11,7 +12,7 @@ const WORTEL = resolve(__dirname, "../..");
 const LIB = resolve(WORTEL, "scripts/lib/db-types.mjs");
 
 function roep(functie: string, ...args: string[]): string {
-  const code = `import(${JSON.stringify(LIB)}).then((m) => process.stdout.write(String(m.${functie}(...JSON.parse(process.argv[1])))))`;
+  const code = `import(${JSON.stringify(pathToFileURL(LIB).href)}).then((m) => process.stdout.write(String(m.${functie}(...JSON.parse(process.argv[1])))))`;
   return execFileSync("node", ["--input-type=module", "-e", code, JSON.stringify(args)], {
     cwd: WORTEL,
     encoding: "utf8",
