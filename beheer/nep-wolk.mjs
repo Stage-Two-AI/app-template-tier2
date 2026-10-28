@@ -49,8 +49,13 @@ export function nepWolk({
     projecten: projecten.map((p) => ({ ...p })),
     auth: {},
     sql: [],
+    // Dezelfde SQL, maar met het project erbij: { ref, query }.
+    sqlOp: [],
     providers: providers.map((p) => ({ ...p })),
     gebruikers: gebruikers.map((g) => ({ ...g })),
+    // Eigen gebruikers per project, op de url van supabase-js (`https://<ref>.supabase.co`).
+    // Zonder eigen lijst delen de projecten `gebruikers`.
+    gebruikersOp: {},
     ghVariabelen: structuredClone(ghVariabelen),
     // Secret-namen per omgeving; "repo" voor secrets op de repo zelf.
     ghSecrets: structuredClone(ghSecrets),
@@ -224,6 +229,7 @@ export function nepWolk({
       }
       if (pas(/^\/projects\/([^/]+)\/database\/query$/) && methode === "POST") {
         staat.sql.push(body.query);
+        staat.sqlOp.push({ ref: m[1], query: body.query });
         return antwoord(201, []);
       }
       return antwoord(404, { message: `geen nep-route ${methode} ${rest}` });
@@ -235,6 +241,7 @@ export function nepWolk({
   function maakAdmin(url, sleutel) {
     const log = (actie, extra = {}) =>
       aanroepen.push({ soort: "admin", methode: actie, url, sleutel, ...extra });
+    const lijst = () => staat.gebruikersOp[url] ?? staat.gebruikers;
     return {
       customProviders: {
         async listProviders() {
@@ -263,12 +270,12 @@ export function nepWolk({
       },
       async listUsers({ page = 1, perPage = 50 } = {}) {
         log("listUsers");
-        const users = staat.gebruikers.slice((page - 1) * perPage, page * perPage);
+        const users = lijst().slice((page - 1) * perPage, page * perPage);
         return { data: { users }, error: null };
       },
       async updateUserById(id, attrs) {
         log("updateUserById", { body: { id, ...attrs } });
-        const g = staat.gebruikers.find((q) => q.id === id);
+        const g = lijst().find((q) => q.id === id);
         if (attrs.ban_duration === "none") delete g.banned_until;
         else g.banned_until = "2126-01-01T00:00:00Z";
         return { data: { user: g }, error: null };

@@ -34,7 +34,14 @@
     "anon_key is de publieke sleutel van het testproject (sb_publishable_... of de anon-JWT):",
     "geen geheim, hij zit al in elke preview. Staat hij hier, dan werkt de preview op de",
     "computer van de gebruiker zonder login bij Supabase. Voorbeeld:",
-    "  \"testdatabase\": { \"project_ref\": \"abcdefghijklmnopqrst\", \"anon_key\": \"sb_publishable_...\" }"
+    "  \"testdatabase\": { \"project_ref\": \"abcdefghijklmnopqrst\", \"anon_key\": \"sb_publishable_...\" }",
+    "",
+    "testmail: het adres waar alle mail uit test en lokaal naartoe gaat, wie er ook als",
+    "ontvanger staat. Het onderwerp krijgt dan [test] ervoor. Leeg: buiten productie gaat er",
+    "geen mail weg. Het adres hoort bij de app, niet bij de bouwer (de preview wordt gedeeld),",
+    "en is geen geheim. Functies uitrollen zet het als TESTMAIL_ADRES op de testdatabase;",
+    "zie supabase/functions/_shared/mail.ts. Voorbeeld: \"testmail\": \"test@klant.nl\""
   ],
-  "database": true
+  "database": true,
+  "testmail": ""
 }

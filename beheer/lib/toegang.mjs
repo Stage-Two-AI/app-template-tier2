@@ -3,8 +3,15 @@
  *
  *   {
  *     "groepen": { "<groep>": { "domeinen": [], "adressen": [], "idp_groepen": [], "uitsluiten": [] } },
- *     "apps":    { "<app>": ["<groep>", ...] }
+ *     "apps":    { "<app>": ["<groep>", ...] },
+ *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
+ *
+ * `testaccounts` is optioneel en geldt alleen voor de testdatabase van die app
+ * (`<vv><app>-test`): accounts met e-mail en wachtwoord, zodat iemand (of Claude) de
+ * schermen kan zien zonder door Cloudflare te gaan. Ze komen nooit in een Access-policy
+ * en nooit in productie. De vaste testgebruiker van Claude (TESTGEBRUIKER) telt altijd
+ * als testaccount, ook als hij er niet in staat.
  *
  * Per groep maakt de inrichting één herbruikbare Access-policy; beide Access-apps van
  * een app (deur en inlogdienst) en de Access op de Worker krijgen dezelfde lijst. Wie
@@ -22,6 +29,12 @@ const DOMEIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}
 const ADRES = /^[a-z0-9._%+-]+@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const IDP_GROEP = /^[^'"\\\n]{1,200}$/;
 
+/** De vaste testgebruiker van Claude in elke testdatabase; altijd een testaccount. */
+export const TESTGEBRUIKER = "testgebruiker@stagetwo.nl";
+
+/** De provider van de inlog via Cloudflare Access (gelijk aan PROVIDER in supabase.mjs). */
+export const PROVIDER_CLOUDFLARE = "custom:cloudflare";
+
 function klein(lijst) {
   return (lijst ?? []).map((x) => String(x).toLowerCase());
 }
@@ -31,8 +44,8 @@ export function valideerToegang(t) {
   const fouten = [];
   if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error("toegang.json: geen object");
   for (const sleutel of Object.keys(t)) {
-    if (!["groepen", "apps"].includes(sleutel) && !sleutel.startsWith("$")) {
-      fouten.push(`onbekend veld "${sleutel}" bovenin (alleen groepen en apps)`);
+    if (!["groepen", "apps", "testaccounts"].includes(sleutel) && !sleutel.startsWith("$")) {
+      fouten.push(`onbekend veld "${sleutel}" bovenin (alleen groepen, apps en testaccounts)`);
     }
   }
   const groepen = t.groepen;
@@ -91,6 +104,29 @@ export function valideerToegang(t) {
     }
     for (const g of gekozen) {
       if (!Object.hasOwn(groepen, g)) fouten.push(`app "${app}", groep "${g}": onbekende groep`);
+    }
+  }
+
+  const testaccounts = t.testaccounts;
+  if (testaccounts !== undefined) {
+    if (!testaccounts || typeof testaccounts !== "object" || Array.isArray(testaccounts)) {
+      fouten.push('"testaccounts" is geen object (per app een lijst met adressen)');
+    } else {
+      for (const [app, lijst] of Object.entries(testaccounts)) {
+        if (app.startsWith("$")) continue;
+        if (!Object.hasOwn(apps, app)) {
+          fouten.push(`testaccounts, app "${app}": staat niet onder apps`);
+          continue;
+        }
+        if (!Array.isArray(lijst) || lijst.some((x) => typeof x !== "string")) {
+          fouten.push(`testaccounts, app "${app}": moet een lijst met adressen zijn`);
+          continue;
+        }
+        for (const x of lijst) {
+          if (!ADRES.test(x.toLowerCase()))
+            fouten.push(`testaccounts, app "${app}": "${x}" is geen geldig adres`);
+        }
+      }
     }
   }
   if (fouten.length) throw new Error(`toegang.json: ${fouten.join("; ")}`);
@@ -253,6 +289,15 @@ export async function koppelPolicies(cf, toegang, apps, ids, voorvoegsel) {
   return acties;
 }
 
+/**
+ * De testaccounts van een app, in kleine letters, met de vaste testgebruiker erbij.
+ * Alleen voor de testdatabase; productie kent geen testaccounts.
+ */
+export function testaccountsVan(toegang, app) {
+  const lijst = klein(toegang?.testaccounts?.[app]);
+  return [...new Set([TESTGEBRUIKER, ...lijst])];
+}
+
 // ---------------------------------------------------------------- de beslissing
 
 function geldigAdres(adres) {
@@ -286,8 +331,21 @@ export function magAanmelden(email, toegang, app) {
  *
  * Wie past en nog een actieve ban heeft (eerder ingetrokken, nu weer op de lijst),
  * krijgt de ban opgeheven via `ontban`. Wie past zonder ban, blijft onaangeroerd.
+ *
+ * `testaccounts` (alleen bij de testdatabase, zie testaccountsVan) telt als "past":
+ * een testaccount wordt nooit geband, en een eerder gebande krijgt de ban opgeheven.
  */
-export async function trekIn({ gebruikers, toegang, app, ban, afmelden, ontban, nu = new Date() }) {
+export async function trekIn({
+  gebruikers,
+  toegang,
+  app,
+  ban,
+  afmelden,
+  ontban,
+  testaccounts = [],
+  nu = new Date(),
+}) {
+  const test = new Set(klein(testaccounts));
   const uit = {
     ingetrokken: [],
     toegelaten: [],
@@ -297,7 +355,9 @@ export async function trekIn({ gebruikers, toegang, app, ban, afmelden, ontban, 
   };
   for (const g of gebruikers) {
     if (!g.email) continue;
-    const oordeel = magAanmelden(g.email, toegang, app);
+    const oordeel = test.has(String(g.email).toLowerCase())
+      ? "ja"
+      : magAanmelden(g.email, toegang, app);
     const geband = Boolean(g.banned_until && new Date(g.banned_until) > nu);
     if (oordeel === "ja") {
       if (geband) {
@@ -348,30 +408,59 @@ function sqlLijst(lijst) {
   return `array[${lijst.map(sqlTekst).join(", ")}]::text[]`;
 }
 
+const WEIGER =
+  "return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', 'Dit adres heeft geen toegang tot deze app.'));";
+
+/** Per gekozen groep: toelaten bij een passend domein of adres, behalve de uitgeslotenen. */
+function groepRegels(t, app, inspringen = "  ") {
+  return t.apps[app].map((g) => {
+    const groep = t.groepen[g];
+    return [
+      `-- groep ${g}`,
+      `if (domein = any (${sqlLijst(klein(groep.domeinen))}) or adres = any (${sqlLijst(klein(groep.adressen))}))`,
+      `   and not (adres = any (${sqlLijst(klein(groep.uitsluiten))})) then`,
+      "  return '{}'::jsonb;",
+      "end if;",
+    ]
+      .map((r) => `${inspringen}${r}`)
+      .join("\n");
+  });
+}
+
 /**
  * De before-user-created-hook van het vangnet: laat alleen aanmelden toe wie past bij
  * de domeinen en adressen van de gekozen groepen van deze app, met dezelfde
  * uitsluitingen als de Access-policies. IdP-groepen tellen hier niet mee: het vangnet
  * is juist voor inloggen zónder Cloudflare. De hook geldt voor elke aanmeldroute
  * (mailcode, wachtwoord, OAuth).
+ *
+ * Met `testdatabase: true` is het de hook van het testproject, en kijkt hij ook naar de
+ * provider (`user.app_metadata.provider` in de invoer van de hook):
+ *   - `email` (mailcode of wachtwoord) mag alleen voor de testaccounts van de app;
+ *   - `custom:cloudflare` mag voor de adressen uit de groepen, zoals in productie;
+ *   - elke andere provider (ook anoniem, zonder provider) wordt geweigerd.
+ * Zonder die controle kan iemand die een toegelaten adres kent met een zelfgekozen
+ * wachtwoord een account op dat adres maken, want `mailer_autoconfirm` staat aan.
+ *
+ * De vaste testgebruiker (TESTGEBRUIKER) staat hier bewust níet in: Testdatabase
+ * verversen maakt hem met de admin-API, en die gaat niet langs deze hook (in de broncode
+ * van Supabase Auth roept alleen aanmelden, uitnodigen, anoniem, OAuth, SAML en web3 de
+ * hook aan, `admin/users` niet). Zijn adres is openbaar; zo kan niemand hem met een eigen
+ * wachtwoord vóór zijn.
  */
-export function vangnetSql(toegang, app, functie) {
+export function vangnetSql(toegang, app, functie, { testdatabase = false } = {}) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
     throw new Error(`ongeldige functienaam "${functie}"`);
   const t = valideerToegang(toegang);
   if (!t.apps[app]) throw new Error(`app "${app}" staat niet in toegang.json`);
-  const regels = t.apps[app].map((g) => {
-    const groep = t.groepen[g];
-    return [
-      `  -- groep ${g}`,
-      `  if (domein = any (${sqlLijst(klein(groep.domeinen))}) or adres = any (${sqlLijst(klein(groep.adressen))}))`,
-      `     and not (adres = any (${sqlLijst(klein(groep.uitsluiten))})) then`,
-      `    return '{}'::jsonb;`,
-      "  end if;",
-    ].join("\n");
-  });
   const naam = `public.${functie}`;
-  return `create or replace function ${naam}(event jsonb)
+  const slot = `$vangnet$;
+
+grant execute on function ${naam}(jsonb) to supabase_auth_admin;
+revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
+`;
+  if (!testdatabase) {
+    return `create or replace function ${naam}(event jsonb)
 returns jsonb
 language plpgsql
 set search_path = ''
@@ -381,14 +470,40 @@ declare
   domein text := split_part(adres, '@', 2);
 begin
   if adres !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
-    return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', 'Dit adres heeft geen toegang tot deze app.'));
+    ${WEIGER}
   end if;
-${regels.join("\n")}
-  return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', 'Dit adres heeft geen toegang tot deze app.'));
+${groepRegels(t, app).join("\n")}
+  ${WEIGER}
 end;
-$vangnet$;
-
-grant execute on function ${naam}(jsonb) to supabase_auth_admin;
-revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
-`;
+${slot}`;
+  }
+  return `create or replace function ${naam}(event jsonb)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $vangnet$
+declare
+  adres text := lower(coalesce(event->'user'->>'email', ''));
+  domein text := split_part(adres, '@', 2);
+  aanbieder text := coalesce(event->'user'->'app_metadata'->>'provider', '');
+begin
+  if adres !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
+    ${WEIGER}
+  end if;
+  -- testdatabase: met e-mail (mailcode of wachtwoord) alleen de testaccounts; de vaste
+  -- testgebruiker maakt Testdatabase verversen met de admin-API, buiten deze hook om
+  if aanbieder = 'email' then
+    if adres = any (${sqlLijst(testaccountsVan(t, app).filter((a) => a !== TESTGEBRUIKER))}) then
+      return '{}'::jsonb;
+    end if;
+    ${WEIGER}
+  end if;
+  -- via Cloudflare Access: de groepen uit toegang.json, zoals in productie
+  if aanbieder <> ${sqlTekst(PROVIDER_CLOUDFLARE)} then
+    ${WEIGER}
+  end if;
+${groepRegels(t, app).join("\n")}
+  ${WEIGER}
+end;
+${slot}`;
 }

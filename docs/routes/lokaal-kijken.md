@@ -15,8 +15,9 @@ verandert daar niets aan; hij komt ervóór.
 Werk je in het tabblad Code van de Claude-app, dan hoef je deze route niet te volgen.
 De app start de preview zelf, volgens `.claude/launch.json`: dat draait
 `scripts/preview.mjs`, en dat regelt de pakketten, zet `.env.local` op de testdatabase
-(zie hieronder) en start de app. Je ziet hem in het venster naast het gesprek, en
-de assistent kijkt daar zelf ook mee om zijn werk te controleren. De preview weigert te
+(zie hieronder), haalt de testlogin op en start de app. Je ziet hem in het venster naast
+het gesprek, en de assistent kijkt daar zelf ook mee om zijn werk te controleren: hij logt
+in als testgebruiker en klikt rond met de gegevens uit de testdatabase. De preview weigert te
 starten als `.env.local` naar een andere database wijst dan de testdatabase of een
 lokale Supabase.
 
@@ -57,9 +58,9 @@ naar `database`:
 
 ### De testdatabase van deze app
 
-Dezelfde database als waar de Cloudflare-preview naar wijst: een apart Supabase-project met
-testgegevens, los van productie. Zo zie je hoe een scherm eruitziet met echt lijkende
-gegevens.
+Dezelfde database als waar de Cloudflare-preview naar wijst: een apart Supabase-project, los
+van productie. De gegevens erin zijn een kopie van productie, elke nacht ververst. Zo zie je
+hoe een scherm eruitziet met echte gegevens, zonder dat je productie kunt raken.
 
 Welk project dat is, staat in `stack.config.json` onder `testdatabase`. Staat dat blok
 er niet, dan heeft deze app geen testdatabase: vraag Stage Two.
@@ -82,6 +83,46 @@ al een `.env.local`, dan overschrijft het script die alleen met `--overschrijf`.
 
 De anon-sleutel is expres publiek en wordt door RLS beschermd; de service-role-sleutel
 van welk project dan ook hoort hier nooit in.
+
+### Inloggen als testgebruiker
+
+Gewoon inloggen loopt via Cloudflare, en dat werkt op je eigen computer niet. Daarom heeft
+de testdatabase een vaste testgebruiker, `testgebruiker@stagetwo.nl`. Het wachtwoord wordt
+elke nacht vernieuwd en staat klaar in de beheer-repo van je organisatie.
+
+```bash
+pnpm testlogin     # haalt het wachtwoord op met gh en zet het in .env.development.local
+```
+
+`pnpm env:test` en de preview in de Claude-app doen dit zelf. Het komt in
+`.env.development.local`, samen met `VITE_INLOGDIENST=wachtwoord`. Dat bestand staat net als
+`.env.local` in `.gitignore`, alleen jij kunt het lezen, en Vite gebruikt het alleen als de
+app op je eigen computer draait, nooit bij het bouwen. `.env.local` zelf blijft zoals hij
+was.
+
+Op het inlogscherm staat daarna een knop **Inloggen als testgebruiker**. Die knop is er
+alleen op je eigen computer; in een preview of in productie nooit. Een app van vóór versie
+34 heeft die knop nog niet. Daar staat lokaal het gewone formulier met e-mail en
+wachtwoord: vul daar het adres (`VITE_TESTLOGIN_EMAIL`) en het wachtwoord
+(`VITE_TESTLOGIN_WACHTWOORD`) uit `.env.development.local` in.
+
+Lukt het niet, dan zegt het script waarom. De gewone oorzaken:
+
+| Melding | Wat je doet |
+|---|---|
+| geen beheer-repo gevonden | je hebt geen toegang tot de beheer-repo; vraag de owner van je organisatie. Heet hij anders, zet dan `STAGETWO_BEHEER_REPO=<naam>` |
+| geen geldige `testlogin-<app>` | Testdatabase verversen heeft nog niet gedraaid voor deze app; start die workflow in de beheer-repo, of vraag Stage Two |
+| inloggen als testgebruiker lukt niet | het wachtwoord is die nacht vernieuwd; draai `pnpm testlogin` opnieuw |
+| je ziet geen gegevens | de testgebruiker heeft in deze app nog geen rol; geef hem er één keer een, net als een nieuwe collega |
+
+### Echte gegevens op je computer
+
+Met de testlogin kun je bij een kopie van echte gegevens. Zorg daarom dat
+schijfversleuteling aan staat (FileVault op een Mac, BitLocker op Windows), en zet
+`.env.local` en `.env.development.local` nooit in git, een chat of een mail.
+
+Mail uit de app gaat lokaal nooit naar echte mensen: alleen naar het testadres uit
+`stack.config.json` (`testmail`), of nergens heen als dat leeg is.
 
 ## Starten
 
@@ -111,3 +152,11 @@ een assistent werk "oplevert".
   stap 8). Geef nooit een `localhost`-adres als opgeleverd resultaat.
 - Kom je een `.env.local` tegen die naar productie wijst, stop dan en
   zeg het. Dat is een fout die je niet stil repareert.
+- Controleer je eigen werk ingelogd als testgebruiker: de knop op het inlogscherm, of in een
+  app zonder die knop het gewone formulier, met het adres en wachtwoord uit
+  `.env.development.local`. Lees die waarden zelf uit het bestand en typ ze in het
+  formulier; zet ze niet in het gesprek. Zie je
+  niets, dan heeft de testgebruiker waarschijnlijk nog geen rol: zeg dat de gebruiker en
+  vraag of jij of hij die rol geeft. Verzin geen omweg langs het inloggen.
+- Zet het wachtwoord van de testgebruiker nooit in een bestand dat in git komt, in een
+  PR-tekst of in het gesprek, en verplaats het niet naar `.env.local`.

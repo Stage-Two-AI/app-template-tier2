@@ -66,12 +66,15 @@ export function authInstellingen({ hostname, worker, subdomein }) {
     // inlog niet aan een bestaande gebruiker met hetzelfde adres. email_verified via
     // attribute_mapping kan niet ("protected system field"). Veilig, omdat inloggen met
     // mail en wachtwoord hierboven uit staat. Gevonden bij de doorsteek, 29-09-2026.
+    // In de testdatabase staat e-mail wel aan, maar alleen samen met een aanmeld-hook die
+    // naar de provider kijkt (vangnetSql met testdatabase: true).
     mailer_autoconfirm: true,
   };
 }
 
 /**
- * De before-user-created-hook voor het vangnet. NAGAAN (U7): de veldnamen
+ * De before-user-created-hook, voor het vangnet en voor de testdatabase. Zet ook
+ * inloggen met e-mail aan; schrijf de hookfunctie dus altijd eerst. NAGAAN (U7): de veldnamen
  * `hook_before_user_created_enabled` en `hook_before_user_created_uri` en de vorm
  * `pg-functions://postgres/<schema>/<functie>`.
  */

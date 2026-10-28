@@ -36,6 +36,7 @@
     "db:types:uit-ci": "node scripts/types-uit-ci.mjs",
     "env:local": "node scripts/write-local-env.mjs",
     "env:test": "node scripts/write-test-env.mjs",
+    "testlogin": "node scripts/testlogin.mjs",
     "apparaat:nieuw": "node scripts/apparaat-nieuw.mjs"
   },
   "dependencies": {

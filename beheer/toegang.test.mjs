@@ -9,6 +9,8 @@ import {
   policyVoorGroep,
   sqlTekst,
   synchroniseerPolicies,
+  TESTGEBRUIKER,
+  testaccountsVan,
   trekIn,
   valideerToegang,
   vangnetSql,
@@ -406,4 +408,125 @@ test("vangnet: de SQL-functie laat alleen de gekozen domeinen en adressen door",
 test("vangnet: tekst in SQL wordt veilig geciteerd en een rare functienaam geweigerd", () => {
   assert.equal(sqlTekst("o'brien"), "'o''brien'");
   assert.throws(() => vangnetSql(KLANT, "cf-proef", "x; drop table y"), /functienaam/);
+});
+
+// ---------------------------------------------------------------- testaccounts (testdatabase)
+
+const MET_TEST = {
+  ...KLANT,
+  testaccounts: { "cf-proef": ["Scherm@Elders.nl", "testgebruiker@stagetwo.nl"] },
+};
+
+test("testaccounts: geldig per app, en altijd met de vaste testgebruiker erbij", () => {
+  assert.equal(valideerToegang(MET_TEST), MET_TEST);
+  assert.equal(TESTGEBRUIKER, "testgebruiker@stagetwo.nl");
+  assert.deepEqual(testaccountsVan(MET_TEST, "cf-proef"), [
+    "testgebruiker@stagetwo.nl",
+    "scherm@elders.nl",
+  ]);
+  assert.deepEqual(testaccountsVan(KLANT, "cf-proef"), ["testgebruiker@stagetwo.nl"]);
+});
+
+test("testaccounts: een onbekende app, een ongeldig adres of de verkeerde vorm is een fout", () => {
+  assert.throws(
+    () => valideerToegang({ ...KLANT, testaccounts: { onbekend: ["a@b.nl"] } }),
+    /testaccounts, app "onbekend": staat niet onder apps/,
+  );
+  assert.throws(
+    () => valideerToegang({ ...KLANT, testaccounts: { "cf-proef": ["geen-adres"] } }),
+    /testaccounts, app "cf-proef": "geen-adres" is geen geldig adres/,
+  );
+  assert.throws(
+    () => valideerToegang({ ...KLANT, testaccounts: { "cf-proef": "a@b.nl" } }),
+    /moet een lijst met adressen zijn/,
+  );
+  assert.throws(
+    () => valideerToegang({ ...KLANT, testaccounts: ["a@b.nl"] }),
+    /"testaccounts" is geen object/,
+  );
+});
+
+test("testaccounts: komen nooit in een Access-policy", () => {
+  const policies = Object.entries(MET_TEST.groepen).map(([naam, groep]) =>
+    policyVoorGroep(naam, groep, { voorvoegsel: VV }),
+  );
+  assert.doesNotMatch(JSON.stringify(policies), /scherm|testgebruiker/i);
+});
+
+test("intrekken in de testdatabase: testaccounts blijven staan, een gebande krijgt de ban opgeheven", async () => {
+  const gebruikers = [
+    { id: "11111111-1111-4111-8111-111111111111", email: "testgebruiker@stagetwo.nl" },
+    {
+      id: "22222222-2222-4222-8222-222222222222",
+      email: "scherm@elders.nl",
+      banned_until: "2126-01-01T00:00:00Z",
+    },
+    { id: "33333333-3333-4333-8333-333333333333", email: "vreemd@elders.nl" },
+  ];
+  const log = [];
+  const r = await trekIn({
+    gebruikers,
+    toegang: MET_TEST,
+    app: "cf-proef",
+    testaccounts: testaccountsVan(MET_TEST, "cf-proef"),
+    ban: async (id) => log.push(`ban ${id}`),
+    afmelden: async (id) => log.push(`afmelden ${id}`),
+    ontban: async (id) => log.push(`ontban ${id}`),
+    nu: new Date("2026-10-28T00:00:00Z"),
+  });
+  assert.deepEqual(log, [
+    "ontban 22222222-2222-4222-8222-222222222222",
+    "ban 33333333-3333-4333-8333-333333333333",
+    "afmelden 33333333-3333-4333-8333-333333333333",
+  ]);
+  assert.deepEqual(r.ingetrokken, ["vreemd@elders.nl"]);
+  assert.deepEqual(r.toegelaten, ["scherm@elders.nl"]);
+  assert.equal(r.onaangeroerd, 1);
+});
+
+test("intrekken in productie (zonder testaccounts): de testgebruiker wordt gewoon geband", async () => {
+  const log = [];
+  const r = await trekIn({
+    gebruikers: [{ id: "11111111-1111-4111-8111-111111111111", email: TESTGEBRUIKER }],
+    toegang: MET_TEST,
+    app: "cf-proef",
+    ban: async (id) => log.push(`ban ${id}`),
+    afmelden: async (id) => log.push(`afmelden ${id}`),
+  });
+  assert.deepEqual(r.ingetrokken, [TESTGEBRUIKER]);
+});
+
+test("aanmeld-hook van de testdatabase: e-mail alleen voor testaccounts, Cloudflare voor de groepen, de rest nooit", () => {
+  const sql = vangnetSql(MET_TEST, "cf-proef", "cf_proef_voor_aanmelden", { testdatabase: true });
+  // De provider staat in user.app_metadata.provider van de invoer van de hook.
+  assert.match(
+    sql,
+    /aanbieder text := coalesce\(event->'user'->'app_metadata'->>'provider', ''\);/,
+  );
+  // Met e-mail: alleen de testaccounts, daarna altijd weigeren (geen doorval naar de groepen).
+  const emailTak = sql.slice(
+    sql.indexOf("if aanbieder = 'email' then"),
+    sql.indexOf("aanbieder <>"),
+  );
+  assert.match(emailTak, /adres = any \(array\['scherm@elders\.nl'\]::text\[\]\)/);
+  // De vaste testgebruiker meldt zich nooit zelf aan: die maakt de admin-API, buiten de hook.
+  assert.doesNotMatch(emailTak, /testgebruiker/);
+  assert.match(emailTak, /'http_code', 403/);
+  assert.doesNotMatch(emailTak, /klant\.nl|info@stagetwo/);
+  // Elke andere provider dan custom:cloudflare: weigeren, vóór de groepen.
+  assert.ok(sql.indexOf("aanbieder <> 'custom:cloudflare'") < sql.indexOf("-- groep klant"));
+  assert.match(sql, /domein = any \(array\['klant\.nl'\]::text\[\]\)/);
+  assert.match(sql, /not \(adres = any \(array\['jan@klant\.nl'\]::text\[\]\)\)/);
+  assert.match(sql, /to supabase_auth_admin/);
+  assert.match(sql, /from authenticated, anon, public/);
+});
+
+test("aanmeld-hook van productie: ongewijzigd, zonder provider en zonder testaccounts", () => {
+  const sql = vangnetSql(MET_TEST, "cf-proef", "cf_proef_voor_aanmelden");
+  assert.doesNotMatch(sql, /aanbieder|app_metadata|scherm|testgebruiker/);
+  assert.equal(
+    sql,
+    vangnetSql(KLANT, "cf-proef", "cf_proef_voor_aanmelden"),
+    "testaccounts veranderen de hook van productie niet",
+  );
 });

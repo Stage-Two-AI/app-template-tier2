@@ -58,6 +58,16 @@ intern werktuig achter een login. Geen Google nodig, maar wél de printer, de ca
 voor barcodes, een PDF uit wat op het scherm staat, Excel in- en uitlezen. Dat kan
 alleen in de browser; een server kan er niet bij.
 
+**Fouten uit productie lezen: Sentry.** Elke fout die een gebruiker in productie tegenkomt,
+komt in Sentry terecht. Het Sentry-account staat op naam van je organisatie, op het gratis
+plan. Je assistent leest het via de koppeling met Sentry in claude.ai (Instellingen >
+Koppelingen); dat werkt ook in een cloudsessie. Bij een nieuwe bouwer zet die de koppeling
+aan in zijn eigen claude.ai, en logt de beheerder van het Sentry-account in op het scherm
+van de bouwer, zodat het wachtwoord niet rondgaat. Bij een melding over een fout is de
+eerste stap: in Sentry kijken wat er precies gebeurde. Gaat er iemand weg, trek dan alle
+koppelingen in en koppel de anderen opnieuw: één los intrekken lukt waarschijnlijk niet,
+omdat ze allemaal aan dezelfde Sentry-login hangen.
+
 ---
 
 ## 2. Beveiliging, en waarom dat hier zwaarder weegt
@@ -81,6 +91,11 @@ in het bestand dat de bezoeker downloadt.
   Die horen in een Supabase Edge Function.
 - `.env` staat nooit in git. `.env.example` wel, met lege waarden en per variabele een
   regel uitleg.
+- Eén uitzondering op je eigen computer: de testlogin (`VITE_TESTLOGIN_*`). Die staat in
+  `.env.development.local`, een bestand dat Vite alleen leest als de app op je eigen
+  computer draait, nooit bij het bouwen. Als extra slot maakt `vite.config.ts` hem bij het
+  bouwen ook nog leeg. Zo komt hij nooit in de gebouwde app. Omdat je daarmee bij een kopie van echte
+  gegevens kunt, hoort schijfversleuteling aan te staan (hoofdstuk 3).
 
 Twee checks bewaken dit automatisch: één die de repo doorzoekt, en één die de
 gebouwde bundel doorzoekt. Die tweede is de belangrijkste van allemaal.
@@ -253,6 +268,7 @@ Wat erop draait:
   zet `.env.local` zelf op de testdatabase (`pnpm env:test` doet hetzelfde met de hand;
   route `docs/routes/lokaal-kijken.md`). Met de publieke sleutel in
   `stack.config.json` (`testdatabase.anon_key`) is daar geen login bij Supabase voor nodig.
+  Inloggen gaat daar als testgebruiker, zie hieronder.
 - **Migraties, als eerste.** Bij een merge past Actions de migraties eerst toe op de
   testdatabase (de canary) en pas daarna op productie. Faalt het op de testdatabase, dan
   blijft productie zoals hij was.
@@ -271,6 +287,75 @@ Ontbreekt het blok, dan is er geen testdatabase: de preview gebruikt wat er in d
 staat ingesteld en migraties gaan rechtstreeks naar productie. Dat is toegestaan, maar het
 is de uitzondering en niet de standaard. Wat de testdatabase kost: een tweede project bij
 Supabase, dat je kunt pauzeren als er een tijd niet gebouwd wordt.
+
+### Lokaal kijken met echte gegevens, als testgebruiker
+
+Gewoon inloggen loopt via Cloudflare, en daar komt een assistent niet langs. Daarom heeft
+elke testdatabase een vaste **testgebruiker**, `testgebruiker@stagetwo.nl`, die met e-mail
+en wachtwoord inlogt. Zo kan de assistent op je eigen computer de app openen, inloggen en
+rondklikken met de gegevens uit de testdatabase, en zelf zien of zijn werk klopt.
+
+- **Het wachtwoord** maakt de beheer-repo elke nacht opnieuw (Testdatabase verversen) en zet
+  het daar een paar dagen klaar. `pnpm testlogin` haalt het op met `gh`, waarmee je al bent
+  ingelogd, en zet het in `.env.development.local` (net als `.env.local` nooit in git).
+  De preview in de Claude-app doet dat bij elke start,
+  `pnpm env:test` ook. Wie bij de beheer-repo mag, kan het ophalen; wie uit de organisatie
+  vertrekt, kan er hoogstens een dag mee verder.
+- **In de app** staat dan op het inlogscherm een knop "Inloggen als testgebruiker". Die
+  knop bestaat alleen in de versie op je eigen computer; in een preview of in productie
+  staat hij er nooit, en het wachtwoord komt nooit in de gebouwde app. Een app van vóór
+  versie 34 heeft die knop nog niet (het inlogscherm is van het project); daar staat lokaal
+  het gewone formulier met e-mail en wachtwoord, en vul je het adres en wachtwoord uit
+  `.env.development.local` in.
+- **Een rol.** De testgebruiker is voor de app een nieuwe collega: geef hem één keer een rol
+  in de app (in de testdatabase), net als iemand die net begint. Die rol blijft daarna staan,
+  ook als de gegevens 's nachts opnieuw uit productie komen. Een app die gegevens per persoon
+  afschermt, laat de testgebruiker alleen zijn eigen testgegevens zien, en dat is goed.
+- **Andere testaccounts** (bijvoorbeeld voor een tweede rol) zet je in `toegang.json` in de
+  beheer-repo, onder `testaccounts`. Die gelden alleen in de testdatabase en nooit in
+  productie, en Toegang bijwerken laat ze daar staan.
+
+In de testdatabase staat inloggen met e-mail daarvoor aan, maar alleen voor de
+testaccounts. Wie via Cloudflare binnenkomt, moet net als in productie in `toegang.json`
+staan. Een zelfgekozen wachtwoord op het adres van een collega werkt dus niet.
+
+### Een kopie van echte gegevens op je computer
+
+De testdatabase is een kopie van productie. Wie lokaal met de testlogin werkt, heeft op zijn
+computer dus toegang tot echte gegevens: het wachtwoord staat in `.env.development.local`.
+Daarom:
+
+- **Schijfversleuteling hoort aan te staan** op elke computer waarop gebouwd wordt:
+  FileVault op een Mac, BitLocker (of Apparaatversleuteling) op Windows. Raakt de laptop
+  kwijt, dan is er zonder je login niets te lezen.
+- `.env.local` en `.env.development.local` staan nooit in git en gaan nooit in een chat of
+  mail.
+- Gaat er iemand weg: haal hem uit de GitHub-organisatie. Het wachtwoord van de testgebruiker
+  is de volgende nacht al vernieuwd.
+
+### Testmail: in test en lokaal gaat geen mail naar echte mensen
+
+Met een kopie van echte gegevens kan een mail uit een preview of van je eigen computer bij
+een echte klant belanden. Daarom stuurt de app buiten productie elke mail naar één
+**testadres**, wie er ook als ontvanger staat, en krijgt het onderwerp `[test]` ervoor.
+Het adres staat in `stack.config.json` als `testmail`. Het hoort bij de app, niet bij de
+bouwer: de preview wordt gedeeld. Het is geen geheim. Staat er geen adres, dan gaat er
+buiten productie helemaal geen mail weg.
+
+Een Edge Function die mail verstuurt, gebruikt daarvoor altijd `richtMail` uit
+`supabase/functions/_shared/mail.ts`. Functies uitrollen in de beheer-repo vertelt de
+testdatabase dat het een testomgeving is en wat het testadres is.
+
+### Zelf kijken op het vaste adres
+
+Elke app heeft naast de preview per pull request een vast adres: `actueel-...`. Daar staat
+altijd de laatst gepushte versie, achter dezelfde login als productie. Log daar gerust zelf
+in en kijk mee, ook op een tablet. Je hoeft na een wijziging alleen te verversen.
+
+Tip: op het vaste adres praat de app met de testdatabase. De eerste keer dat je daar
+inlogt, krijg je in de testdatabase een eigen account, los van je account in productie. Laat
+iemand dat account één keer een rol geven, net als in productie. Die rol blijft daarna
+staan.
 
 ### Als er wel een database is
 
@@ -317,6 +402,16 @@ mens. Ze krijgen een eigen apparaatsleutel:
 
 Een apparaatsleutel geeft alleen toegang tot wat die ene functie doet. Laat de functie dus
 precies doen wat het apparaat nodig heeft, en niet meer.
+
+**Een functie proberen vóór de merge.** Normaal gaat een functie pas na de merge naar de
+testdatabase. Wil je hem eerder proberen, dan kan Functies uitrollen ook vanaf een tak
+draaien (`-f tak=<tak>`). Dat zet de functies van die tak alleen op de testdatabase, nooit op
+productie. Let op: alle previews en iedereen die lokaal kijkt, delen die testdatabase, en
+zien zolang die proefversie. Na de merge zet de gewone run alles weer gelijk met `main`.
+
+Heeft een app veel eigen serverlogica (veel koppelingen, berekeningen of webhooks), kies dan
+bij het begin liever tier 1. Daar draait de servercode lokaal mee, en hoef je niet via de
+testdatabase te proberen.
 
 **Sleutels van andere systemen** (Stripe, Moneybird, een AI-dienst) staan als geheim bij
 Supabase. Die zet de owner van de organisatie: een nieuw extern systeem aansluiten is een
@@ -503,3 +598,5 @@ De namen zitten op verschillende verdiepingen; het zijn geen concurrenten van el
 | **AGENTS.md** | het bestand met de afspraken dat AI-assistenten automatisch lezen. Een afspraak tussen tools, niet van één leverancier |
 | **Hook** | een regel die een tool-aanroep van de agent onderschept en kan blokkeren. Afdwingen in plaats van vragen. In deze stack alleen voor Claude Code; de afspraak zelf staat in `AGENTS.md` en de check |
 | **Happy path** | de route door de app waarop niets misgaat: de normale, geslaagde gang van zaken |
+| **Testgebruiker** | `testgebruiker@stagetwo.nl`: het vaste account in de testdatabase waarmee de assistent (en jij) lokaal inlogt, zonder Cloudflare. `pnpm testlogin` haalt het wachtwoord op |
+| **Testmail** | het ene adres (`testmail` in `stack.config.json`) waar alle mail uit test en lokaal naartoe gaat |
