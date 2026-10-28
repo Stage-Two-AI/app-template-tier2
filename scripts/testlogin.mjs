@@ -16,8 +16,8 @@ import { testDatabase } from "./lib/stack-config.mjs";
  * bij de beheer-repo mag, kan het ophalen; verder is er niets bij te houden.
  *
  * Welke beheer-repo: STAGETWO_BEHEER_REPO als die gezet is (`naam` of `org/naam`), anders
- * `<org>/stagetwo-beheer-tier2`, anders de enige repo in de org die eindigt op
- * `-beheer-tier2`. De org en de naam van de app komen uit de git-remote (`origin`): de
+ * de repo in de org die eindigt op `-beheer-tier2`; zijn dat er meer, dan die met de app in
+ * toegang.json. De org en de naam van de app komen uit de git-remote (`origin`): de
  * app heet in toegang.json zoals haar repo.
  *
  * Het zet alleen deze regels in .env.development.local (mode 600) en laat de rest staan:
@@ -92,23 +92,24 @@ function eigenRepo() {
   return r;
 }
 
-/** De beheer-repo van deze organisatie, als `org/naam`. */
-export function vindBeheerRepo(org, { omgeving = process.env } = {}) {
+/**
+ * De beheer-repo waar deze app in staat, als `org/naam`: STAGETWO_BEHEER_REPO als die gezet
+ * is, anders de repo's in de org die eindigen op `-beheer-tier2` (`stagetwo-beheer-tier2`
+ * ook). Is er één, dan die; zijn er meer, dan de enige met de app in toegang.json.
+ */
+export function vindBeheerRepo(org, app, { omgeving = process.env } = {}) {
   const gezet = (omgeving.STAGETWO_BEHEER_REPO ?? "").trim();
   if (gezet) return gezet.includes("/") ? gezet : `${org}/${gezet}`;
+  let lijst;
   try {
-    gh(["api", `repos/${org}/stagetwo-beheer-tier2`, "--jq", ".full_name"]);
-    return `${org}/stagetwo-beheer-tier2`;
+    lijst = JSON.parse(gh(["repo", "list", org, "--limit", "1000", "--json", "name"]) || "[]");
   } catch (fout) {
     if (fout instanceof Melding) throw fout;
-    if (!/not found|404/i.test(fout.ghFout ?? "")) {
-      stop(
-        `Kon de beheer-repo niet opzoeken (${fout.message}).`,
-        "Ben je offline, of niet ingelogd bij GitHub? Probeer `gh auth status`.",
-      );
-    }
+    stop(
+      `Kon de beheer-repo niet opzoeken (${fout.message}).`,
+      "Ben je offline, of niet ingelogd bij GitHub? Probeer `gh auth status`.",
+    );
   }
-  const lijst = JSON.parse(gh(["repo", "list", org, "--limit", "1000", "--json", "name"]) || "[]");
   const kandidaten = lijst.map((r) => r.name).filter((n) => n.endsWith("-beheer-tier2"));
   if (kandidaten.length === 1) return `${org}/${kandidaten[0]}`;
   if (kandidaten.length === 0) {
@@ -117,10 +118,32 @@ export function vindBeheerRepo(org, { omgeving = process.env } = {}) {
       "Heb je toegang tot de beheer-repo? Anders: zet STAGETWO_BEHEER_REPO=<naam>.",
     );
   }
+  const metApp = kandidaten.filter((n) => staatInToegang(`${org}/${n}`, app));
+  if (metApp.length === 1) return `${org}/${metApp[0]}`;
   stop(
-    `Meer dan één beheer-repo in ${org}: ${kandidaten.join(", ")}.`,
+    metApp.length === 0
+      ? `${app} staat in geen van de beheer-repo's in ${org}: ${kandidaten.join(", ")}.`
+      : `${app} staat in meer dan één beheer-repo in ${org}: ${metApp.join(", ")}.`,
     "Kies er één met STAGETWO_BEHEER_REPO=<naam>.",
   );
+}
+
+/** Staat `app` in toegang.json van `repo` onder `apps`? Niet te lezen telt als nee. */
+function staatInToegang(repo, app) {
+  try {
+    const toegang = JSON.parse(
+      gh([
+        "api",
+        `repos/${repo}/contents/toegang.json`,
+        "-H",
+        "Accept: application/vnd.github.raw",
+      ]),
+    );
+    return Object.hasOwn(toegang?.apps ?? {}, app);
+  } catch (fout) {
+    if (fout instanceof Melding) throw fout;
+    return false;
+  }
 }
 
 /** Het nieuwste artifact `testlogin-<app>` dat nog niet verlopen is, of null. */
@@ -200,7 +223,7 @@ export function haalTestloginOp() {
   }
 
   const { org, repo: app } = eigenRepo();
-  const beheer = vindBeheerRepo(org);
+  const beheer = vindBeheerRepo(org, app);
   const naam = `testlogin-${app}`;
   let lijst;
   try {
