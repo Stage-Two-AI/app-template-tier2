@@ -33,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 35,
+  "stackVersion": 36,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -68,6 +68,7 @@
       "scripts/write-local-env.mjs",
       "scripts/write-test-env.mjs",
       "scripts/dev.mjs",
+      "scripts/bouwen.mjs",
       "scripts/preview.mjs",
       "scripts/apparaat-nieuw.mjs",
       "scripts/testlogin.mjs",

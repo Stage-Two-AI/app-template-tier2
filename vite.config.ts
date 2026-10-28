@@ -4,11 +4,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 /**
- * De testlogin (`pnpm testlogin`) staat in .env.development.local, dat Vite alleen in de
- * dev-server leest. Dit is een extra slot: staat hij toch ergens anders (in .env.local of
- * in de omgeving, zoals bij `pnpm test:e2e`, dat .env.local inleest), dan komt hij bij het
- * bouwen niet in de gebouwde bestanden. Een waarde in process.env gaat bij Vite vóór elk
- * .env-bestand, dus leeg maken vóór het bouwen houdt hem eruit.
+ * De testlogin (`pnpm testlogin`) blijft buiten de gebouwde bestanden; zie
+ * scripts/bouwen.mjs, dat `pnpm build` draait. Dit is hetzelfde slot voor wie
+ * `vite build` direct aanroept.
  */
 export const ALLEEN_DEV = ["VITE_TESTLOGIN_EMAIL", "VITE_TESTLOGIN_WACHTWOORD"];
 
