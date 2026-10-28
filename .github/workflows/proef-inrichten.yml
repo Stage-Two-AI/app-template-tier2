@@ -20,10 +20,6 @@ on:
         description: Alles met het voorvoegsel cf-proef- verwijderen
         type: boolean
         default: false
-      vangnet:
-        description: Vangnet aanzetten (e-mail-inlog met domeinfilter)
-        type: boolean
-        default: false
       tweede_doorgang:
         description: Alleen Access op de Worker zetten (na de eerste uitrol)
         type: boolean
@@ -74,7 +70,6 @@ jobs:
           APP: ${{ inputs.app }}
           DROOGLOOP: ${{ inputs.droogloop }}
           OPRUIMEN: ${{ inputs.opruimen }}
-          VANGNET: ${{ inputs.vangnet }}
           TWEEDE_DOORGANG: ${{ inputs.tweede_doorgang }}
         run: |
           # Het voorvoegsel is verplicht; cf-proef- is dat van de proef en de enige
@@ -82,6 +77,5 @@ jobs:
           args=(--voorvoegsel cf-proef- --app "$APP")
           if [ "$DROOGLOOP" = "true" ]; then args+=(--droogloop); fi
           if [ "$OPRUIMEN" = "true" ]; then args+=(--opruimen); fi
-          if [ "$VANGNET" = "true" ]; then args+=(--vangnet); fi
           if [ "$TWEEDE_DOORGANG" = "true" ]; then args+=(--tweede-doorgang); fi
           node beheer/inrichten-cloudflare.mjs "${args[@]}"

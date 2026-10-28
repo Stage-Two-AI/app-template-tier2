@@ -251,6 +251,35 @@ describe("pnpm testlogin", () => {
     ).toBe(true);
   });
 
+  it("de oude naam stagetwo-beheer: gevonden als enige beheer-repo", () => {
+    const r = draai({ repos: ["portaal", "stagetwo-beheer", "klant-beheer-tier1"] });
+    expect(r.code, r.uit).toBe(0);
+    expect(
+      r.aanroepen.some((a) => a[1]?.startsWith("repos/klant-org/stagetwo-beheer/actions")),
+    ).toBe(true);
+  });
+
+  it("stagetwo-beheer naast stagetwo-beheer-tier2: die waarin de app in toegang.json staat", () => {
+    const r = draai({
+      repos: ["stagetwo-beheer", "stagetwo-beheer-tier2"],
+      toegang: {
+        "stagetwo-beheer": { apps: { portaal: [] } },
+        "stagetwo-beheer-tier2": { apps: {} },
+      },
+    });
+    expect(r.code, r.uit).toBe(0);
+    expect(
+      r.aanroepen.some((a) => a[1]?.startsWith("repos/klant-org/stagetwo-beheer/actions")),
+    ).toBe(true);
+  });
+
+  it("geen beheer-repo: de melding noemt ook stagetwo-beheer", () => {
+    const r = draai({ repos: ["portaal", "stagetwo-beheer-oud"] });
+    expect(r.code).toBe(1);
+    expect(r.uit).toContain("stagetwo-beheer)");
+    expect(existsSync(ENV_DEV())).toBe(false);
+  });
+
   it("twee kandidaten zonder de app: stopt en vraagt om STAGETWO_BEHEER_REPO", () => {
     const r = draai({ repos: ["a-beheer-tier2", "b-beheer-tier2"] });
     expect(r.code).toBe(1);

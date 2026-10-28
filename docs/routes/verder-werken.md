@@ -50,6 +50,24 @@ wijziging zelf na voordat je iets laat zien. Met een andere assistent: `docs/rou
 hulpmiddel tijdens het bouwen, niet de oplevering: die volgt hieronder. De Cloudflare-preview
 van de pull request is het laatste nakijken, door de gebruiker.
 
+**Ziet de testgebruiker niets, en heeft de app rollen?** Kijk dan eerst naar
+`supabase/testrol.sql`. Dat bestand geeft `testgebruiker@stagetwo.nl` dezelfde rol als de
+bouwer van de app; Testdatabase verversen voert het elke nacht uit, meteen nadat de
+testgebruiker is aangemaakt of vernieuwd, met de versie van `main`. Ontbreekt het, schrijf
+het dan één keer in deze pull request: zoek in `supabase/migrations/` hoe de app rollen
+bijhoudt en welke rol de bouwer heeft, en vraag alleen bij twijfel. Alleen de rol van de
+testgebruiker, en zo dat het vaker mag draaien. Bijvoorbeeld:
+
+```sql
+-- De testgebruiker krijgt dezelfde rol als de bouwer van de app (hier: beheerder).
+insert into public.gebruikersrollen (user_id, rol)
+select id, 'beheerder' from auth.users where email = 'testgebruiker@stagetwo.nl'
+on conflict (user_id) do nothing;
+```
+
+De rol is er na de merge en de eerstvolgende verversing. Een app zonder rollen heeft dit
+bestand niet nodig.
+
 Verstuurt je wijziging mail (in een Edge Function)? Gebruik dan `richtMail` uit
 `supabase/functions/_shared/mail.ts`. Buiten productie gaat de mail dan alleen naar het
 testadres uit `stack.config.json` (`testmail`), nooit naar echte mensen.

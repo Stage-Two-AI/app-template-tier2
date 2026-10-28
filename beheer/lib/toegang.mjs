@@ -19,7 +19,8 @@
  *
  * Een policy laat toe wie past bij een van de include-regels en niet bij een van de
  * exclude-regels van díe policy. Meerdere policies op een app tellen als "of". De
- * beslissing hieronder (magAanmelden) en de SQL van het vangnet volgen precies dat.
+ * beslissing hieronder (magAanmelden) en de aanmeld-hook van de testdatabase volgen
+ * precies dat.
  */
 import { appNamen, metPolicies, policyIdsVanApp, valideerVoorvoegsel } from "./cloudflare.mjs";
 
@@ -388,10 +389,10 @@ export const BAN_DUUR = "876000h";
 /** Zo heft Supabase een ban op (`updateUserById`). */
 export const GEEN_BAN = "none";
 
-// ---------------------------------------------------------------- vangnet (R18)
+// ---------------------------------------------------------------- aanmeld-hook (testdatabase)
 
 /**
- * De naam van de hookfunctie van het vangnet, afgeleid van het voorvoegsel:
+ * De naam van de aanmeld-hookfunctie, afgeleid van het voorvoegsel:
  * `cf-proef-` wordt `cf_proef_voor_aanmelden`, `rp-` wordt `rp_voor_aanmelden`. Het
  * patroon van het voorvoegsel zorgt dat er alleen `[a-z0-9_]` in staat.
  */
@@ -428,19 +429,16 @@ function groepRegels(t, app, inspringen = "  ") {
 }
 
 /**
- * De before-user-created-hook van het vangnet: laat alleen aanmelden toe wie past bij
- * de domeinen en adressen van de gekozen groepen van deze app, met dezelfde
- * uitsluitingen als de Access-policies. IdP-groepen tellen hier niet mee: het vangnet
- * is juist voor inloggen zónder Cloudflare. De hook geldt voor elke aanmeldroute
- * (mailcode, wachtwoord, OAuth).
- *
- * Met `testdatabase: true` is het de hook van het testproject, en kijkt hij ook naar de
- * provider (`user.app_metadata.provider` in de invoer van de hook):
+ * De before-user-created-hook van de testdatabase (`<vv><app>-test`). Daar staat inloggen
+ * met e-mail aan, zodat testaccounts met een wachtwoord kunnen inloggen. De hook kijkt
+ * naar de provider (`user.app_metadata.provider` in de invoer van de hook):
  *   - `email` (mailcode of wachtwoord) mag alleen voor de testaccounts van de app;
- *   - `custom:cloudflare` mag voor de adressen uit de groepen, zoals in productie;
+ *   - `custom:cloudflare` mag voor de domeinen en adressen van de gekozen groepen, met
+ *     dezelfde uitsluitingen als de Access-policies (IdP-groepen tellen hier niet mee);
  *   - elke andere provider (ook anoniem, zonder provider) wordt geweigerd.
  * Zonder die controle kan iemand die een toegelaten adres kent met een zelfgekozen
  * wachtwoord een account op dat adres maken, want `mailer_autoconfirm` staat aan.
+ * Productie heeft geen hook: daar staat inloggen met e-mail uit.
  *
  * De vaste testgebruiker (TESTGEBRUIKER) staat hier bewust níet in: Testdatabase
  * verversen maakt hem met de admin-API, en die gaat niet langs deze hook (in de broncode
@@ -448,40 +446,17 @@ function groepRegels(t, app, inspringen = "  ") {
  * hook aan, `admin/users` niet). Zijn adres is openbaar; zo kan niemand hem met een eigen
  * wachtwoord vóór zijn.
  */
-export function vangnetSql(toegang, app, functie, { testdatabase = false } = {}) {
+export function aanmeldHookSql(toegang, app, functie) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
     throw new Error(`ongeldige functienaam "${functie}"`);
   const t = valideerToegang(toegang);
   if (!t.apps[app]) throw new Error(`app "${app}" staat niet in toegang.json`);
   const naam = `public.${functie}`;
-  const slot = `$vangnet$;
-
-grant execute on function ${naam}(jsonb) to supabase_auth_admin;
-revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
-`;
-  if (!testdatabase) {
-    return `create or replace function ${naam}(event jsonb)
-returns jsonb
-language plpgsql
-set search_path = ''
-as $vangnet$
-declare
-  adres text := lower(coalesce(event->'user'->>'email', ''));
-  domein text := split_part(adres, '@', 2);
-begin
-  if adres !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
-    ${WEIGER}
-  end if;
-${groepRegels(t, app).join("\n")}
-  ${WEIGER}
-end;
-${slot}`;
-  }
   return `create or replace function ${naam}(event jsonb)
 returns jsonb
 language plpgsql
 set search_path = ''
-as $vangnet$
+as $hook$
 declare
   adres text := lower(coalesce(event->'user'->>'email', ''));
   domein text := split_part(adres, '@', 2);
@@ -505,5 +480,9 @@ begin
 ${groepRegels(t, app).join("\n")}
   ${WEIGER}
 end;
-${slot}`;
+$hook$;
+
+grant execute on function ${naam}(jsonb) to supabase_auth_admin;
+revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
+`;
 }

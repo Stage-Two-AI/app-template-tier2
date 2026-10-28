@@ -7,7 +7,7 @@
  *
  *   node beheer/inrichten-cloudflare.mjs --voorvoegsel <vv-> --app <naam>
  *        [--repo <org/naam>] [--wrangler <pad>] [--hostname <host>]
- *        [--testdatabase] [--droogloop | --opruimen | --vangnet | --tweede-doorgang | --toegang]
+ *        [--testdatabase] [--droogloop | --opruimen | --tweede-doorgang | --toegang]
  *
  * Het voorvoegsel is verplicht (vlag of BEHEER_VOORVOEGSEL): `cf-proef-` voor de proef,
  * `rp-` voor Richplant. Buiten de proef zijn ook `--repo` (de app-repo die de
@@ -85,6 +85,7 @@ import {
   zetProvider,
 } from "./lib/supabase.mjs";
 import {
+  aanmeldHookSql,
   BAN_DUUR,
   GEEN_BAN,
   gewenstePolicies,
@@ -97,7 +98,6 @@ import {
   testaccountsVan,
   trekIn,
   valideerToegang,
-  vangnetSql,
   verwijderOverbodig,
 } from "./lib/toegang.mjs";
 
@@ -146,7 +146,6 @@ export function leesArgumenten(argv, env = {}) {
     voorvoegsel: null,
     droogloop: false,
     opruimen: false,
-    vangnet: false,
     tweedeDoorgang: false,
     toegang: false,
     testdatabase: false,
@@ -155,7 +154,6 @@ export function leesArgumenten(argv, env = {}) {
     "--testdatabase": "testdatabase",
     "--droogloop": "droogloop",
     "--opruimen": "opruimen",
-    "--vangnet": "vangnet",
     "--tweede-doorgang": "tweedeDoorgang",
     "--toegang": "toegang",
   };
@@ -170,9 +168,9 @@ export function leesArgumenten(argv, env = {}) {
       i += 1;
     } else throw new Error(`onbekende optie: ${a}`);
   }
-  const modi = ["opruimen", "vangnet", "tweedeDoorgang", "toegang"].filter((m) => uit[m]);
+  const modi = ["opruimen", "tweedeDoorgang", "toegang"].filter((m) => uit[m]);
   if (modi.length > 1) {
-    throw new Error("kies één van --opruimen, --vangnet, --tweede-doorgang of --toegang");
+    throw new Error("kies één van --opruimen, --tweede-doorgang of --toegang");
   }
   const appNodig = !uit.opruimen && !uit.toegang;
   if (uit.app === null && appNodig) throw new Error("geef --app <naam> mee");
@@ -829,52 +827,6 @@ export async function tweedeDoorgang(arg, d) {
   return { app: arg.app, melding: w.actie, worker: w.id };
 }
 
-// ---------------------------------------------------------------- vangnet (R18)
-
-/**
- * Het vangnet: e-mail-inlog weer aan, met een before-user-created-hook die alleen de
- * domeinen en adressen van de gekozen groepen toelaat. De app schakelt via
- * VITE_INLOGDIENST=mailcode om; geen codewijziging nodig.
- */
-export async function vangnet(arg, d) {
-  const v = await verken(arg, d, { schrijven: !arg.droogloop });
-  if (!v.project)
-    throw new Error(`Supabase-project ${v.namen.project} bestaat niet; draai eerst de inrichting`);
-  const functie = hookFunctie(arg.voorvoegsel);
-  const sql = vangnetSql(v.t, arg.app, functie);
-  const resultaat = {
-    app: arg.app,
-    supabase: { ref: v.project.ref },
-    hook: functie,
-    stappen: [],
-  };
-  if (arg.droogloop) {
-    resultaat.stappen.push({
-      stap: "vangnet",
-      actie:
-        "gepland: hook-functie, auth-config, VITE_INLOGDIENST en PREVIEW_VITE_INLOGDIENST=mailcode",
-    });
-    return resultaat;
-  }
-  await d.supabase.voerSqlUit(v.project.ref, sql);
-  resultaat.stappen.push({ stap: "hook-functie", actie: `public.${functie} gezet` });
-  const anders = verschil(await d.supabase.authConfig(v.project.ref), hookInstellingen(functie));
-  if (Object.keys(anders).length) await d.supabase.werkAuthBij(v.project.ref, anders);
-  resultaat.stappen.push({
-    stap: "auth-config",
-    actie: Object.keys(anders).length ? "bijgewerkt" : "ongewijzigd",
-  });
-  const gezet = await zetGithub(d, arg.repo, {
-    variabelen: { VITE_INLOGDIENST: "mailcode" },
-    repoVariabelen: { PREVIEW_VITE_INLOGDIENST: "mailcode" },
-  });
-  resultaat.stappen.push({
-    stap: "GitHub",
-    actie: gezet.length ? `gezet: ${gezet.join(", ")}` : "ongewijzigd",
-  });
-  return resultaat;
-}
-
 // ---------------------------------------------------------------- opruimen
 
 /**
@@ -1033,16 +985,6 @@ export async function ruimOp(arg, d) {
 
 // ---------------------------------------------------------------- toegang bijwerken (U6)
 
-/** Staat het vangnet aan: wijst de before-user-created-hook naar onze functie? */
-async function vangnetAan(d, ref, voorvoegsel) {
-  const gewenst = hookInstellingen(hookFunctie(voorvoegsel));
-  const huidig = await d.supabase.authConfig(ref);
-  return (
-    huidig?.hook_before_user_created_enabled === true &&
-    huidig?.hook_before_user_created_uri === gewenst.hook_before_user_created_uri
-  );
-}
-
 /**
  * De aanmeld-hook van de testdatabase: de functie schrijven (altijd, want toegang.json
  * kan veranderd zijn). Geeft de naam van de functie. De auth-config (hook aan en
@@ -1050,7 +992,7 @@ async function vangnetAan(d, ref, voorvoegsel) {
  */
 async function schrijfTestHook(d, t, app, ref, voorvoegsel) {
   const functie = hookFunctie(voorvoegsel);
-  await d.supabase.voerSqlUit(ref, vangnetSql(t, app, functie, { testdatabase: true }));
+  await d.supabase.voerSqlUit(ref, aanmeldHookSql(t, app, functie));
   return functie;
 }
 
@@ -1099,11 +1041,7 @@ export async function werkToegangBij(arg, d) {
     if (conflicten.length) throw new Error(`gestopt zonder wijzigingen: ${conflicten.join("; ")}`);
     const hooks = [];
     for (const app of doelApps) {
-      const project = projectVan(app);
-      if (project && (await vangnetAan(d, project.ref, vv))) {
-        hooks.push(`gepland: aanmeld-hook van ${app} opnieuw schrijven (vangnet staat aan)`);
-      }
-      if (project && testProjectVan(app)) {
+      if (projectVan(app) && testProjectVan(app)) {
         hooks.push(
           `gepland: aanmeld-hook van ${app} (test) schrijven, inloggen met e-mail alleen voor testaccounts`,
         );
@@ -1128,13 +1066,6 @@ export async function werkToegangBij(arg, d) {
   for (const app of doelApps) {
     const project = projectVan(app);
     if (!project) continue;
-    // Met het vangnet aan is de aanmeld-hook de poort: die moet het nieuwe bestand
-    // volgen, anders mag wie eruit is zich nog steeds aanmelden.
-    if (await vangnetAan(d, project.ref, vv)) {
-      const functie = hookFunctie(vv);
-      await supabase.voerSqlUit(project.ref, vangnetSql(t, app, functie));
-      hooks.push(`aanmeld-hook public.${functie} van ${app} bijgewerkt`);
-    }
     // De testdatabase: eerst de aanmeld-hook (die het nieuwe bestand moet volgen), dan
     // pas inloggen met e-mail aan. Zo staat e-mail nooit aan zonder hook.
     const testProject = testProjectVan(app);
@@ -1221,7 +1152,7 @@ if (
   let modus = "inrichten";
   try {
     const arg = leesArgumenten(process.argv.slice(2), process.env);
-    modus = ["opruimen", "vangnet", "tweedeDoorgang", "toegang"].find((m) => arg[m]) ?? "inrichten";
+    modus = ["opruimen", "tweedeDoorgang", "toegang"].find((m) => arg[m]) ?? "inrichten";
     let config = null;
     try {
       // Buiten de proef dwingt leesArgumenten --wrangler af; de proef leest zijn eigen.
@@ -1234,7 +1165,7 @@ if (
     arg.stand = config?.stand ?? null;
     for (const naam of ["CLOUDFLARE_PROEF_TOKEN", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"])
       maskeer(process.env[naam]);
-    const ghNodig = !arg.droogloop && ["inrichten", "vangnet", "opruimen"].includes(modus);
+    const ghNodig = !arg.droogloop && ["inrichten", "opruimen"].includes(modus);
     if (ghNodig) eis("GH_TOKEN");
     const d = {
       cf: cloudflareClient({
@@ -1262,7 +1193,6 @@ if (
     const uitvoeren = {
       inrichten: richtIn,
       opruimen: ruimOp,
-      vangnet,
       tweedeDoorgang,
       toegang: werkToegangBij,
     }[modus];

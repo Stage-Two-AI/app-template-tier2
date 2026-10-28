@@ -92,10 +92,14 @@ function eigenRepo() {
   return r;
 }
 
+/** De oude naam van een beheer-repo van tier 2, van vóór de naam op -beheer-tier2. */
+const OUDE_BEHEERNAAM = "stagetwo-beheer";
+
 /**
  * De beheer-repo waar deze app in staat, als `org/naam`: STAGETWO_BEHEER_REPO als die gezet
  * is, anders de repo's in de org die eindigen op `-beheer-tier2` (`stagetwo-beheer-tier2`
- * ook). Is er één, dan die; zijn er meer, dan de enige met de app in toegang.json.
+ * ook), en daarna `stagetwo-beheer`: de oude naam, die bij Richplant nog bestaat. Is er
+ * één, dan die; zijn er meer, dan de enige met de app in toegang.json.
  */
 export function vindBeheerRepo(org, app, { omgeving = process.env } = {}) {
   const gezet = (omgeving.STAGETWO_BEHEER_REPO ?? "").trim();
@@ -110,11 +114,15 @@ export function vindBeheerRepo(org, app, { omgeving = process.env } = {}) {
       "Ben je offline, of niet ingelogd bij GitHub? Probeer `gh auth status`.",
     );
   }
-  const kandidaten = lijst.map((r) => r.name).filter((n) => n.endsWith("-beheer-tier2"));
+  const namen = lijst.map((r) => r.name);
+  const kandidaten = [
+    ...namen.filter((n) => n.endsWith("-beheer-tier2")),
+    ...namen.filter((n) => n === OUDE_BEHEERNAAM),
+  ];
   if (kandidaten.length === 1) return `${org}/${kandidaten[0]}`;
   if (kandidaten.length === 0) {
     stop(
-      `Geen beheer-repo gevonden in ${org} (stagetwo-beheer-tier2, of een naam die eindigt op -beheer-tier2).`,
+      `Geen beheer-repo gevonden in ${org} (stagetwo-beheer-tier2, een naam die eindigt op -beheer-tier2, of ${OUDE_BEHEERNAAM}).`,
       "Heb je toegang tot de beheer-repo? Anders: zet STAGETWO_BEHEER_REPO=<naam>.",
     );
   }

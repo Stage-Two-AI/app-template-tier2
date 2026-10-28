@@ -2,15 +2,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
  * Welke inlogdienst deze app gebruikt, komt uit `VITE_INLOGDIENST` (zie lib/env.ts).
- * Het is een instelling, geen code: dezelfde app kan zonder wijziging terug van
- * Cloudflare naar het inloggen van Supabase zelf.
+ * Het is een instelling, geen code. De beheer-repo richt alleen `cloudflare` in: in
+ * productie loopt inloggen altijd via Cloudflare Access. azure, google en mailcode
+ * vragen eigen instellingen in Supabase die de inrichting niet zet.
  *
  *   cloudflare  Cloudflare Access is de inlogdienst van Supabase (custom OIDC-provider
  *               `custom:cloudflare`). De standaard in productie: één login, en wie niet
  *               door de deur mag, krijgt ook geen Supabase-account.
- *   azure       Supabase logt zelf in bij Microsoft (vangnet).
- *   google      Supabase logt zelf in bij Google (vangnet).
- *   mailcode    Supabase stuurt een inloglink per mail (vangnet zonder IdP).
+ *   azure       Supabase logt zelf in bij Microsoft.
+ *   google      Supabase logt zelf in bij Google.
+ *   mailcode    Supabase stuurt een inloglink per mail.
  *   wachtwoord  e-mail en wachtwoord; alleen lokaal en in CI, voor de tests.
  */
 export const INLOGDIENSTEN = ["cloudflare", "azure", "google", "mailcode", "wachtwoord"] as const;
