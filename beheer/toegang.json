@@ -1,5 +1,5 @@
 {
-  "$beschrijving": "Wie bij welke app mag. Per groep: domeinen, adressen, idp_groepen, uitsluiten. Per app: de gekozen groepen. Zie beheer/README.md.",
+  "$beschrijving": "Wie bij welke app mag. Per groep: domeinen, adressen, idp_groepen, uitsluiten. Per app: de gekozen groepen. Optioneel testaccounts: per app adressen die alleen in de testdatabase met e-mail mogen inloggen. Zie beheer/README.md.",
   "groepen": {
     "stagetwo": {
       "adressen": ["info@stagetwo.nl"]

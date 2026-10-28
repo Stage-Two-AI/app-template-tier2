@@ -81,3 +81,40 @@ describe("VITE_SENTRY_DSN", () => {
     expect(envSchema.safeParse({ VITE_SENTRY_DSN: "geen-dsn" }).success).toBe(true);
   });
 });
+
+describe("testloginVoorDev", () => {
+  const waarden = {
+    VITE_TESTLOGIN_EMAIL: "testgebruiker@stagetwo.nl",
+    VITE_TESTLOGIN_WACHTWOORD: "nacht-wachtwoord-123",
+  };
+
+  it("geeft de testlogin in de dev-server als e-mail en wachtwoord er zijn", async () => {
+    const { testloginVoorDev } = await import("./env");
+    expect(testloginVoorDev(waarden, true)).toEqual({
+      email: "testgebruiker@stagetwo.nl",
+      wachtwoord: "nacht-wachtwoord-123",
+    });
+  });
+
+  it("geeft nooit iets in een gebouwde versie", async () => {
+    const { testloginVoorDev } = await import("./env");
+    expect(testloginVoorDev(waarden, false)).toBeNull();
+  });
+
+  it("geeft niets als een van de twee ontbreekt, of standaard", async () => {
+    const { testloginVoorDev } = await import("./env");
+    expect(testloginVoorDev({ VITE_TESTLOGIN_EMAIL: "a@b.nl" }, true)).toBeNull();
+    expect(testloginVoorDev({ VITE_TESTLOGIN_WACHTWOORD: "x".repeat(20) }, true)).toBeNull();
+    expect(testloginVoorDev()).toBeNull();
+  });
+
+  it("een lege waarde telt als afwezig", async () => {
+    const { envSchema } = await import("./env");
+    const uitkomst = envSchema.safeParse({
+      VITE_TESTLOGIN_EMAIL: "",
+      VITE_TESTLOGIN_WACHTWOORD: "",
+    });
+    expect(uitkomst.success).toBe(true);
+    expect(uitkomst.data?.VITE_TESTLOGIN_WACHTWOORD).toBeUndefined();
+  });
+});

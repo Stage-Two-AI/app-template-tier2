@@ -1341,9 +1341,10 @@ test("testdatabase: een tweede run maakt niets dubbel aan", async () => {
   assert.equal(w.staat.projecten.length, projecten);
   assert.equal(w.staat.apps.length, apps);
   assert.equal(r.waarschuwingen.filter((x) => /TEST_DB/.test(x)).length, 0);
+  // De aanmeld-hook wordt elke run opnieuw geschreven (toegang.json kan veranderd zijn).
   assert.ok(
     r.stappen
-      .filter((s) => s.stap.startsWith("T "))
+      .filter((s) => s.stap.startsWith("T ") && s.stap !== "T testdatabase: aanmeld-hook")
       .every((s) => /hergebruikt|ongewijzigd/.test(s.actie)),
     JSON.stringify(r.stappen),
   );
@@ -1460,6 +1461,166 @@ test("testdatabase: toegang bijwerken trekt ook in de testdatabase in", async ()
     w.aanroepen.some((a) => a.methode === "listUsers" && a.url.includes(testRef)),
     "gebruikers van de testdatabase nagelopen",
   );
+});
+
+// ---------------------------------------------------------------- testaccounts in de testdatabase
+
+const MET_TESTACCOUNT = {
+  groepen: { klant: { domeinen: ["klant.nl"] } },
+  apps: { "cf-proef": ["klant"] },
+  testaccounts: { "cf-proef": ["scherm@elders.nl"] },
+};
+
+function testRef(w) {
+  return w.staat.projecten.find((p) => p.name.endsWith("-test")).ref;
+}
+function prodRef(w) {
+  return w.staat.projecten.find((p) => !p.name.endsWith("-test")).ref;
+}
+
+test("testdatabase: eerst de aanmeld-hook, dan inloggen met e-mail aan; productie blijft dicht", async () => {
+  const w = nepWolk();
+  const r = await richtIn(TEST_ARG, opzet(w, { toegang: MET_TESTACCOUNT }));
+  const test = testRef(w);
+  const prod = prodRef(w);
+  // De hook staat alleen in de testdatabase, met de provider-controle en de testaccounts.
+  assert.deepEqual(
+    w.staat.sqlOp.map((x) => x.ref),
+    [test],
+  );
+  const sql = w.staat.sqlOp[0].query;
+  assert.match(sql, /create or replace function public\.cf_proef_voor_aanmelden/);
+  assert.match(sql, /event->'user'->'app_metadata'->>'provider'/);
+  assert.match(sql, /array\['scherm@elders\.nl'\]::text\[\]/);
+  assert.doesNotMatch(
+    sql,
+    /'testgebruiker@stagetwo\.nl'/,
+    "die maakt de admin-API, buiten de hook",
+  );
+  assert.match(sql, /aanbieder <> 'custom:cloudflare'/);
+  // De volgorde: SQL vóór de PATCH die e-mail aanzet.
+  const iSql = w.aanroepen.findIndex((a) => a.pad?.endsWith(`${test}/database/query`));
+  const iAuth = w.aanroepen.findIndex(
+    (a) => a.methode === "PATCH" && a.pad?.endsWith(`${test}/config/auth`),
+  );
+  assert.ok(iSql > -1 && iAuth > iSql, "hook vóór e-mail");
+  assert.equal(w.staat.auth[test].external_email_enabled, true);
+  assert.equal(w.staat.auth[test].mailer_autoconfirm, true);
+  assert.equal(w.staat.auth[test].hook_before_user_created_enabled, true);
+  assert.equal(
+    w.staat.auth[test].hook_before_user_created_uri,
+    "pg-functions://postgres/public/cf_proef_voor_aanmelden",
+  );
+  // Productie: e-mail uit, geen hook, testaccounts nergens.
+  assert.equal(w.staat.auth[prod].external_email_enabled, false);
+  assert.equal(w.staat.auth[prod].hook_before_user_created_enabled, undefined);
+  // Testaccounts komen nooit in een Access-policy.
+  assert.ok(!JSON.stringify(w.staat.policies).includes("scherm@elders.nl"));
+  assert.ok(!JSON.stringify(w.staat.policies).includes("testgebruiker"));
+  assert.match(
+    r.stappen.find((s) => s.stap === "T testdatabase: aanmeld-hook").actie,
+    /alleen voor testaccounts/,
+  );
+});
+
+test("testdatabase: droogloop plant de aanmeld-hook met de testaccounts", async () => {
+  const w = nepWolk();
+  const r = await richtIn({ ...TEST_ARG, droogloop: true }, opzet(w, { toegang: MET_TESTACCOUNT }));
+  assert.deepEqual(w.schrijfacties(), []);
+  assert.match(
+    r.stappen.find((s) => s.stap === "T testdatabase: aanmeld-hook").actie,
+    /gepland: .*testgebruiker@stagetwo\.nl, scherm@elders\.nl/,
+  );
+});
+
+test("toegang bijwerken: in de testdatabase blijven testaccounts en de testgebruiker staan, in productie niet", async () => {
+  const w = nepWolk();
+  const d = opzet(w, { toegang: MET_TESTACCOUNT });
+  await richtIn(TEST_ARG, d);
+  const gebruikers = () => [
+    { id: "11111111-1111-4111-8111-111111111111", email: "piet@klant.nl" },
+    { id: "22222222-2222-4222-8222-222222222222", email: "testgebruiker@stagetwo.nl" },
+    { id: "33333333-3333-4333-8333-333333333333", email: "scherm@elders.nl" },
+    { id: "44444444-4444-4444-8444-444444444444", email: "vreemd@elders.nl" },
+  ];
+  w.staat.gebruikersOp[`https://${prodRef(w)}.supabase.co`] = gebruikers();
+  w.staat.gebruikersOp[`https://${testRef(w)}.supabase.co`] = gebruikers();
+  w.aanroepen.length = 0;
+  const r = await werkToegangBij({ voorvoegsel: "cf-proef-" }, d);
+  assert.deepEqual(r.ingetrokken["cf-proef (test)"], ["vreemd@elders.nl"]);
+  assert.deepEqual(r.ingetrokken["cf-proef"], [
+    "testgebruiker@stagetwo.nl",
+    "scherm@elders.nl",
+    "vreemd@elders.nl",
+  ]);
+  const geband = (ref) =>
+    w.staat.gebruikersOp[`https://${ref}.supabase.co`]
+      .filter((g) => g.banned_until)
+      .map((g) => g.email);
+  assert.deepEqual(geband(testRef(w)), ["vreemd@elders.nl"]);
+});
+
+test("toegang bijwerken: een eerder geband testaccount krijgt de ban opgeheven zodra het in de lijst staat", async () => {
+  const w = nepWolk();
+  const d = opzet(w, { toegang: MET_TESTACCOUNT });
+  await richtIn(TEST_ARG, d);
+  w.staat.gebruikersOp[`https://${testRef(w)}.supabase.co`] = [
+    {
+      id: "33333333-3333-4333-8333-333333333333",
+      email: "scherm@elders.nl",
+      banned_until: "2126-01-01T00:00:00Z",
+    },
+  ];
+  const r = await werkToegangBij({ voorvoegsel: "cf-proef-" }, d);
+  assert.deepEqual(r.toegelaten["cf-proef (test)"], ["scherm@elders.nl"]);
+  assert.deepEqual(r.ingetrokken, {});
+});
+
+test("toegang bijwerken: de aanmeld-hook van de testdatabase volgt het bestand, e-mail gaat alleen samen met de hook aan", async () => {
+  const w = nepWolk();
+  const d = opzet(w, { toegang: MET_TESTACCOUNT });
+  await richtIn(TEST_ARG, d);
+  const test = testRef(w);
+  // Een testdatabase van vóór deze versie: e-mail uit, geen hook.
+  w.staat.auth[test] = { ...w.staat.auth[test], external_email_enabled: false };
+  delete w.staat.auth[test].hook_before_user_created_enabled;
+  delete w.staat.auth[test].hook_before_user_created_uri;
+  d.toegang = {
+    ...MET_TESTACCOUNT,
+    testaccounts: { "cf-proef": ["scherm@elders.nl", "tweede@elders.nl"] },
+  };
+  w.staat.sqlOp.length = 0;
+  w.aanroepen.length = 0;
+  const r = await werkToegangBij({ voorvoegsel: "cf-proef-" }, d);
+  assert.deepEqual(
+    w.staat.sqlOp.map((x) => x.ref),
+    [test],
+    "alleen de testdatabase krijgt een hook; het vangnet van productie staat uit",
+  );
+  assert.match(w.staat.sqlOp[0].query, /'tweede@elders\.nl'/);
+  const iSql = w.aanroepen.findIndex((a) => a.pad?.endsWith(`${test}/database/query`));
+  const iAuth = w.aanroepen.findIndex(
+    (a) => a.methode === "PATCH" && a.pad?.endsWith(`${test}/config/auth`),
+  );
+  assert.ok(iSql > -1 && iAuth > iSql, "hook vóór e-mail");
+  assert.equal(w.staat.auth[test].external_email_enabled, true);
+  assert.equal(w.staat.auth[test].hook_before_user_created_enabled, true);
+  assert.ok(r.acties.some((a) => /inloggen met e-mail in cf-proef \(test\) aangezet/.test(a)));
+
+  // Een tweede run: de hook opnieuw, de auth-config niet.
+  w.aanroepen.length = 0;
+  await werkToegangBij({ voorvoegsel: "cf-proef-" }, d);
+  assert.ok(!w.aanroepen.some((a) => a.methode === "PATCH" && a.pad?.includes("/config/auth")));
+});
+
+test("toegang bijwerken, droogloop: plant de aanmeld-hook van de testdatabase en schrijft niets", async () => {
+  const w = nepWolk();
+  const d = opzet(w, { toegang: MET_TESTACCOUNT });
+  await richtIn(TEST_ARG, d);
+  w.aanroepen.length = 0;
+  const r = await werkToegangBij({ voorvoegsel: "cf-proef-", droogloop: true }, d);
+  assert.deepEqual(w.schrijfacties(), []);
+  assert.ok(r.acties.some((a) => /aanmeld-hook van cf-proef \(test\)/.test(a)));
 });
 
 // ---------------------------------------------------------------- meer dan één Supabase-organisatie

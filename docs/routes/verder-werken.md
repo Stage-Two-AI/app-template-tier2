@@ -42,10 +42,17 @@ Raakt je wijziging de database (een tabel, kolom, index of policy)? Lees dan nu
 request open je niet als concept, zodat de databasetests meteen meedraaien. In Claude
 Code herinnert de plugin je eraan zodra je in `supabase/migrations/` schrijft.
 
-Wil je tussendoor zien wat je gemaakt hebt? In de Claude-app start de preview vanzelf
-(`.claude/launch.json`), tegen de testdatabase; gebruik die ook om je eigen werk te
-controleren. Met een andere assistent: `docs/routes/lokaal-kijken.md`. Het is een
-hulpmiddel tijdens het bouwen, niet de oplevering: die volgt hieronder.
+**Kijk eerst lokaal, ingelogd als testgebruiker, met echte gegevens.** In de Claude-app start
+de preview vanzelf (`.claude/launch.json`), tegen de testdatabase, en haalt hij de testlogin
+op. Log in met de knop "Inloggen als testgebruiker" (heeft de app die knop nog niet, vul dan
+in het gewone formulier het adres en wachtwoord uit `.env.development.local` in) en klik de
+wijziging zelf na voordat je iets laat zien. Met een andere assistent: `docs/routes/lokaal-kijken.md`. Het is een
+hulpmiddel tijdens het bouwen, niet de oplevering: die volgt hieronder. De Cloudflare-preview
+van de pull request is het laatste nakijken, door de gebruiker.
+
+Verstuurt je wijziging mail (in een Edge Function)? Gebruik dan `richtMail` uit
+`supabase/functions/_shared/mail.ts`. Buiten productie gaat de mail dan alleen naar het
+testadres uit `stack.config.json` (`testmail`), nooit naar echte mensen.
 
 ## Stap 4: Schrijf de test erbij
 
@@ -92,9 +99,12 @@ als reactie in de PR heeft gezet en plak de PR-link erin. Die reactie noemt er t
 - **de preview van deze PR** (`pr-<nummer>-...`): precies deze wijziging;
 - **het vaste adres van de app** (`actueel-...`): altijd de laatst gepushte PR. Dit adres
   verandert nooit. Geef het de gebruiker één keer; hij kan het open laten staan, ook op een
-  tablet, en hoeft na een push alleen te verversen.
+  tablet, en hoeft na een push alleen te verversen. Moedig hem aan daar zelf in te loggen
+  en mee te kijken. Tip: daar krijgt hij in de testdatabase een eigen account, los van
+  productie. Iemand moet dat account één keer een rol geven; die rol blijft daarna staan.
 
-**Kijk zelf eerst.** Open de preview in de browser in de zijbalk van de Claude-app (of, als
+**Kijk zelf eerst.** Je hebt de wijziging lokaal al nagelopen als testgebruiker (stap 3).
+Open daarna de preview in de browser in de zijbalk van de Claude-app (of, als
 die er niet is, in Chrome via Claude in Chrome) en loop de wijziging na voordat je de
 gebruiker vraagt te kijken. Zie je het inlogscherm van Cloudflare Access, vraag de gebruiker
 dan één keer in te loggen met zijn werkaccount, in dat paneel; de browser onthoudt dat voor
@@ -153,8 +163,29 @@ gh run watch --repo <org>/stagetwo-beheer-tier2 "$(gh run list --repo <org>/stag
 ```
 
 Heet de beheer-repo bij deze organisatie nog `stagetwo-beheer` of `stack-beheer`, gebruik dan die naam. De functies
-gaan eerst naar de testdatabase en dan naar productie. Een preview van een PR ziet een nieuwe
-functie dus pas na de merge; zeg dat erbij als de gebruiker hem in de preview wil proberen.
+gaan eerst naar de testdatabase en dan naar productie.
+
+### Een functie proberen vóór de merge
+
+Wil je een gewijzigde Edge Function proberen terwijl de pull request nog open staat, start
+Functies uitrollen dan vanaf je tak:
+
+```bash
+gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer-tier2 -f app=<naam van deze repo> -f tak=<jouw tak>
+```
+
+Dat zet de functies van die tak alleen op de testdatabase, nooit op productie. Lokaal en in
+de preview praat de app daarna met die proefversie. Zeg erbij: alle previews en iedereen die
+lokaal kijkt, delen de testdatabase en zien zolang ook de proefversie. Na de merge zet de
+gewone run (vanaf `main`) alles weer gelijk.
+
+## Een fout uit productie
+
+Meldt de gebruiker een fout, of zie je er een? Kijk dan eerst in Sentry wat er precies
+gebeurde: welke melding, op welk scherm, bij hoeveel mensen. Je leest Sentry via de
+koppeling in claude.ai. Staat die niet aan, vraag de gebruiker hem aan te zetten
+(Instellingen > Koppelingen > Sentry); de beheerder van het Sentry-account logt dan één keer
+in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat zien.
 
 ## Als een check rood staat
 

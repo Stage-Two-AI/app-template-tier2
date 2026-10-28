@@ -91,6 +91,18 @@ testdatabase (canary) en dan op productie. Let op: het gratis plan van Supabase 
 twee actieve projecten per organisatie toe, dus één app met testdatabase. Toegang
 bijwerken trekt ook in de testdatabase in; opruimen haalt hem mee weg.
 
+In de testdatabase staat inloggen met e-mail aan, zodat de testgebruiker van Claude
+(`testgebruiker@stagetwo.nl`) en de testaccounts uit `toegang.json` er zonder Cloudflare
+in kunnen. Dat gaat alleen samen met een aanmeld-hook (before-user-created) die naar de
+manier van aanmelden kijkt: met e-mail (mailcode of wachtwoord) alleen een testaccount,
+via Cloudflare (`custom:cloudflare`) de adressen uit de groepen, zoals in productie, en
+verder niets. De testgebruiker zelf meldt zich nooit zo aan: Testdatabase verversen maakt
+hem met de admin-API, die niet langs de hook gaat. Zo kan niemand hem met een eigen
+wachtwoord vóór zijn. Zonder die controle kon iemand die een toegelaten adres kent met een
+zelfgekozen wachtwoord een account op dat adres maken, want `mailer_autoconfirm` staat
+aan. De inrichting schrijft eerst de hook en zet pas daarna e-mail aan; Toegang
+bijwerken doet hetzelfde bij elke run, ook voor een testdatabase van vóór versie 34.
+
 De PR-job in `uitrollen.yml` noemt geen omgeving en leest daarom de `PREVIEW_`-
 repovariabelen (geen secrets, ze staan toch in de bundel). `PREVIEW_VITE_SENTRY_DSN` zet
 het script alleen met een `VITE_SENTRY_DSN` in de beheeromgeving. Ontbreekt `PREVIEW_VITE_SUPABASE_URL` bij een app met
@@ -160,7 +172,9 @@ gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=fals
 Access-apps en trekt de toegang in van wie er niet meer in staat: een ban en afmelden
 van alle sessies in Supabase. Staat het vangnet aan (de aanmeld-hook van Supabase wijst
 naar onze functie), dan schrijft hij ook de hook opnieuw, zodat die het nieuwe bestand
-volgt.
+volgt. In de testdatabase schrijft hij altijd de aanmeld-hook, en de testaccounts (met
+de testgebruiker) blijven daar ongemoeid; een eerder geband testaccount krijgt de ban
+opgeheven.
 
 ## toegang.json
 
@@ -170,12 +184,17 @@ volgt.
     "kantoor": { "domeinen": ["klant.nl"], "uitsluiten": ["oud@klant.nl"] },
     "it": { "adressen": ["it@klant.nl"], "idp_groepen": ["<groeps-id in Entra>"] }
   },
-  "apps": { "cf-proef": ["kantoor", "it"] }
+  "apps": { "cf-proef": ["kantoor", "it"] },
+  "testaccounts": { "cf-proef": ["schermtest@klant.nl"] }
 }
 ```
 
 Een groep zonder domeinen, adressen of IdP-groepen, een app zonder groep en een app met
 een onbekende groep worden geweigerd; de melding noemt groep en veld.
+
+`testaccounts` is optioneel: per app de adressen die in de testdatabase met e-mail en
+wachtwoord mogen inloggen. Ze komen nooit in een Access-policy en nooit in productie.
+`testgebruiker@stagetwo.nl` telt altijd mee, ook als hij er niet in staat.
 
 ## Alleen IT mag toegang.json wijzigen (bij een klant)
 

@@ -54,6 +54,16 @@ const velden = z
      * verkeerde DSN mag de app niet laten crashen; src/lib/fouten.ts vangt die af.
      */
     VITE_SENTRY_DSN: z.string().optional(),
+    /**
+     * De testlogin: e-mail en wachtwoord van de vaste testgebruiker in de testdatabase.
+     * `pnpm testlogin` zet ze in .env.development.local (het wachtwoord wordt elke nacht
+     * vernieuwd); dat bestand leest Vite alleen in de dev-server.
+     * Alleen de dev-server op je eigen computer gebruikt ze (zie testloginVoorDev);
+     * vite.config.ts maakt ze leeg bij elke build, zodat ze nooit in een gebouwde versie
+     * staan.
+     */
+    VITE_TESTLOGIN_EMAIL: z.string().optional(),
+    VITE_TESTLOGIN_WACHTWOORD: z.string().optional(),
   })
   .superRefine((waarden, ctx) => {
     const url = Boolean(waarden.VITE_SUPABASE_URL);
@@ -85,3 +95,17 @@ export const env = parsed.data;
  * met `"database": false`, en van elke app tot Stage Two de database heeft gekoppeld.
  */
 export const heeftDatabase = Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_ANON_KEY);
+
+/**
+ * De testlogin, alleen in de dev-server (`import.meta.env.DEV`) en alleen als e-mail én
+ * wachtwoord er zijn. In een gebouwde versie altijd null.
+ */
+export function testloginVoorDev(
+  waarden: Pick<typeof env, "VITE_TESTLOGIN_EMAIL" | "VITE_TESTLOGIN_WACHTWOORD"> = env,
+  dev: boolean = import.meta.env.DEV,
+): { email: string; wachtwoord: string } | null {
+  if (!dev) return null;
+  const email = waarden.VITE_TESTLOGIN_EMAIL;
+  const wachtwoord = waarden.VITE_TESTLOGIN_WACHTWOORD;
+  return email && wachtwoord ? { email, wachtwoord } : null;
+}

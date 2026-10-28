@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { databaseModus, testDatabase } from "./lib/stack-config.mjs";
 
 /**
@@ -16,7 +17,9 @@ import { databaseModus, testDatabase } from "./lib/stack-config.mjs";
  * Wat dit script regelt, zodat de gebruiker niets hoeft te weten:
  *   1. de pakketten (`pnpm install`) als die er nog niet zijn;
  *   2. bij een app met database: een .env.local naar de TESTDATABASE (nooit productie),
- *      via `pnpm env:test`, met de publieke sleutel uit stack.config.json;
+ *      via `pnpm env:test`, met de publieke sleutel uit stack.config.json, en bij elke
+ *      start de testlogin (`pnpm testlogin`), want het wachtwoord wordt elke nacht
+ *      vernieuwd;
  *   3. vite op de poort die de app doorgeeft (PORT), of 5173.
  */
 
@@ -50,7 +53,8 @@ if (!existsSync(join("node_modules", "vite", "bin", "vite.js"))) {
 const modus = databaseModus();
 if (modus !== "geen") {
   const test = testDatabase();
-  if (!existsSync(".env.local") && test) {
+  const vers = !existsSync(".env.local") && Boolean(test);
+  if (vers) {
     // Schrijft .env.local met de publieke sleutel van de testdatabase; faalt het, dan
     // draait de app zonder database (de startpagina) en zegt het script waarom.
     pnpm(["env:test"]);
@@ -73,6 +77,20 @@ if (modus !== "geen") {
         "De preview praat nooit met productie: wat je hier aanklikt, gebeurt dan echt.",
         "Verwijder .env.local (dan schrijft de preview hem opnieuw), of vraag Stage Two.",
       ]);
+    }
+    // Bij elke start de testlogin vernieuwen (in .env.development.local); env:test deed dat
+    // net al als hij .env.local schreef. Lukt het niet (offline, geen artifact), dan start de app gewoon.
+    if (!vers && ref !== null && ref === test?.project_ref) {
+      const r = spawnSync(
+        process.execPath,
+        [fileURLToPath(new URL("./testlogin.mjs", import.meta.url))],
+        {
+          stdio: "inherit",
+        },
+      );
+      if (r.status !== 0) {
+        console.warn("  ! Geen nieuwe testlogin; de app start, maar inloggen lukt misschien niet.");
+      }
     }
   } else {
     console.warn(

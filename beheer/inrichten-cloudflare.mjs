@@ -24,7 +24,9 @@
  *   4   Access op de Worker zelf (vóór 3.6, zodat hij er staat vóór de eerste uitrol)
  *   T   met --testdatabase: een tweede Supabase-project `<vv><app>-test` met een eigen
  *       SaaS-app `<vv><app>-test-inlog`, provider en auth-config; de previews wijzen
- *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production
+ *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production.
+ *       Daar staat inloggen met e-mail aan, maar alleen samen met de aanmeld-hook van
+ *       de testdatabase: e-mail alleen voor testaccounts, Cloudflare voor de groepen
  *   3.6 GitHub-variabelen en -secrets per omgeving
  *
  * In de tijdelijke stand van wrangler.jsonc (geen routes; zie
@@ -92,6 +94,7 @@ import {
   policyIdsVoorApp,
   policyNaam,
   synchroniseerPolicies,
+  testaccountsVan,
   trekIn,
   valideerToegang,
   vangnetSql,
@@ -486,6 +489,10 @@ function geplandeStappen(arg, v, workerBestaat) {
               `${v.namen.test} in ${REGIO}, SaaS-app ${v.namen.testInlog}; de previews wijzen daarheen`,
             ),
           },
+          {
+            stap: "T testdatabase: aanmeld-hook",
+            actie: `gepland: public.${hookFunctie(arg.voorvoegsel)} en inloggen met e-mail, alleen voor testaccounts (${testaccountsVan(v.t, arg.app).join(", ")})`,
+          },
         ]
       : []),
     {
@@ -579,12 +586,19 @@ async function stapTestdatabase(arg, d, v, { policyIds, gewenstAuth, maskeer, st
     maskeer,
   });
   stap("T testdatabase: SaaS-app (OIDC)", saas.actie);
+  // Eerst de aanmeld-hook, dan pas inloggen met e-mail aan (in de auth-config hieronder):
+  // e-mail mag nooit aan staan zonder hook, want mailer_autoconfirm staat aan.
+  const functie = await schrijfTestHook(d, v.t, arg.app, project.ref, arg.voorvoegsel);
+  stap(
+    "T testdatabase: aanmeld-hook",
+    `public.${functie} geschreven; e-mail alleen voor testaccounts, Cloudflare voor de groepen`,
+  );
   const k = await koppelInlog(d, v, {
     ref: project.ref,
     serviceRole: sleutels.serviceRole,
     saas,
     naam: v.namen.testInlog,
-    gewenstAuth,
+    gewenstAuth: { ...gewenstAuth, ...hookInstellingen(functie) },
   });
   stap("T testdatabase: provider en auth-config", `${k.provider}; auth-config ${k.auth}`);
   if (
@@ -1029,8 +1043,22 @@ async function vangnetAan(d, ref, voorvoegsel) {
   );
 }
 
-/** Ban en afmelden in één Supabase-project voor wie niet (meer) bij de app mag. */
-async function trekInOp(d, t, app, ref) {
+/**
+ * De aanmeld-hook van de testdatabase: de functie schrijven (altijd, want toegang.json
+ * kan veranderd zijn). Geeft de naam van de functie. De auth-config (hook aan en
+ * inloggen met e-mail aan) zet de aanroeper pas daarna.
+ */
+async function schrijfTestHook(d, t, app, ref, voorvoegsel) {
+  const functie = hookFunctie(voorvoegsel);
+  await d.supabase.voerSqlUit(ref, vangnetSql(t, app, functie, { testdatabase: true }));
+  return functie;
+}
+
+/**
+ * Ban en afmelden in één Supabase-project voor wie niet (meer) bij de app mag. In de
+ * testdatabase (`test: true`) blijven de testaccounts en de testgebruiker buiten schot.
+ */
+async function trekInOp(d, t, app, ref, { test = false } = {}) {
   const sleutels = await d.supabase.sleutels(ref);
   d.maskeer?.(sleutels.serviceRole);
   const admin = (d.maakAdmin ?? standaardAdmin)(supabaseUrl(ref), sleutels.serviceRole);
@@ -1038,6 +1066,7 @@ async function trekInOp(d, t, app, ref) {
     gebruikers: await alleGebruikers(admin),
     toegang: t,
     app,
+    testaccounts: test ? testaccountsVan(t, app) : [],
     ban: async (id) => {
       const { error } = await admin.updateUserById(id, { ban_duration: BAN_DUUR });
       if (error) throw new Error(`Supabase updateUserById: ${error.message ?? error}`);
@@ -1074,6 +1103,11 @@ export async function werkToegangBij(arg, d) {
       if (project && (await vangnetAan(d, project.ref, vv))) {
         hooks.push(`gepland: aanmeld-hook van ${app} opnieuw schrijven (vangnet staat aan)`);
       }
+      if (project && testProjectVan(app)) {
+        hooks.push(
+          `gepland: aanmeld-hook van ${app} (test) schrijven, inloggen met e-mail alleen voor testaccounts`,
+        );
+      }
     }
     return {
       droogloop: true,
@@ -1101,14 +1135,30 @@ export async function werkToegangBij(arg, d) {
       await supabase.voerSqlUit(project.ref, vangnetSql(t, app, functie));
       hooks.push(`aanmeld-hook public.${functie} van ${app} bijgewerkt`);
     }
+    // De testdatabase: eerst de aanmeld-hook (die het nieuwe bestand moet volgen), dan
+    // pas inloggen met e-mail aan. Zo staat e-mail nooit aan zonder hook.
+    const testProject = testProjectVan(app);
+    if (testProject) {
+      const functie = await schrijfTestHook(d, t, app, testProject.ref, vv);
+      hooks.push(`aanmeld-hook public.${functie} van ${app} (test) bijgewerkt`);
+      const anders = verschil(
+        await supabase.authConfig(testProject.ref),
+        hookInstellingen(functie),
+      );
+      if (Object.keys(anders).length) {
+        await supabase.werkAuthBij(testProject.ref, anders);
+        hooks.push(`inloggen met e-mail in ${app} (test) aangezet, alleen voor testaccounts`);
+      }
+    }
     // Ook in de testdatabase: wie eruit is, komt ook in de previews niet meer binnen.
+    // De testaccounts daar blijven staan.
     const doelen = [
-      [app, project],
-      [`${app} (test)`, testProjectVan(app)],
+      [app, project, false],
+      [`${app} (test)`, testProject, true],
     ];
-    for (const [sleutel, p] of doelen) {
+    for (const [sleutel, p, test] of doelen) {
       if (!p) continue;
-      const r = await trekInOp(d, t, app, p.ref);
+      const r = await trekInOp(d, t, app, p.ref, { test });
       if (r.ingetrokken.length) ingetrokken[sleutel] = r.ingetrokken;
       if (r.toegelaten.length) toegelaten[sleutel] = r.toegelaten;
       if (r.onbekend.length) onbekend[sleutel] = r.onbekend;

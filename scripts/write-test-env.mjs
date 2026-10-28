@@ -1,5 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { databaseModus, testDatabase } from "./lib/stack-config.mjs";
 
 /**
@@ -10,7 +11,8 @@ import { databaseModus, testDatabase } from "./lib/stack-config.mjs";
  * (scripts/preview.mjs) roept dit script zelf aan als er nog geen .env.local is.
  *
  * Alleen de publieke anon key komt hierin terecht. Die is expres publiek en wordt
- * door RLS beschermd. Een service role key van de testdatabase bestaat voor deze
+ * door RLS beschermd. Daarna haalt `pnpm testlogin` (scripts/testlogin.mjs) de login
+ * van de testgebruiker op uit de beheer-repo; lukt dat niet, dan werkt de rest gewoon. Een service role key van de testdatabase bestaat voor deze
  * route niet: er is geen .env.test, want de RLS-tests draaien lokaal of in CI, nooit
  * tegen een gedeeld project.
  */
@@ -117,7 +119,22 @@ writeFileSync(
     "VITE_OMGEVING=test",
     "",
   ].join("\n"),
+  { mode: 0o600 },
 );
 
 console.log(`✓ .env.local geschreven: de app praat nu met de testdatabase (${test.project_ref})`);
+
+// De testlogin: zonder kan de app lokaal niet inloggen (de gewone inlog loopt via
+// Cloudflare). Lukt het niet (offline, nog geen artifact), dan een waarschuwing.
+const testlogin = spawnSync(
+  process.execPath,
+  [fileURLToPath(new URL("./testlogin.mjs", import.meta.url))],
+  {
+    stdio: "inherit",
+  },
+);
+if (testlogin.status !== 0) {
+  console.warn("  ! Zonder testlogin start de app wel, maar kun je lokaal niet inloggen.");
+  console.warn("    Later opnieuw proberen: `pnpm testlogin`.");
+}
 console.log("  Starten: de preview in de Claude-app, of `STACK_ALLOW_DEV=1 pnpm dev`");

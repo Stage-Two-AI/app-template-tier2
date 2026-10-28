@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { type Inlogdienst, inlogVorm, startInloggen } from "@/features/auth/inlogdienst";
-import { env } from "@/lib/env";
+import { env, testloginVoorDev } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { credentialsSchema, fieldErrors } from "@/lib/validation";
 
@@ -34,9 +34,16 @@ function foutUitAdres(): string | null {
   return params.get("error") ?? hash.get("error");
 }
 
-export function LoginPage({ dienst = env.VITE_INLOGDIENST }: { dienst?: Inlogdienst }) {
+export function LoginPage({
+  dienst = env.VITE_INLOGDIENST,
+  testlogin = testloginVoorDev(),
+}: {
+  dienst?: Inlogdienst;
+  /** Alleen lokaal in de dev-server: de testgebruiker van de testdatabase (`pnpm testlogin`). */
+  testlogin?: { email: string; wachtwoord: string } | null;
+}) {
   const vorm = inlogVorm(dienst);
-  if (vorm === "wachtwoord") return <WachtwoordFormulier />;
+  if (vorm === "wachtwoord") return <WachtwoordFormulier testlogin={testlogin} />;
   if (vorm === "mailcode") return <MailcodeFormulier />;
   return <ExterneInlog dienst={dienst} automatisch={vorm === "doorsturen"} />;
 }
@@ -167,12 +174,37 @@ function MailcodeFormulier() {
   );
 }
 
-function WachtwoordFormulier() {
+function WachtwoordFormulier({
+  testlogin,
+}: {
+  testlogin: { email: string; wachtwoord: string } | null;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * Lokaal, met de testdatabase: één klik en je bent binnen als de testgebruiker. Zo kan
+   * ook Claude in de preview rondklikken met echte gegevens, zonder Cloudflare. In een
+   * gebouwde versie is er nooit een testlogin (zie testloginVoorDev).
+   */
+  async function alsTestgebruiker() {
+    if (!testlogin) return;
+    setFormError(null);
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithPassword({
+      email: testlogin.email,
+      password: testlogin.wachtwoord,
+    });
+    setBusy(false);
+    if (error) {
+      setFormError(
+        "Inloggen als testgebruiker is niet gelukt. Haal een nieuwe testlogin op met `pnpm testlogin`.",
+      );
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -195,6 +227,16 @@ function WachtwoordFormulier() {
 
   return (
     <Pagina>
+      {testlogin ? (
+        <div className="flex flex-col gap-2 rounded-md border border-dashed p-4">
+          <Button type="button" onClick={() => void alsTestgebruiker()} disabled={busy}>
+            Inloggen als testgebruiker
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Alleen op deze computer, met de testdatabase: {testlogin.email}
+          </p>
+        </div>
+      ) : null}
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
         <div className="flex flex-col gap-2">
           <Label htmlFor="email">E-mailadres</Label>

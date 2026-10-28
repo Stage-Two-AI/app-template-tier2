@@ -105,3 +105,35 @@ describe("LoginPage met andere diensten", () => {
     });
   });
 });
+
+describe("LoginPage met een testlogin (alleen lokaal)", () => {
+  const testlogin = { email: "testgebruiker@stagetwo.nl", wachtwoord: "nacht-wachtwoord-123" };
+
+  it("toont een duidelijke knop en logt daarmee in als de testgebruiker", async () => {
+    render(<LoginPage dienst="wachtwoord" testlogin={testlogin} />);
+    expect(screen.getByText(/testgebruiker@stagetwo\.nl/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen als testgebruiker" }));
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: "testgebruiker@stagetwo.nl",
+      password: "nacht-wachtwoord-123",
+    });
+  });
+
+  it("zegt wat te doen als het wachtwoord niet meer klopt", async () => {
+    signInWithPassword.mockResolvedValue({ data: {}, error: { message: "Invalid login" } });
+    render(<LoginPage dienst="wachtwoord" testlogin={testlogin} />);
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen als testgebruiker" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("pnpm testlogin");
+  });
+
+  it("zonder testlogin is er geen knop, en het formulier werkt zoals altijd", () => {
+    render(<LoginPage dienst="wachtwoord" testlogin={null} />);
+    expect(screen.queryByRole("button", { name: "Inloggen als testgebruiker" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Inloggen" })).toBeInTheDocument();
+  });
+
+  it("standaard (zonder VITE_TESTLOGIN_*) is er geen knop", () => {
+    render(<LoginPage dienst="wachtwoord" />);
+    expect(screen.queryByRole("button", { name: "Inloggen als testgebruiker" })).toBeNull();
+  });
+});

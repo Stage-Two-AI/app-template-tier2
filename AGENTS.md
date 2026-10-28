@@ -71,7 +71,8 @@ eigen computer dus nooit. Zet nooit de sleutels van productie in `.env.local`.
 | `pnpm db:types:uit-ci` | databasetypes ophalen uit de laatste run van de Kwaliteitspoort (geen Docker nodig) |
 | `pnpm db:start` | lokale Supabase starten; vraagt Docker, alleen voor Stage Two |
 | `pnpm env:local` | `.env.local` en `.env.test` schrijven op basis van die database |
-| `pnpm env:test` | `.env.local` laten wijzen naar de testdatabase van de app (geen Docker nodig) |
+| `pnpm env:test` | `.env.local` laten wijzen naar de testdatabase van de app (geen Docker nodig), met de testlogin erbij |
+| `pnpm testlogin` | het wachtwoord van de testgebruiker ophalen uit de beheer-repo (elke nacht nieuw) en in `.env.development.local` zetten; de preview doet dit bij elke start |
 | `pnpm db:reset` | lokale database opnieuw opbouwen uit alle migraties |
 | `pnpm db:types` | databasetypes genereren na een migratie |
 | `pnpm test:rls` | beveiligingstests (database moet draaien) |
@@ -102,6 +103,14 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   dev-server in een terminal op, en geef nooit een `localhost`-adres als resultaat:
   `pnpm dev` weigert om die reden, het is geen storing. Andere assistenten volgen
   `docs/routes/lokaal-kijken.md`.
+- **Lokaal log je in als testgebruiker** (`testgebruiker@stagetwo.nl`, de knop op het
+  inlogscherm), niet via Cloudflare. Heeft de app die knop nog niet, vul dan in het gewone
+  formulier het adres en wachtwoord in uit `.env.development.local`
+  (`VITE_TESTLOGIN_EMAIL` en `VITE_TESTLOGIN_WACHTWOORD`). De testdatabase is een kopie van
+  echte gegevens: dat wachtwoord komt nooit in git, een PR-tekst of het gesprek. Ziet de
+  testgebruiker niets, dan heeft hij nog geen rol in de app; zeg dat, in plaats van om het
+  inloggen heen te werken.
+- **Bij een fout uit productie kijk je eerst in Sentry**, via de koppeling in claude.ai.
 - **Geen `any`, geen `@ts-ignore`, geen `as unknown as`, geen non-null `!`.** Los de
   echte typefout op. Een groene build met verstopte fouten is erger dan een rode.
 - **Databasetypes komen uit `pnpm db:types`**, nooit met de hand verzonnen. Klaagt
@@ -125,6 +134,13 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   controleert hem met `welkApparaat(request, ["<naam>"])` uit `_shared/apparaat.ts`, altijd met de namen van de apparaten die déze functie mogen gebruiken, en staat in
   `supabase/config.toml` op `verify_jwt = false`. Zet de sleutel zelf nooit in git of een
   chat; de gebruiker zet hem op het apparaat.
+- **Mail uit een Edge Function gaat altijd via `richtMail`** uit
+  `supabase/functions/_shared/mail.ts`. Buiten productie gaat hij dan alleen naar het
+  testadres (`testmail` in `stack.config.json`), of nergens heen. Verstuur nooit mail om
+  die functie heen.
+- **Een functie proberen vóór de merge** kan met Functies uitrollen vanaf je tak
+  (`-f tak=<tak>`): alleen naar de testdatabase, nooit naar productie. Zeg de gebruiker dat
+  alle previews die proefversie dan ook zien (zie `docs/routes/verder-werken.md`).
 - **Een sleutel van een ander systeem** (Stripe, Moneybird, een AI-dienst) in een functie
   zetten is een architectuurwijziging: dat doet de owner, niet de bouwer. Schrijf de functie
   zo dat hij een duidelijke fout geeft als de sleutel ontbreekt (zie

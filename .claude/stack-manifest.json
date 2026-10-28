@@ -33,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 33,
+  "stackVersion": 34,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -70,8 +70,10 @@
       "scripts/dev.mjs",
       "scripts/preview.mjs",
       "scripts/apparaat-nieuw.mjs",
+      "scripts/testlogin.mjs",
       "supabase/functions/_shared/apparaat.ts",
       "supabase/functions/_shared/apparaat-kern.ts",
+      "supabase/functions/_shared/mail.ts",
       "docs/WERKWIJZE.md",
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",
@@ -86,6 +88,8 @@
       "tests/unit/guard-cloudflare.test.ts",
       "tests/unit/guard-secrets.test.ts",
       "tests/unit/guard-template.test.ts",
+      "tests/unit/mail.test.ts",
+      "tests/unit/testlogin.test.ts",
       "tests/unit/uitrollen-workflow.test.ts"
     ],
     "sleutelsSamenvoegen": {
