@@ -35,6 +35,11 @@ if (a === "api" && /^repos\\/[^/]+\\/[^/?]+$/.test(b)) {
   if (stand.repos.includes(naam)) { process.stdout.write(b.slice(6)); process.exit(0); }
   process.stderr.write("gh: Not Found (HTTP 404)\\n"); process.exit(1);
 }
+if (a === "api" && b.endsWith("/contents/toegang.json")) {
+  const naam = b.split("/")[2];
+  if (stand.toegang && stand.toegang[naam]) { process.stdout.write(JSON.stringify(stand.toegang[naam])); process.exit(0); }
+  process.stderr.write("gh: Not Found (HTTP 404)\\n"); process.exit(1);
+}
 if (a === "repo" && b === "list") {
   process.stdout.write(JSON.stringify(stand.repos.map((name) => ({ name })))); process.exit(0);
 }
@@ -152,10 +157,13 @@ describe("pnpm testlogin", () => {
     expect(inhoud).toContain("VITE_INLOGDIENST=wachtwoord\n");
     // De beheer-repo met de vaste naam, het artifact van de app, de nieuwste run (2).
     expect(r.aanroepen[0]).toEqual([
-      "api",
-      "repos/klant-org/stagetwo-beheer-tier2",
-      "--jq",
-      ".full_name",
+      "repo",
+      "list",
+      "klant-org",
+      "--limit",
+      "1000",
+      "--json",
+      "name",
     ]);
     expect(r.aanroepen[1]?.[1]).toBe(
       "repos/klant-org/stagetwo-beheer-tier2/actions/artifacts?name=testlogin-portaal&per_page=30",
@@ -229,7 +237,21 @@ describe("pnpm testlogin", () => {
     );
   });
 
-  it("twee kandidaten: stopt en vraagt om STAGETWO_BEHEER_REPO", () => {
+  it("twee kandidaten: die waarin de app in toegang.json staat", () => {
+    const r = draai({
+      repos: ["stagetwo-beheer-tier2", "prive-beheer-tier2"],
+      toegang: {
+        "prive-beheer-tier2": { apps: { portaal: [] } },
+        "stagetwo-beheer-tier2": { apps: {} },
+      },
+    });
+    expect(r.code, r.uit).toBe(0);
+    expect(
+      r.aanroepen.some((a) => a[1]?.startsWith("repos/klant-org/prive-beheer-tier2/actions")),
+    ).toBe(true);
+  });
+
+  it("twee kandidaten zonder de app: stopt en vraagt om STAGETWO_BEHEER_REPO", () => {
     const r = draai({ repos: ["a-beheer-tier2", "b-beheer-tier2"] });
     expect(r.code).toBe(1);
     expect(r.uit).toContain("STAGETWO_BEHEER_REPO");
