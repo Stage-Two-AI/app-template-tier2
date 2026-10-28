@@ -113,7 +113,34 @@ Lukt het niet, dan zegt het script waarom. De gewone oorzaken:
 | geen beheer-repo gevonden | je hebt geen toegang tot de beheer-repo; vraag de owner van je organisatie. Heet hij anders, zet dan `STAGETWO_BEHEER_REPO=<naam>` |
 | geen geldige `testlogin-<app>` | Testdatabase verversen heeft nog niet gedraaid voor deze app; start die workflow in de beheer-repo, of vraag Stage Two |
 | inloggen als testgebruiker lukt niet | het wachtwoord is die nacht vernieuwd; draai `pnpm testlogin` opnieuw |
-| je ziet geen gegevens | de testgebruiker heeft in deze app nog geen rol; geef hem er één keer een, net als een nieuwe collega |
+| je ziet geen gegevens | de app heeft rollen en de testgebruiker nog geen; zie hieronder, `supabase/testrol.sql` |
+
+### De rol van de testgebruiker: `supabase/testrol.sql`
+
+Werkt de app met rollen (beheerder, medewerker, klant), dan ziet de testgebruiker pas iets
+als hij een rol heeft. Die rol komt uit één bestand in deze repo, `supabase/testrol.sql`. Het
+geeft `testgebruiker@stagetwo.nl` dezelfde rol als de bouwer van de app, en verder niets.
+Een app zonder rollen heeft dit bestand niet nodig; de template levert het ook niet mee.
+
+Een voorbeeld, voor een app die rollen bijhoudt in een tabel `gebruikersrollen`:
+
+```sql
+-- De testgebruiker krijgt dezelfde rol als de bouwer van de app (hier: beheerder).
+insert into public.gebruikersrollen (user_id, rol)
+select id, 'beheerder' from auth.users where email = 'testgebruiker@stagetwo.nl'
+on conflict (user_id) do nothing;
+```
+
+Testdatabase verversen in de beheer-repo voert het bestand elke nacht uit, op de
+testdatabase, meteen nadat de testgebruiker is aangemaakt of vernieuwd. Het neemt de versie
+van `main`, dus het werkt vanaf de eerste nacht na de merge (of eerder, als je die workflow
+in de beheer-repo met de hand start). Schrijf het daarom zo dat het vaker mag draaien
+(`on conflict do nothing`). Ontbreekt het bestand, dan slaat het verversen het over; zit er
+een fout in, dan staat dat in het logboek van die run.
+
+Claude schrijft dit bestand één keer, met de rol van de bouwer: het zoekt in
+`supabase/migrations/` hoe de app rollen bijhoudt en welke rol de bouwer heeft, en vraagt
+alleen bij twijfel. Daarna hoeft niemand de testgebruiker nog een rol te geven.
 
 ### Echte gegevens op je computer
 
@@ -155,8 +182,9 @@ een assistent werk "oplevert".
 - Controleer je eigen werk ingelogd als testgebruiker: de knop op het inlogscherm, of in een
   app zonder die knop het gewone formulier, met het adres en wachtwoord uit
   `.env.development.local`. Lees die waarden zelf uit het bestand en typ ze in het
-  formulier; zet ze niet in het gesprek. Zie je
-  niets, dan heeft de testgebruiker waarschijnlijk nog geen rol: zeg dat de gebruiker en
-  vraag of jij of hij die rol geeft. Verzin geen omweg langs het inloggen.
+  formulier; zet ze niet in het gesprek. Zie je niets en heeft de app rollen, kijk dan
+  eerst naar `supabase/testrol.sql` (zie hierboven). Ontbreekt het, schrijf het dan in je
+  pull request met de rol van de bouwer, en zeg de gebruiker dat de testgebruiker die rol
+  krijgt na de merge en de eerstvolgende verversing. Verzin geen omweg langs het inloggen.
 - Zet het wachtwoord van de testgebruiker nooit in een bestand dat in git komt, in een
   PR-tekst of in het gesprek, en verplaats het niet naar `.env.local`.

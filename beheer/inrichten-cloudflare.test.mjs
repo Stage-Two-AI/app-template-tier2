@@ -6,7 +6,6 @@ import {
   ruimOp,
   tweedeDoorgang,
   uitvoerRegel,
-  vangnet,
   werkToegangBij,
 } from "./inrichten-cloudflare.mjs";
 import {
@@ -16,7 +15,6 @@ import {
   wachtOpDiscovery,
 } from "./lib/cloudflare.mjs";
 import { organisaties, supabaseBeheer, uriAllowList } from "./lib/supabase.mjs";
-import { magAanmelden } from "./lib/toegang.mjs";
 import { vraag } from "./lib/vraag.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
@@ -77,7 +75,6 @@ test("argumenten: app verplicht, modi sluiten elkaar uit", () => {
     voorvoegsel: "cf-proef-",
     droogloop: true,
     opruimen: false,
-    vangnet: false,
     tweedeDoorgang: false,
     toegang: false,
     testdatabase: false,
@@ -89,7 +86,7 @@ test("argumenten: app verplicht, modi sluiten elkaar uit", () => {
   assert.throws(() => leesArgumenten([...PROEF, "--droogloop"]), /--app/);
   assert.throws(() => leesArgumenten([...PROEF, "--app", "Cf_Proef"]), /kleine letters/);
   assert.throws(
-    () => leesArgumenten([...PROEF, "--app", "a", "--opruimen", "--vangnet"]),
+    () => leesArgumenten([...PROEF, "--app", "a", "--opruimen", "--toegang"]),
     /één van/,
   );
   assert.throws(() => leesArgumenten([...PROEF, "--app", "a", "--wat"]), /onbekende optie/);
@@ -749,90 +746,16 @@ test("tijdelijke stand: tweede doorgang zet Access op een bestaande Worker zonde
   );
 });
 
-// ---------------------------------------------------------------- vangnet
+// ---------------------------------------------------------------- aanmeld-hook
 
-test("--vangnet: e-mail weer aan en een hook die jan@elders.nl weigert en piet@klant.nl toelaat", async () => {
-  const w = nepWolk();
-  const toegang = {
-    groepen: { klant: { domeinen: ["klant.nl"] } },
-    apps: { "cf-proef": ["klant"] },
-  };
-  const d = opzet(w, { toegang });
-  await richtIn(ARG, d);
-  w.aanroepen.length = 0;
-  const r = await vangnet(ARG, d);
-  const ref = w.staat.projecten[0].ref;
-  assert.equal(w.staat.sql.length, 1);
-  assert.match(w.staat.sql[0], /domein = any \(array\['klant\.nl'\]::text\[\]\)/);
-  assert.doesNotMatch(w.staat.sql[0], /elders/);
-  const patch = w.aanroepen.find((a) => a.methode === "PATCH").body;
-  assert.equal(patch.external_email_enabled, true);
-  assert.equal(patch.hook_before_user_created_enabled, true);
-  assert.equal(
-    patch.hook_before_user_created_uri,
-    "pg-functions://postgres/public/cf_proef_voor_aanmelden",
-  );
-  assert.equal("disable_signup" in patch, false);
-  assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "mailcode");
-  assert.equal(w.staat.ghVariabelen.repo.PREVIEW_VITE_INLOGDIENST, "mailcode");
-  assert.equal(magAanmelden("jan@elders.nl", toegang, "cf-proef"), "nee", "JS-spiegel van de hook");
-  assert.equal(magAanmelden("piet@klant.nl", toegang, "cf-proef"), "ja", "JS-spiegel van de hook");
-  assert.equal(r.supabase.ref, ref);
-});
-
-test("--vangnet met rp-: de hookfunctie heet rp_voor_aanmelden", async () => {
-  const w = nepWolk();
-  const arg = { ...ARG, voorvoegsel: "rp-", repo: "Richplant-BV/richplant-start" };
-  const d = opzet(w);
-  await richtIn(arg, d);
-  const r = await vangnet(arg, d);
-  assert.equal(r.hook, "rp_voor_aanmelden");
-  assert.match(w.staat.sql[0], /function public\.rp_voor_aanmelden\(event jsonb\)/);
-});
-
-test("vangnet aan: een wijziging in toegang.json werkt ook de aanmeld-hook bij", async () => {
-  const w = nepWolk();
-  const d = opzet(w, {
-    toegang: { groepen: { klant: { domeinen: ["klant.nl"] } }, apps: { "cf-proef": ["klant"] } },
-  });
-  await richtIn(ARG, d);
-  await vangnet(ARG, d);
-  assert.equal(w.staat.sql.length, 1);
-  d.toegang = {
-    groepen: { klant: { domeinen: ["klant.nl", "klant.be"] } },
-    apps: { "cf-proef": ["klant"] },
-  };
-  w.aanroepen.length = 0;
-  const r = await werkToegangBij(ARG, d);
-  assert.equal(w.staat.sql.length, 2, "de hook is opnieuw geschreven");
-  assert.match(w.staat.sql[1], /create or replace function public\.cf_proef_voor_aanmelden/);
-  assert.match(w.staat.sql[1], /array\['klant\.nl', 'klant\.be'\]/);
-  assert.ok(
-    r.acties.some((a) => /aanmeld-hook/.test(a)),
-    JSON.stringify(r.acties),
-  );
-});
-
-test("vangnet uit: toegang bijwerken schrijft geen hook", async () => {
+test("zonder testdatabase: toegang bijwerken schrijft geen aanmeld-hook en laat e-mail uit", async () => {
   const w = nepWolk();
   const d = opzet(w);
   await richtIn(ARG, d);
   await werkToegangBij(ARG, d);
   assert.deepEqual(w.staat.sql, []);
-});
-
-test("vangnet aan, droogloop van toegang bijwerken: plant de hook maar schrijft niets", async () => {
-  const w = nepWolk();
-  const d = opzet(w);
-  await richtIn(ARG, d);
-  await vangnet(ARG, d);
-  w.aanroepen.length = 0;
-  const r = await werkToegangBij({ ...ARG, droogloop: true }, d);
-  assert.deepEqual(w.schrijfacties(), []);
-  assert.ok(
-    r.acties.some((a) => /aanmeld-hook/.test(a)),
-    JSON.stringify(r.acties),
-  );
+  const ref = w.staat.projecten[0].ref;
+  assert.equal(w.staat.auth[ref].external_email_enabled, false);
 });
 
 // ---------------------------------------------------------------- opruimen
@@ -1085,7 +1008,6 @@ test("Edge Functions en hun instellingen worden nergens aangeraakt", async () =>
   const w = nepWolk({ workerBestaat: true });
   const d = opzet(w);
   await richtIn(ARG, d);
-  await vangnet(ARG, d);
   await werkToegangBij(ARG, d);
   await ruimOp(ARG, d);
   assert.equal(
@@ -1595,7 +1517,7 @@ test("toegang bijwerken: de aanmeld-hook van de testdatabase volgt het bestand, 
   assert.deepEqual(
     w.staat.sqlOp.map((x) => x.ref),
     [test],
-    "alleen de testdatabase krijgt een hook; het vangnet van productie staat uit",
+    "alleen de testdatabase krijgt een hook; productie heeft er geen",
   );
   assert.match(w.staat.sqlOp[0].query, /'tweede@elders\.nl'/);
   const iSql = w.aanroepen.findIndex((a) => a.pad?.endsWith(`${test}/database/query`));

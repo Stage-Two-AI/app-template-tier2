@@ -8,10 +8,10 @@ Wat erin zit:
 
 | Bestand | Wat het doet |
 |---|---|
-| `inrichten-cloudflare.mjs` | het script: inrichten, tweede doorgang, vangnet, toegang bijwerken, opruimen |
+| `inrichten-cloudflare.mjs` | het script: inrichten, tweede doorgang, toegang bijwerken, opruimen |
 | `lib/cloudflare.mjs` | Access-policies, Access-apps, workers.dev-subdomein, placeholder-Worker |
 | `lib/supabase.mjs` | project, sleutels, auth-config, custom provider `custom:cloudflare` |
-| `lib/toegang.mjs` | `toegang.json` controleren, vertalen naar policies, intrekken, vangnet-SQL |
+| `lib/toegang.mjs` | `toegang.json` controleren, vertalen naar policies, intrekken, de aanmeld-hook van de testdatabase |
 | `toegang.json` | wie bij welke app mag |
 | `package.json` | maakt van `beheer/` een zelfstandig pakket (zie "Los van de template") |
 | `*.test.mjs`, `nep-wolk.mjs` | tests tegen een nagebootste API (`pnpm beheer:test`) |
@@ -29,8 +29,8 @@ Wat al bestaat met het voorvoegsel wordt hergebruikt. Opruimen raakt alleen de e
 namen die het script voor de app en de groepen in `toegang.json` maakt; een andere naam
 met het voorvoegsel blijft staan, met een waarschuwing. Bestaat er iets met dezelfde
 naam zónder voorvoegsel, of staat er al een andere Access-app op de hostname, dan stopt
-het script voordat het iets wijzigt. De hookfunctie van het vangnet heet ook naar het
-voorvoegsel (`cf_proef_voor_aanmelden`, `rp_voor_aanmelden`).
+het script voordat het iets wijzigt. De aanmeld-hookfunctie van de testdatabase heet ook
+naar het voorvoegsel (`cf_proef_voor_aanmelden`, `rp_voor_aanmelden`).
 
 ## Voorwaarden (door Christijn)
 
@@ -159,22 +159,16 @@ ontbrekende Access op de Worker alsnog.
 Het resultaat staat in het logboek als één regel die begint met `INRICHTING`. Geheimen
 staan daar nooit leesbaar in.
 
-**Vangnet** (als de keten Cloudflare naar Supabase niet werkt): e-mail-inlog weer aan,
-met een hook die alleen de domeinen en adressen uit `toegang.json` toelaat, en
-`VITE_INLOGDIENST=mailcode`. Daarna een nieuwe uitrol vanaf `main`.
-
-```sh
-gh workflow run proef-inrichten.yml --ref main -f app=cf-proef -f droogloop=false -f vangnet=true
-```
+Inloggen in productie loopt altijd via Cloudflare; in productie staat inloggen met e-mail
+uit. Werkt de keten Cloudflare naar Supabase niet, dan herstellen we Cloudflare. Er is
+geen tweede deur.
 
 **Proef toegang bijwerken** (`proef-toegang.yml`) draait vanzelf als `toegang.json` op
 `main` verandert. Hij zet de policies gelijk aan het bestand, hangt ze aan de
 Access-apps en trekt de toegang in van wie er niet meer in staat: een ban en afmelden
-van alle sessies in Supabase. Staat het vangnet aan (de aanmeld-hook van Supabase wijst
-naar onze functie), dan schrijft hij ook de hook opnieuw, zodat die het nieuwe bestand
-volgt. In de testdatabase schrijft hij altijd de aanmeld-hook, en de testaccounts (met
-de testgebruiker) blijven daar ongemoeid; een eerder geband testaccount krijgt de ban
-opgeheven.
+van alle sessies in Supabase. In de testdatabase schrijft hij ook de aanmeld-hook
+opnieuw, zodat die het nieuwe bestand volgt, en de testaccounts (met de testgebruiker)
+blijven daar ongemoeid; een eerder geband testaccount krijgt de ban opgeheven.
 
 ## toegang.json
 

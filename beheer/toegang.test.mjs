@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import {
+  aanmeldHookSql,
   hookFunctie,
   koppelPolicies,
   magAanmelden,
@@ -13,7 +14,6 @@ import {
   testaccountsVan,
   trekIn,
   valideerToegang,
-  vangnetSql,
   verwijderOverbodig,
 } from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
@@ -375,9 +375,9 @@ test("intrekken: bij een groep met idp_groepen wordt een onbekend adres niet bli
   assert.deepEqual(r.onbekend, ["x@y.nl"]);
 });
 
-// ---------------------------------------------------------------- vangnet
+// ---------------------------------------------------------------- de beslissing en de aanmeld-hook
 
-test("vangnet: de beslissing laat piet@klant.nl toe en weigert jan@elders.nl en de uitgeslotene", () => {
+test("beslissing: laat piet@klant.nl toe en weigert jan@elders.nl en de uitgeslotene", () => {
   const t = { groepen: { klant: KLANT.groepen.klant }, apps: { a: ["klant"] } };
   assert.equal(magAanmelden("piet@klant.nl", t, "a"), "ja");
   assert.equal(magAanmelden("PIET@klant.nl", t, "a"), "ja");
@@ -387,8 +387,8 @@ test("vangnet: de beslissing laat piet@klant.nl toe en weigert jan@elders.nl en 
   assert.equal(magAanmelden("a@b@klant.nl", t, "a"), "nee");
 });
 
-test("vangnet: de SQL-functie laat alleen de gekozen domeinen en adressen door", () => {
-  const sql = vangnetSql(KLANT, "cf-proef", "cf_proef_voor_aanmelden");
+test("aanmeld-hook: via Cloudflare laat de SQL-functie alleen de gekozen domeinen en adressen door", () => {
+  const sql = aanmeldHookSql(KLANT, "cf-proef", "cf_proef_voor_aanmelden");
   assert.match(sql, /create or replace function public\.cf_proef_voor_aanmelden\(event jsonb\)/);
   assert.match(sql, /domein = any \(array\['klant\.nl'\]::text\[\]\)/);
   assert.match(sql, /adres = any \(array\['info@stagetwo\.nl'\]::text\[\]\)/);
@@ -405,9 +405,9 @@ test("vangnet: de SQL-functie laat alleen de gekozen domeinen en adressen door",
   assert.doesNotMatch(sql, /elders/);
 });
 
-test("vangnet: tekst in SQL wordt veilig geciteerd en een rare functienaam geweigerd", () => {
+test("aanmeld-hook: tekst in SQL wordt veilig geciteerd en een rare functienaam geweigerd", () => {
   assert.equal(sqlTekst("o'brien"), "'o''brien'");
-  assert.throws(() => vangnetSql(KLANT, "cf-proef", "x; drop table y"), /functienaam/);
+  assert.throws(() => aanmeldHookSql(KLANT, "cf-proef", "x; drop table y"), /functienaam/);
 });
 
 // ---------------------------------------------------------------- testaccounts (testdatabase)
@@ -497,7 +497,7 @@ test("intrekken in productie (zonder testaccounts): de testgebruiker wordt gewoo
 });
 
 test("aanmeld-hook van de testdatabase: e-mail alleen voor testaccounts, Cloudflare voor de groepen, de rest nooit", () => {
-  const sql = vangnetSql(MET_TEST, "cf-proef", "cf_proef_voor_aanmelden", { testdatabase: true });
+  const sql = aanmeldHookSql(MET_TEST, "cf-proef", "cf_proef_voor_aanmelden");
   // De provider staat in user.app_metadata.provider van de invoer van de hook.
   assert.match(
     sql,
@@ -519,14 +519,4 @@ test("aanmeld-hook van de testdatabase: e-mail alleen voor testaccounts, Cloudfl
   assert.match(sql, /not \(adres = any \(array\['jan@klant\.nl'\]::text\[\]\)\)/);
   assert.match(sql, /to supabase_auth_admin/);
   assert.match(sql, /from authenticated, anon, public/);
-});
-
-test("aanmeld-hook van productie: ongewijzigd, zonder provider en zonder testaccounts", () => {
-  const sql = vangnetSql(MET_TEST, "cf-proef", "cf_proef_voor_aanmelden");
-  assert.doesNotMatch(sql, /aanbieder|app_metadata|scherm|testgebruiker/);
-  assert.equal(
-    sql,
-    vangnetSql(KLANT, "cf-proef", "cf_proef_voor_aanmelden"),
-    "testaccounts veranderen de hook van productie niet",
-  );
 });

@@ -307,10 +307,13 @@ rondklikken met de gegevens uit de testdatabase, en zelf zien of zijn werk klopt
   versie 34 heeft die knop nog niet (het inlogscherm is van het project); daar staat lokaal
   het gewone formulier met e-mail en wachtwoord, en vul je het adres en wachtwoord uit
   `.env.development.local` in.
-- **Een rol.** De testgebruiker is voor de app een nieuwe collega: geef hem één keer een rol
-  in de app (in de testdatabase), net als iemand die net begint. Die rol blijft daarna staan,
-  ook als de gegevens 's nachts opnieuw uit productie komen. Een app die gegevens per persoon
-  afschermt, laat de testgebruiker alleen zijn eigen testgegevens zien, en dat is goed.
+- **Een rol.** Werkt de app met rollen, dan krijgt de testgebruiker dezelfde rol als de
+  bouwer, uit het bestand `supabase/testrol.sql` in deze repo. Testdatabase verversen voert
+  het elke nacht uit, meteen na het aanmaken of vernieuwen van de testgebruiker. Claude
+  schrijft het één keer, met de rol van de bouwer die het in de migraties vindt; een app
+  zonder rollen heeft het niet nodig. Uitleg en een voorbeeld: `docs/routes/lokaal-kijken.md`.
+  Een app die gegevens per persoon afschermt, laat de testgebruiker alleen zijn eigen
+  testgegevens zien, en dat is goed.
 - **Andere testaccounts** (bijvoorbeeld voor een tweede rol) zet je in `toegang.json` in de
   beheer-repo, onder `testaccounts`. Die gelden alleen in de testdatabase en nooit in
   productie, en Toegang bijwerken laat ze daar staan.
