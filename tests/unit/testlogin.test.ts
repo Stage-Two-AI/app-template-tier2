@@ -332,19 +332,11 @@ describe("pnpm env:test", () => {
 });
 
 describe("de build", () => {
-  it("laat de testlogin nooit in de gebouwde bestanden, ook niet als hij in de omgeving staat", () => {
+  it("pnpm build laat de testlogin nooit in de gebouwde bestanden, ook niet als hij in de omgeving staat", () => {
     const uit = join(map, "dist");
     const r = spawnSync(
       process.execPath,
-      [
-        resolve("node_modules/vite/bin/vite.js"),
-        "build",
-        "--outDir",
-        uit,
-        "--emptyOutDir",
-        "--logLevel",
-        "error",
-      ],
+      [resolve("scripts/bouwen.mjs"), "--outDir", uit, "--emptyOutDir", "--logLevel", "error"],
       {
         cwd: resolve("."),
         encoding: "utf8",
