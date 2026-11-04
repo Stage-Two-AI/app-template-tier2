@@ -78,6 +78,24 @@ describe("types uit het CI-log halen (versie 21, zonder Docker)", () => {
     expect(roep("typesUitLog", log)).toBe("// kop\nexport type Database = {\n  public: {};\n};\n");
   });
 
+  it("laat een regel van pnpm weg die midden in het blok belandt", () => {
+    const vervuild = log.replace(
+      `${T}   public: {};`,
+      `${T}   public: {};\nDatabase en end-to-end\tDatabasetypes lopen gelijk\t${T} [ELIFECYCLE] Command failed with exit code 1.`,
+    );
+    expect(roep("typesUitLog", vervuild)).toBe(
+      "// kop\nexport type Database = {\n  public: {};\n};\n",
+    );
+  });
+
+  it("keurt types zonder Database of met uitvoer van pnpm af, en echte types goed", () => {
+    expect(roep("controleerTypes", "export type Database = {};\n")).toBe("null");
+    expect(roep("controleerTypes", "// alleen een kop\n")).toContain("export type Database");
+    expect(
+      roep("controleerTypes", "export type Database = {};\n ELIFECYCLE  Command failed.\n"),
+    ).toContain("uitvoer van pnpm");
+  });
+
   it("geeft niets als het einde ontbreekt (een afgebroken log)", () => {
     const afgebroken = log.split("\n").slice(0, -1).join("\n");
     expect(roep("typesUitLog", afgebroken)).toBe("null");

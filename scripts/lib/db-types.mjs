@@ -89,6 +89,26 @@ export function stripHeader(text) {
 }
 
 const BEGIN = "----- BEGIN GEGENEREERDE TYPES -----";
+
+/**
+ * Een regel van pnpm zelf, geen TypeScript. In het CI-log staan stdout en stderr door elkaar, en
+ * de afsluitende regel "[ELIFECYCLE] Command failed" van pnpm belandde soms midden in het blok
+ * met types (melding 29-10-2026). Zo'n regel komt nooit in gegenereerde types voor.
+ */
+function isPnpmRegel(regel) {
+  return /^\s*(\[ELIFECYCLE\]|ELIFECYCLE\b|\[?ERR_PNPM_|WARN\s+\S)/.test(regel);
+}
+
+/**
+ * Zijn dit echte databasetypes? Geeft de reden als het niet zo is, anders null. Zo schrijft
+ * `pnpm db:types:uit-ci` nooit een half of vervuild bestand weg.
+ */
+export function controleerTypes(tekst) {
+  if (!/^export type Database\b/m.test(tekst)) return "er staat geen `export type Database` in";
+  const vreemd = tekst.split("\n").find((r) => isPnpmRegel(r));
+  if (vreemd) return `er staat uitvoer van pnpm in: ${vreemd.trim()}`;
+  return null;
+}
 const EINDE = "----- EINDE GEGENEREERDE TYPES -----";
 
 /**
@@ -97,7 +117,10 @@ const EINDE = "----- EINDE GEGENEREERDE TYPES -----";
  * een tijdstempel; die gaan eraf. Geeft null als het blok er niet (helemaal) in staat.
  */
 export function typesUitLog(log) {
-  const regels = log.split("\n").map((r) => r.replace(/^[^\t]*\t[^\t]*\t\S+Z ?/, ""));
+  const regels = log
+    .split("\n")
+    .map((r) => r.replace(/^[^\t]*\t[^\t]*\t\S+Z ?/, ""))
+    .filter((r) => !isPnpmRegel(r));
   const begin = regels.findIndex((r) => r.trimEnd() === BEGIN);
   if (begin < 0) return null;
   const einde = regels.findIndex((r, i) => i > begin && r.trimEnd() === EINDE);

@@ -304,6 +304,7 @@ describe("kwaliteitspoort", () => {
 
   it("draait de snelle job altijd, de zware alleen buiten een concept-PR", () => {
     expect(job("checks", ci).if).toBeUndefined();
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: een uitdrukking van GitHub Actions, geen JavaScript-template
     expect(job("database", ci).if).toBe("${{ !github.event.pull_request.draft }}");
   });
 

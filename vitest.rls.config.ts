@@ -1,3 +1,4 @@
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -6,6 +7,12 @@ import { defineConfig } from "vitest/config";
  * omgevingsvariabelen weg met `pnpm env:local`.
  */
 export default defineConfig({
+  // Dezelfde alias als de unittests, zodat een RLS-test gewone code uit de app kan importeren.
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   envPrefix: ["VITE_", "SUPABASE_"],
   test: {
     environment: "node",

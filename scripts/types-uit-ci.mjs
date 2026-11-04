@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { TARGET, typesUitLog } from "./lib/db-types.mjs";
+import { controleerTypes, TARGET, typesUitLog } from "./lib/db-types.mjs";
 
 /**
  * De databasetypes zonder lokale database (dus zonder Docker): de Kwaliteitspoort van de
@@ -51,6 +51,14 @@ if (!types) {
   console.error(`✗ In run ${runId} staan geen gegenereerde types.`);
   console.error("  Dat betekent meestal dat de types al gelijk lopen, of dat de check");
   console.error("  Databasetypes niet heeft gedraaid (een concept-PR: zet hem op klaar).");
+  process.exit(1);
+}
+const fout = controleerTypes(types);
+if (fout) {
+  console.error(`✗ De types uit run ${runId} zien er niet goed uit: ${fout}.`);
+  console.error(
+    `  ${TARGET} is niet aangepast. Draai de Kwaliteitspoort opnieuw, of meld het bij Stage Two.`,
+  );
   process.exit(1);
 }
 writeFileSync(TARGET, types);

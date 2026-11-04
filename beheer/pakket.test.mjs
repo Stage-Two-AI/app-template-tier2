@@ -35,14 +35,21 @@ test("pakket: eigen package.json met type module, node --test en supabase-js", (
   assert.ok(pakket.dependencies?.["@supabase/supabase-js"], "supabase-js staat erin");
 });
 
-test("pakket: supabase-js in dezelfde versie als de template (alleen in de template)", (t) => {
+/**
+ * Dezelfde hoofdversie, niet exact dezelfde: Dependabot werkt alleen de package.json in de
+ * hoofdmap bij (dependabot.yml gaat mee naar elke app, en daar bestaat beheer/ niet), dus een
+ * exacte vergelijking maakte elke kleine update rood (melding 28-10-2026). beheer/ verhuist op
+ * termijn helemaal naar beheer-template.
+ */
+test("pakket: supabase-js in dezelfde hoofdversie als de template (alleen in de template)", (t) => {
   const root = resolve(BEHEER, "../package.json");
   if (!existsSync(root)) return t.skip("geen template eromheen (kopie in een beheer-repo)");
   const template = JSON.parse(readFileSync(root, "utf8"));
   if (!template.dependencies?.["@supabase/supabase-js"]) return t.skip("geen template");
+  const hoofd = (v) => v.replace(/^[^\d]*/, "").split(".")[0];
   assert.equal(
-    pakket.dependencies["@supabase/supabase-js"],
-    template.dependencies["@supabase/supabase-js"],
+    hoofd(pakket.dependencies["@supabase/supabase-js"]),
+    hoofd(template.dependencies["@supabase/supabase-js"]),
   );
 });
 

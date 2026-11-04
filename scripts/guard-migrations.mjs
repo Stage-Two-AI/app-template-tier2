@@ -7,6 +7,7 @@ import {
   pullRequestBody,
   skip,
 } from "./lib/changed-files.mjs";
+import { destructieveRegels } from "./lib/destructief.mjs";
 import { bezitDatabase, databaseModus } from "./lib/stack-config.mjs";
 
 /**
@@ -58,28 +59,7 @@ if (!bezitDatabase()) {
   skip(`deze app bezit geen database (database: ${modus === "gedeeld" ? '"gedeeld"' : "false"})`);
 }
 
-const DESTRUCTIVE = [
-  { name: "drop table", re: /\bdrop\s+table\b/i },
-  { name: "drop column", re: /\bdrop\s+column\b/i },
-  { name: "drop schema", re: /\bdrop\s+schema\b/i },
-  { name: "drop database", re: /\bdrop\s+database\b/i },
-  { name: "truncate", re: /\btruncate\b/i },
-  {
-    name: "delete zonder where",
-    re: /\bdelete\s+from\s+[^;]*?;/i,
-    guard: (m) => !/\bwhere\b/i.test(m),
-  },
-  { name: "drop policy", re: /\bdrop\s+policy\b/i },
-  { name: "row level security uitzetten", re: /\bdisable\s+row\s+level\s+security\b/i },
-  { name: "type van een kolom wijzigen", re: /\balter\s+column\b[^;]*\btype\b/i },
-];
-
 const CONFIRMATION = /^\s*Bevestigd:\s*destructieve migratie\s*$/im;
-
-/** Haalt SQL-commentaar weg, zodat een voorbeeld in commentaar geen alarm geeft. */
-function stripComments(sql) {
-  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
-}
 
 const files = changedFiles();
 if (files === null) skip("geen basis om mee te vergelijken");
@@ -91,16 +71,11 @@ const findings = [];
 for (const file of migrations) {
   let sql;
   try {
-    sql = stripComments(readFileSync(file, "utf8"));
+    sql = readFileSync(file, "utf8");
   } catch {
     continue; // bestand is hernoemd of verwijderd
   }
-  for (const rule of DESTRUCTIVE) {
-    const match = rule.re.exec(sql);
-    if (!match) continue;
-    if (rule.guard && !rule.guard(match[0])) continue;
-    findings.push(`${file}: ${rule.name}`);
-  }
+  for (const naam of destructieveRegels(sql)) findings.push(`${file}: ${naam}`);
 }
 
 if (findings.length === 0) pass(`${migrations.length} migratie(s) gewijzigd, niets destructiefs`);
