@@ -38,8 +38,9 @@ misgaan:
   `docs/routes/databasewijziging.md`.
 
 Raakt je wijziging de database (een tabel, kolom, index of policy)? Lees dan nu
-`docs/routes/databasewijziging.md` in zijn geheel en volg die stappen erbij; zo'n pull
-request open je niet als concept, zodat de databasetests meteen meedraaien. In Claude
+`docs/routes/databasewijziging.md` in zijn geheel en volg die stappen erbij. Ook zo'n pull
+request begint als concept: bij een wijziging in `supabase/` draaien de databasetests (zonder
+browser) dan al bij elke push. In Claude
 Code herinnert de plugin je eraan zodra je in `supabase/migrations/` schrijft.
 
 **Kijk eerst lokaal, ingelogd als testgebruiker, met echte gegevens.** In de Claude-app start
@@ -108,11 +109,13 @@ git push -u origin <branch>
 gh pr create --draft
 ```
 
-Altijd als concept (draft), behalve een pull request met een migratie: die open je
-meteen gewoon (zie `docs/routes/databasewijziging.md`). Zolang de PR een concept is, draait bij elke push alleen de
-snelle check `Code`, en de workflow `Preview uitrollen` zet de nieuwe versie online. De zware
-check `Database en end-to-end` wacht tot stap 7. Zo kost een tussenstap minuten in plaats van
-een volle poort, en ziet de gebruiker geen rode tussenstanden.
+Altijd als concept (draft), ook een pull request met een migratie. Zolang de PR een concept
+is, draait bij elke push de snelle check `Code`; is die groen, dan zet de workflow
+`Preview uitrollen` de nieuwe versie online. Is `supabase/` gewijzigd, dan draait ook
+`Database en end-to-end`, maar zonder browser (Supabase, typecontrole, RLS-tests); anders
+slaat die check over. De browsertest wacht tot stap 7. Zo kost een tussenstap minuten in
+plaats van een volle poort, en ziet de gebruiker geen rode tussenstanden. Is `Code` rood, dan
+komt er geen nieuwe preview: repareer eerst.
 
 Vul het PR-formulier volledig in. De regel `Cloudflare-preview:` is niet optioneel: die
 link is de enige geldige manier om werk te laten zien. Wacht tot `Preview uitrollen` de links
@@ -224,7 +227,7 @@ in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat 
 | `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stagetwo-tier2:updaten` |
 | `guard:cloudflare` | `wrangler.jsonc` vraagt om opslag van Cloudflare (D1, R2, KV, Durable Objects), Worker-code of een sleutel die niet op de lijst staat. Gegevens horen in Supabase: haal de sleutel weg |
 | `db:types:check` | de gegenereerde types lopen achter. `pnpm db:types:uit-ci` haalt ze uit deze run; committen en pushen |
-| Database en end-to-end | migraties, RLS-tests of de browsertest in een eigen Supabase in GitHub. Bij een concept-PR staat deze check op overgeslagen: dat is de bedoeling, hij draait bij `gh pr ready` |
+| Database en end-to-end | migraties, RLS-tests of de browsertest in een eigen Supabase in GitHub. Start pas als `Code` groen is. Bij een concept-PR zonder wijziging in `supabase/` staat hij op overgeslagen, en bij een concept mét zo'n wijziging draait hij zonder browser: dat is de bedoeling, alles draait bij `gh pr ready` |
 
 **Een regel in de PR-tekst toegevoegd** (`Geen tests nodig: ...`, `Bevestigd: ...`) terwijl
 de pull request al open staat? Een aangepaste PR-tekst start de controles niet vanzelf opnieuw,

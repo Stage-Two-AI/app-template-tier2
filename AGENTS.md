@@ -26,12 +26,13 @@ Een taak is klaar als: er een pull request open staat die geen concept (draft) m
 repareer je hem zelf en wacht je opnieuw; meld pas daarna "het is af", of meld wat er nog
 mist als het echt niet lukt.
 
-Het ritme (zie `docs/routes/verder-werken.md`): een PR begint als concept, waarop alleen de
-snelle checks draaien en de preview wordt bijgewerkt; de gebruiker kijkt mee op het vaste
-adres van de app (`actueel-...`). Is de gebruiker tevreden, dan zet je hem op klaar
-(`gh pr ready`), wacht je op alle checks (`gh pr checks --watch`) en repareer je wat rood is.
-Een PR met een migratie begint niet als concept. Docker is nergens voor nodig: de
-databasetests draaien in GitHub, en `pnpm db:types:uit-ci` haalt de types daar op.
+Het ritme (zie `docs/routes/verder-werken.md`): een PR begint als concept, ook een PR met een
+migratie. Dan draaien alleen de snelle checks (bij een wijziging in `supabase/` ook de
+databasetests, zonder browser), en komt de preview online zodra de check `Code` groen is; de
+gebruiker kijkt mee op het vaste adres van de app (`actueel-...`). Is de gebruiker tevreden,
+dan zet je hem op klaar (`gh pr ready`), wacht je op alle checks (`gh pr checks --watch`) en
+repareer je wat rood is. Docker is nergens voor nodig: de databasetests draaien in GitHub, en
+`pnpm db:types:uit-ci` haalt de types daar op.
 
 ## Stack
 

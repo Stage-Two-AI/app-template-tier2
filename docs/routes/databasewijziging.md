@@ -129,13 +129,15 @@ Een lokale database is niet nodig (en dus ook geen Docker). De Kwaliteitspoort s
 elke run een eigen, lege Supabase, draait daar al je migraties vanaf niets en in volgorde,
 en daarna de RLS-tests en de controle op de types. Dat is de echte test.
 
-Een pull request met een migratie open je daarom **niet** als concept, zodat die zware
-check meteen meedraait:
+Ook een pull request met een migratie begint als concept. Omdat `supabase/` gewijzigd is,
+draait de zware check dan al bij elke push, alleen zonder browser: Supabase, de migraties,
+de controle op de types en de RLS-tests. De browsertest volgt als de PR op klaar gaat
+(`gh pr ready`):
 
 ```bash
 pnpm check
 git push -u origin <branch>
-gh pr create
+gh pr create --draft
 gh pr checks --watch
 ```
 
