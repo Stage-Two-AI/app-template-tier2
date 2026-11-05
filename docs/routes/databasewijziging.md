@@ -118,6 +118,10 @@ pas lopen met de database.
 (Heeft deze computer Docker, dan kan het ook lokaal: `pnpm db:start`, `pnpm db:reset`,
 `pnpm env:local` en `pnpm db:types`. Voor bouwers is dat niet nodig.)
 
+Types ophalen uit de API van de testdatabase (`supabase gen types --project-id`) is geen
+alternatief: dat geeft een andere opmaak dan de CI, en dan blijft de check rood. Gebruik
+alleen als tussenstap, en draai daarna altijd `pnpm db:types:uit-ci`.
+
 Verzin nooit zelf een type voor een tabel. Als TypeScript klaagt dat een kolom niet
 bestaat, is het antwoord `pnpm db:types:uit-ci`, niet een `any`.
 

@@ -33,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 37,
+  "stackVersion": 38,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -53,6 +53,7 @@
       "scripts/lib/changed-files.mjs",
       "scripts/lib/stack-config.mjs",
       "scripts/lib/db-types.mjs",
+      "scripts/lib/destructief.mjs",
       "scripts/lib/cloudflare-config.mjs",
       "scripts/guard-tests.mjs",
       "scripts/guard-migrations.mjs",
