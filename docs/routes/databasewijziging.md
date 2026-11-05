@@ -94,8 +94,29 @@ functie in de app die de database beheert.
 
 ## Stap 3: Schrijf de RLS-test
 
-Voor elke nieuwe tabel, in `tests/rls/`. Het patroon staat in `tests/rls/items.test.ts`:
-log in als gebruiker A, probeer bij de gegevens van B te komen, verwacht leeg.
+Voor elke nieuwe tabel, in `tests/rls/`: log in als gebruiker A, probeer als gebruiker B
+bij die gegevens te komen, verwacht leeg. De hulp `controleerAfscherming` in
+`tests/rls/lib/afscherming.ts` doet dat in één aanroep (lezen, wijzigen, verwijderen, en een
+uitgelogde bezoeker); het voorbeeld staat in `tests/rls/items.test.ts`:
+
+```ts
+await controleerAfscherming({
+  tabel: "voorbeeld",
+  maakRijAlsA: async (a) => {
+    const { data, error } = await a.client
+      .from("voorbeeld").insert({ owner_id: a.id }).select("id").single();
+    if (error) throw error;
+    return data.id;
+  },
+});
+```
+
+Hoort B in een rol of organisatie te zitten om het te kunnen proberen, zet hem daar dan met
+`voorbereidB`, maar niet in die van A.
+
+`guard:rls-tests` kijkt of elke tabel in `public` zo'n aanroep heeft, of met een reden in
+`open_tabellen` staat (zie stap 2). In deze versie is dat nog een waarschuwing; vanaf de
+volgende uitgave van Stage Two is het rood.
 
 Die test draait in de Kwaliteitspoort (stap 4), in dezelfde eigen Supabase als je migraties.
 

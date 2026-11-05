@@ -59,6 +59,7 @@
       "scripts/guard-tests.mjs",
       "scripts/guard-migrations.mjs",
       "scripts/guard-rls.mjs",
+      "scripts/guard-rls-tests.mjs",
       "scripts/open-tabellen-opnemen.mjs",
       "scripts/guard-secrets.mjs",
       "scripts/guard-escape-hatches.mjs",
@@ -97,7 +98,8 @@
       "tests/unit/uitrollen-workflow.test.ts",
       "tests/unit/rls-regels.test.ts",
       "tests/rls/open-policies.test.ts",
-      "tests/rls/lib/database.ts"
+      "tests/rls/lib/database.ts",
+      "tests/rls/lib/afscherming.ts"
     ],
     "sleutelsSamenvoegen": {
       "package.json": ["scripts", "devDependencies"]

@@ -185,3 +185,56 @@ describe("scripts/open-tabellen-opnemen.mjs", () => {
     }
   });
 });
+
+describe("gedekteTabellen (guard:rls-tests)", () => {
+  const gedekt = (tekst: string) => roep<string[]>("gedekteTabellen", tekst).sort();
+
+  it("telt alleen een aanroep van controleerAfscherming met tabel", () => {
+    const tekst = `
+      await controleerAfscherming({
+        tabel: "notities",
+        maakRijAlsA: async (a) => 1,
+      });
+      await controleerAfscherming({ tabel: 'Orders', maakRijAlsA });
+      // alleen de naam noemen telt niet: from("klanten")
+    `;
+    expect(gedekt(tekst)).toEqual(["notities", "orders"]);
+  });
+});
+
+describe("scripts/guard-rls-tests.mjs", () => {
+  it("waarschuwt bij een tabel zonder A/B-test, maar is (nog) niet rood", () => {
+    const map = mkdtempSync(join(tmpdir(), "rls-tests-"));
+    try {
+      mkdirSync(join(map, "supabase/migrations"), { recursive: true });
+      mkdirSync(join(map, "tests/rls"), { recursive: true });
+      writeFileSync(
+        join(map, "stack.config.json"),
+        JSON.stringify({ database: true, open_tabellen: { feestdagen: "kalender" } }),
+      );
+      writeFileSync(
+        join(map, "supabase/migrations/1_x.sql"),
+        "create table public.notities (id int); create table public.feestdagen (id int); create table public.orders (id int);",
+      );
+      writeFileSync(
+        join(map, "tests/rls/notities.test.ts"),
+        'await controleerAfscherming({ tabel: "notities", maakRijAlsA });',
+      );
+      const uitvoer = execFileSync(
+        "node",
+        [resolve(__dirname, "../../scripts/guard-rls-tests.mjs")],
+        {
+          cwd: map,
+          encoding: "utf8",
+          env: { ...process.env, GITHUB_ACTIONS: "true" },
+        },
+      );
+      expect(uitvoer).toContain(
+        "::warning title=A/B-test per tabel::1 tabel(len) zonder A/B-test: orders",
+      );
+      expect(uitvoer).not.toContain("feestdagen");
+    } finally {
+      rmSync(map, { recursive: true, force: true });
+    }
+  });
+});

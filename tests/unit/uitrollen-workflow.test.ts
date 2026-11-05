@@ -308,6 +308,12 @@ describe("kwaliteitspoort", () => {
     expect(job("database", ci).if).toBe("${{ !github.event.pull_request.draft }}");
   });
 
+  it("draait in de job Code de RLS-guards: beveiliging per tabel en de A/B-test per tabel", () => {
+    const runs = job("checks", ci).steps.map((s) => s.run);
+    expect(runs).toContain("pnpm guard:rls");
+    expect(runs).toContain("pnpm guard:rls-tests");
+  });
+
   it("bewaart de browser van Playwright tussen runs", () => {
     const cache = job("database", ci).steps.find((s) => s.uses?.startsWith("actions/cache"));
     expect(cache?.with?.path).toBe("~/.cache/ms-playwright");

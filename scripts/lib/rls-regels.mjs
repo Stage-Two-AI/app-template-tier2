@@ -182,3 +182,13 @@ export function schrijfrechtenVoorLeesrollen(sql, leesrollen = []) {
     .filter(([, rechten]) => rechten.size > 0)
     .map(([sleutel, rechten]) => `${sleutel}: ${[...rechten].join(", ")}`);
 }
+
+/**
+ * Welke tabellen een A/B-test hebben: een aanroep `controleerAfscherming({ tabel: "<naam>"`
+ * in tests/rls/ (de hulp staat in tests/rls/lib/afscherming.ts). Alleen de naam noemen
+ * telt niet; het moet die aanroep zijn.
+ */
+export function gedekteTabellen(testtekst) {
+  const aanroep = /controleerAfscherming\(\s*\{[\s\S]{0,200}?\btabel:\s*["'`](\w+)["'`]/g;
+  return new Set([...testtekst.matchAll(aanroep)].map((m) => m[1].toLowerCase()));
+}

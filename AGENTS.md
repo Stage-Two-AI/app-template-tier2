@@ -152,7 +152,8 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   `api`: views om te lezen, functies om te schrijven. Mis je daar iets, dan is dat een
   wijziging aan het contract en dus een aanvraag bij de eigenaar, geen bestand hier.
 - **Elke nieuwe tabel krijgt RLS aan, een `grant` én policies**, plus een test in
-  `tests/rls/` die controleert dat gebruiker A niet bij de gegevens van B komt.
+  `tests/rls/` die controleert dat gebruiker B niet bij de gegevens van A komt
+  (`controleerAfscherming` uit `tests/rls/lib/afscherming.ts`; `guard:rls-tests` kijkt dat na).
 - **Geen `using (true)`** voor `anon` of zonder `to`-regel. Voor `to authenticated` alleen
   op een tabel die met een reden in `open_tabellen` in `stack.config.json` staat (vraag de
   gebruiker of iedereen binnen dit echt mag zien). Een rol in `leesrollen` (waarmee een

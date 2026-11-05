@@ -214,7 +214,8 @@ in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat 
 | `test` | gedrag is stuk, of de test klopt niet meer. Kijk eerst welke van de twee |
 | `guard:tests` | je wijzigde code zonder test. Voeg er een toe |
 | `guard:secrets` | er staat mogelijk een sleutel in de code of in de bundel. **Altijd zelf naar kijken**, dit is de gevaarlijkste |
-| `guard:rls` | er is een tabel zonder beveiliging |
+| `guard:rls` | er is een tabel zonder beveiliging, een policy met `using (true)` buiten `open_tabellen`, of een leesrol die mag schrijven |
+| `guard:rls-tests` | een tabel heeft geen A/B-test in `tests/rls/` (`controleerAfscherming`) en staat niet in `open_tabellen`. In deze versie nog een waarschuwing, vanaf de volgende uitgave rood |
 | `guard:migrations` | je migratie kan data vernietigen; lees de melding en bevestig bewust |
 | `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stagetwo-tier2:updaten` |
 | `guard:cloudflare` | `wrangler.jsonc` vraagt om opslag van Cloudflare (D1, R2, KV, Durable Objects), Worker-code of een sleutel die niet op de lijst staat. Gegevens horen in Supabase: haal de sleutel weg |
