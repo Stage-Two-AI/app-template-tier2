@@ -10,6 +10,18 @@ Vraag door tot je één zin kunt opschrijven die begint met "na deze wijziging k
 gebruiker …". Lukt dat niet, dan is het verzoek nog niet scherp genoeg en is dit het
 moment om het te vragen, niet halverwege.
 
+**Lees bij de start stil het logboek mee.** In de architectuur-repo van het bedrijf staat
+`docs/logboek.md`: per gemergde pull request wat er met de hand is ingesteld, welke besluiten
+vielen en wat andere onderdelen raakte. Lees de laatste regels, als achtergrond bij je werk:
+
+```bash
+gh api repos/<org>/architectuur/contents/docs/logboek.md -H "Accept: application/vnd.github.raw" | tail -n 20
+```
+
+In Claude Code doet de skill verder-werken van de plugin dit al. Lees het niet voor en vat
+het niet samen voor de gebruiker, tenzij hij erom vraagt of er iets in staat dat zijn vraag
+direct raakt. Geen logboek of geen toegang: ga gewoon door.
+
 Is het verzoek groter dan één zin? Knip het op. **Eén pull request = één onderwerp.**
 Grote PR's zijn niet te beoordelen en er verdwijnt van alles ongemerkt in.
 
@@ -92,13 +104,13 @@ De CI blokkeert een PR die productiecode wijzigt zonder één enkele test aan te
 ## Stap 5: Snel controleren voor je pusht
 
 ```bash
-pnpm typecheck
+pnpm check
 ```
 
-Dat duurt seconden en vangt de fouten die de preview stukmaken. Meer hoeft niet voor een
-concept: de snelle check `Code` in GitHub draait bij elke push toch al lint, unittests en de
-guards, en de volledige poort draai je pas als de gebruiker het goed vindt (stap 7). Rood?
-Repareren, niet omzeilen.
+Dat is typecontrole, lint, unittests en de guards in één keer: precies wat de snelle check
+`Code` in GitHub bij elke push draait. Is `Code` rood, dan komt er geen nieuwe preview; zo
+zie je het hier al, binnen een minuut. De zware check met de browser draai je pas als de
+gebruiker het goed vindt (stap 7). Rood? Repareren, niet omzeilen.
 
 ## Stap 6: Open een concept-PR en laat de gebruiker meekijken
 
@@ -147,7 +159,14 @@ openen en hij bewijst niet dat de gebouwde versie werkt. Lokaal kijken voor jeze
 
 ## Stap 7: Op klaar zetten, wachten en repareren
 
-Zegt de gebruiker dat het goed is ("prima", "zo laten", "zet maar live"), dan:
+Zegt de gebruiker dat het goed is ("prima", "zo laten", "zet maar live"), dan gaat de pull
+request op klaar. Vul eerst zelf het kopje **Voor de architectuur** in de PR-tekst in, zonder
+de gebruiker iets te vragen: haal het uit het gesprek en de wijziging
+(`gh pr edit <nummer> --body-file <bestand>`). Drie regels: wat er met de hand is ingesteld
+(wat en waar, bijvoorbeeld een geheim dat de owner zette of een instelling in een dashboard),
+of hier een besluit viel (welk, in één zin), en of dit een ander onderdeel of een andere app
+raakt (welk). Niets van toepassing: `nee`. Na de merge komt het in het logboek van de
+architectuur-repo. Daarna:
 
 ```bash
 pnpm check         # typecontrole, lint, unittests en guards in één keer, eerst lokaal
