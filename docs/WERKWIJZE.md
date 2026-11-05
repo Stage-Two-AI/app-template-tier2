@@ -426,12 +426,21 @@ beheerserver (optioneel): een server waar Claude Code bij Supabase is ingelogd.
 Draait op elke pull request; alles groen voordat er gemerged kan worden. Wat elke
 check bewaakt staat in de tabel in `README.md`.
 
-**Concept eerst, de volle poort bij klaar.** Een pull request begint als concept (draft).
-Dan draait bij elke push alleen de snelle check `Code` (een paar minuten) en wordt de preview
-bijgewerkt. De zware check `Database en end-to-end` draait pas als de PR op klaar wordt gezet
-(`gh pr ready`). Mergen kan alleen met de volle poort groen: een concept kan niet mergen, en
-op klaar zetten start alles opnieuw. Zo wacht niemand per tussenstap op een browsertest, en
-kost bouwen veel minder Actions-minuten.
+**Concept eerst, de volle poort bij klaar.** Een pull request begint als concept (draft), ook
+een pull request met een migratie. Dan draait bij elke push de snelle check `Code` (een paar
+minuten); is `supabase/` gewijzigd, dan ook de databasetests, maar zonder browser. De
+browsertest draait pas als de PR op klaar wordt gezet (`gh pr ready`). Mergen kan alleen met
+de volle poort groen: een concept kan niet mergen, en op klaar zetten start alles opnieuw. Zo
+wacht niemand per tussenstap op een browsertest, en kost bouwen veel minder Actions-minuten.
+
+**De zware check wacht op de snelle.** `Database en end-to-end` start pas als `Code` groen is.
+Is `Code` rood, dan kost de zware check geen minuten.
+
+**De preview wacht op `Code`.** De job `Code` bouwt de app één keer, met de openbare
+testwaarden, en bewaart dat als de preview, alleen als al zijn controles groen zijn (ook de
+controle op geheimen in die bundel). `Preview uitrollen` zet hem daarna online. Bij een
+concept is dat een à twee minuten na de push; bij een PR die klaar is, na de hele poort. Is
+alleen de browsertest rood, dan komt de preview er wel, zodat je kunt zien wat er misgaat.
 
 **Het vaste preview-adres.** Naast de preview per pull request (`pr-<nummer>-...`) heeft
 elke app één vast adres, `actueel-...`, dat altijd de laatst gepushte PR toont. Dat kan de
@@ -455,6 +464,13 @@ De route door de app waarop niets misgaat: inloggen → lijst openen → item to
 het staat er. Niet de randgevallen. Breekt die route, dan is de app waardeloos, dus
 dat is de test die het meest telt. Hij raakt in één keer de hele keten: build,
 inloggen, database, RLS en de interface.
+
+Daarnaast opent de browsertest **elk onderdeel** van de app (`e2e/onderdelen.spec.ts`): per
+regel in `src/onderdelen.ts` het hoofdscherm, met de vraag of het zonder fout opent en zijn kop
+toont. Zo komt een onderdeel dat bij het openen stukgaat (een route die weg is, een rol die niet
+klopt, een query op een kolom die niet meer bestaat) niet groen door de poort. Een unittest
+houdt die lijst bij met de router. Heeft de app rollen, dan geeft `supabase/testrol.sql` ook
+de e2e-gebruiker zijn rol.
 
 Uitbreiden doe je **reactief**: elke keer dat er in productie iets stukgaat, komt er
 een test bij die precies dat geval afdekt. Zo groeit het vangnet mee met je echte

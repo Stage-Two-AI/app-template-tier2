@@ -40,8 +40,21 @@
     "ontvanger staat. Het onderwerp krijgt dan [test] ervoor. Leeg: buiten productie gaat er",
     "geen mail weg. Het adres hoort bij de app, niet bij de bouwer (de preview wordt gedeeld),",
     "en is geen geheim. Functies uitrollen zet het als TESTMAIL_ADRES op de testdatabase;",
-    "zie supabase/functions/_shared/mail.ts. Voorbeeld: \"testmail\": \"test@klant.nl\""
+    "zie supabase/functions/_shared/mail.ts. Voorbeeld: \"testmail\": \"test@klant.nl\"",
+    "",
+    "open_tabellen: tabellen die bewust open staan voor iedereen die binnen is, met per tabel",
+    "een reden. Alleen daar mag een policy `using (true)` of `with check (true)` hebben voor",
+    "`authenticated` (of een eigen rol), en daar hoeft geen A/B-test in tests/rls/ (gebruiker B",
+    "ziet de rij van A niet). Voor `anon` of `public` mag `using (true)` nooit. Voorbeeld:",
+    "  \"open_tabellen\": { \"feestdagen\": \"kalender voor iedereen binnen, geen persoonsgegevens\" }",
+    "",
+    "leesrollen: rollen waarmee een ándere app deze database leest (bijvoorbeeld een datalake",
+    "dat door een interne app wordt gelezen). Zo'n rol mag alleen lezen; elke",
+    "`grant insert|update|delete` aan een rol in deze lijst is rood in de poort. Schrijven gaat",
+    "via een functie in de app die de database beheert. Voorbeeld: \"leesrollen\": [\"intern_lezer\"]"
   ],
   "database": true,
-  "testmail": ""
+  "testmail": "",
+  "open_tabellen": {},
+  "leesrollen": []
 }

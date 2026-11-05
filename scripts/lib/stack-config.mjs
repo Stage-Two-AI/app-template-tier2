@@ -123,3 +123,50 @@ export function testDatabase() {
     anon_key: anonKey,
   };
 }
+
+/**
+ * Tabellen die bewust open staan voor iedereen die binnen is: een policy met `using (true)`
+ * of `with check (true)` voor `authenticated` (of een eigen rol) mag daar, en de A/B-test
+ * per tabel (guard-rls-tests.mjs) hoeft daar niet. Per tabel een reden, zodat de keuze
+ * zichtbaar in de repo staat en de reviewer hem in de PR ziet:
+ *
+ *   "open_tabellen": { "feestdagen": "kalender voor iedereen binnen, geen persoonsgegevens" }
+ *
+ * Een open policy voor `anon` of `public` (iedereen met de openbare sleutel) mag nooit, ook
+ * niet als de tabel hier staat.
+ */
+export function openTabellen() {
+  const lijst = stackConfig().open_tabellen ?? {};
+  if (typeof lijst !== "object" || Array.isArray(lijst) || lijst === null) {
+    throw new Error(
+      "stack.config.json: `open_tabellen` hoort een object te zijn met per tabel een reden.\n" +
+        'Voorbeeld:\n  "open_tabellen": { "feestdagen": "kalender voor iedereen binnen" }',
+    );
+  }
+  for (const [tabel, reden] of Object.entries(lijst)) {
+    if (typeof reden !== "string" || reden.trim() === "") {
+      throw new Error(
+        `stack.config.json: bij open_tabellen.${tabel} hoort een reden (waarom mag iedereen binnen dit zien?).`,
+      );
+    }
+  }
+  return lijst;
+}
+
+/**
+ * Rollen waarmee een ándere app deze database leest (bijvoorbeeld `intern_lezer` op een
+ * datalake). Zo'n rol mag alleen lezen: elke `grant insert|update|delete` aan een rol in
+ * deze lijst is rood in de poort. Schrijven gaat via een functie in de app die de database
+ * beheert.
+ *
+ *   "leesrollen": ["intern_lezer"]
+ */
+export function leesRollen() {
+  const lijst = stackConfig().leesrollen ?? [];
+  if (!Array.isArray(lijst) || lijst.some((r) => typeof r !== "string" || !/^\w+$/.test(r))) {
+    throw new Error(
+      'stack.config.json: `leesrollen` hoort een lijst namen van rollen te zijn, bijvoorbeeld ["intern_lezer"].',
+    );
+  }
+  return lijst.map((r) => r.toLowerCase());
+}

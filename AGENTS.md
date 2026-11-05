@@ -26,12 +26,13 @@ Een taak is klaar als: er een pull request open staat die geen concept (draft) m
 repareer je hem zelf en wacht je opnieuw; meld pas daarna "het is af", of meld wat er nog
 mist als het echt niet lukt.
 
-Het ritme (zie `docs/routes/verder-werken.md`): een PR begint als concept, waarop alleen de
-snelle checks draaien en de preview wordt bijgewerkt; de gebruiker kijkt mee op het vaste
-adres van de app (`actueel-...`). Is de gebruiker tevreden, dan zet je hem op klaar
-(`gh pr ready`), wacht je op alle checks (`gh pr checks --watch`) en repareer je wat rood is.
-Een PR met een migratie begint niet als concept. Docker is nergens voor nodig: de
-databasetests draaien in GitHub, en `pnpm db:types:uit-ci` haalt de types daar op.
+Het ritme (zie `docs/routes/verder-werken.md`): een PR begint als concept, ook een PR met een
+migratie. Dan draaien alleen de snelle checks (bij een wijziging in `supabase/` ook de
+databasetests, zonder browser), en komt de preview online zodra de check `Code` groen is; de
+gebruiker kijkt mee op het vaste adres van de app (`actueel-...`). Is de gebruiker tevreden,
+dan zet je hem op klaar (`gh pr ready`), wacht je op alle checks (`gh pr checks --watch`) en
+repareer je wat rood is. Docker is nergens voor nodig: de databasetests draaien in GitHub, en
+`pnpm db:types:uit-ci` haalt de types daar op.
 
 ## Stack
 
@@ -147,12 +148,20 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   `supabase/functions/voorbeeld-met-geheim/`), en zeg de gebruiker dat de owner hem moet zetten.
 - **Databasewijzigingen altijd als migratie** in `supabase/migrations/`, nooit
   handmatig in de Supabase-console. Draai daarna `pnpm db:types` en commit het resultaat.
+- **Een migratie met `update` of `delete`** zet bovenin per tabel
+  `-- verwachting: <tabel> <min>-<max>` (het aantal rijen dat hij raakt). De droogloop toetst
+  dat op de testdatabase; zie stap 6 van `docs/routes/databasewijziging.md`.
 - **Gebruikt deze app een gedeelde database** (`"database": "gedeeld"`), schrijf dan hier
   géén migratie. Het schema is van een andere repo. Je praat uitsluitend met het schema
   `api`: views om te lezen, functies om te schrijven. Mis je daar iets, dan is dat een
   wijziging aan het contract en dus een aanvraag bij de eigenaar, geen bestand hier.
 - **Elke nieuwe tabel krijgt RLS aan, een `grant` én policies**, plus een test in
-  `tests/rls/` die controleert dat gebruiker A niet bij de gegevens van B komt.
+  `tests/rls/` die controleert dat gebruiker B niet bij de gegevens van A komt
+  (`controleerAfscherming` uit `tests/rls/lib/afscherming.ts`; `guard:rls-tests` kijkt dat na).
+- **Geen `using (true)`** voor `anon` of zonder `to`-regel. Voor `to authenticated` alleen
+  op een tabel die met een reden in `open_tabellen` in `stack.config.json` staat (vraag de
+  gebruiker of iedereen binnen dit echt mag zien). Een rol in `leesrollen` (waarmee een
+  andere app deze database leest) krijgt alleen `select`.
 - **Heeft de app geen database, verzin er dan geen.** Moet de app iets bewaren of op
   vaste tijden iets doen, dan is dat het signaal om `database` om te zetten (Supabase,
   met Storage voor bestanden en `pg_cron` voor terugkerende taken). Gebruik nooit

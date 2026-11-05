@@ -74,75 +74,106 @@ describe("uitrollen.yml", () => {
     expect(deploy?.if).toContain("skip != 'true'");
   });
 
+  it("waarschuwt bij elke productie-uitrol als Sentry uit staat of de DSN vreemd is", () => {
+    const controle = job("productie").steps.find((s) => s.name === "Is alles ingericht?");
+    expect(controle?.env?.VITE_SENTRY_DSN).toBe(gh("vars.VITE_SENTRY_DSN"));
+    expect(controle?.shell).toBe("bash");
+    const run = controle?.run ?? "";
+    expect(run).toContain('if [ -z "$VITE_SENTRY_DSN" ]; then');
+    expect(run).toContain("::warning::Foutbewaking (Sentry) staat uit");
+    expect(run).toContain("::warning::VITE_SENTRY_DSN ziet er niet uit als een DSN van Sentry");
+    // Een waarschuwing, geen stop: de regels over Sentry zetten geen skip.
+    const sentryDeel = run.slice(run.indexOf("VITE_SENTRY_DSN"));
+    expect(sentryDeel.split("fi")[0]).not.toContain("skip=true");
+  });
+
+  it("herkent een echte DSN van Sentry, en geen vreemde waarde", () => {
+    const run = job("productie").steps.find((s) => s.name === "Is alles ingericht?")?.run ?? "";
+    const patroon = /=~ \^(.+)\$ \]\]/.exec(run)?.[1];
+    expect(patroon).toBeDefined();
+    const dsn = new RegExp(`^${patroon}$`);
+    expect(dsn.test("https://abc123@o1.ingest.sentry.io/42")).toBe(true);
+    expect(dsn.test("https://abc123@o4507.ingest.de.sentry.io/4508")).toBe(true);
+    expect(dsn.test("https://sentry.io/abc")).toBe(false);
+    expect(dsn.test("abc123")).toBe(false);
+  });
+
   it("slaat productie over met een melding als de uitrolsleutel ontbreekt", () => {
     const controle = job("productie").steps.find((s) => s.run?.includes("CLOUDFLARE_API_TOKEN"));
     expect(controle?.run).toContain("::notice::");
   });
 });
 
-describe("uitrollen.yml: de PR-job bouwt alleen, zonder sleutels", () => {
-  const preview = job("preview");
-  const tekst = JSON.stringify(preview);
-
-  it("draait alleen op een PR uit deze repo", () => {
-    expect(preview.if).toContain("github.event_name == 'pull_request'");
-    expect(preview.if).toContain(
-      "github.event.pull_request.head.repo.full_name == github.repository",
-    );
+describe("uitrollen.yml: alleen productie", () => {
+  it("draait alleen bij een push op main en heeft geen preview-job meer", () => {
+    expect(uitrollen.on).toEqual({ push: { branches: ["main"] } });
+    expect(Object.keys(uitrollen.jobs)).toEqual(["productie"]);
   });
+});
+
+describe("ci.yml: de job Code bouwt ook de preview, zonder sleutels", () => {
+  const ci = lees("ci.yml");
+  const code = job("checks", ci);
+  const tekst = JSON.stringify(code);
 
   it("noemt geen omgeving en leest geen enkel secret", () => {
-    expect(preview.environment).toBeUndefined();
+    expect(code.environment).toBeUndefined();
     expect(tekst).not.toContain("secrets.");
     expect(tekst).not.toContain("CLOUDFLARE_API_TOKEN");
-    // wrangler komt alleen voor in de droogoefening hieronder, nooit met een echte uitrol.
-    const metWrangler = preview.steps.filter((s) => JSON.stringify(s).includes("wrangler"));
+    // wrangler komt alleen voor in de droogoefening, nooit met een echte uitrol.
+    const metWrangler = code.steps.filter((s) => JSON.stringify(s).includes("wrangler"));
     expect(metWrangler.map((s) => s.run)).toEqual([
       'pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/wrangler-dry"',
     ]);
     expect(tekst).not.toContain("versions upload");
   });
 
-  it("haalt de wrangler-config van de PR na het bouwen door wrangler, droog en zonder sleutel", () => {
-    const bouw = stapIndex(preview, (s) => s.run?.includes("pnpm build") ?? false);
-    const droog = stapIndex(preview, (s) => s.run?.includes("wrangler deploy --dry-run") ?? false);
-    expect(droog).toBeGreaterThan(bouw);
-    const stap = preview.steps[droog];
-    expect(stap?.run).toContain('--outdir "$RUNNER_TEMP/wrangler-dry"');
-    expect(stap?.env).toEqual({ WRANGLER_SEND_METRICS: "false" });
-    expect(JSON.stringify(stap)).not.toContain("secrets.");
-    expect(JSON.stringify(stap)).not.toContain("CLOUDFLARE_");
-    const bewaar = preview.steps.find((s) => s.uses?.startsWith("actions/upload-artifact@"));
-    expect(stap?.if).toBe(bewaar?.if);
-  });
-
-  it("mag niets schrijven in de repo of de PR", () => {
-    expect(preview.permissions).toEqual({ contents: "read" });
-  });
-
-  it("bouwt met de PREVIEW_-repovariabelen, omgezet naar de VITE_-namen, en met de testbalk", () => {
-    const bouw = preview.steps.find((s) => s.run?.includes("pnpm build"));
-    expect(bouw?.env).toMatchObject({
+  it("bouwt één keer, met de PREVIEW_-repovariabelen omgezet naar de VITE_-namen, en met de testbalk", () => {
+    const bouwen = code.steps.filter((s) => s.run?.includes("pnpm build"));
+    expect(bouwen).toHaveLength(1);
+    expect(bouwen[0]?.env).toMatchObject({
       VITE_SUPABASE_URL: gh("vars.PREVIEW_VITE_SUPABASE_URL"),
       VITE_SUPABASE_ANON_KEY: gh("vars.PREVIEW_VITE_SUPABASE_ANON_KEY"),
       VITE_INLOGDIENST: gh("vars.PREVIEW_VITE_INLOGDIENST"),
       VITE_SENTRY_DSN: gh("vars.PREVIEW_VITE_SENTRY_DSN"),
       VITE_OMGEVING: "test",
     });
-    for (const waarde of Object.values(bouw?.env ?? {})) {
+    for (const waarde of Object.values(bouwen[0]?.env ?? {})) {
       if (waarde.startsWith(EXPRESSIE)) expect(waarde).toContain("vars.PREVIEW_");
     }
   });
 
-  it("bewaart dist als artifact, alleen als er gebouwd is", () => {
-    const bewaar = preview.steps.find((s) => s.uses?.startsWith("actions/upload-artifact@"));
-    expect(bewaar?.with?.name).toBe("preview-dist");
-    expect(bewaar?.with?.path).toBe("dist");
-    expect(bewaar?.if).toContain("skip != 'true'");
+  it("haalt de wrangler-config van de PR na het bouwen door wrangler, droog en zonder sleutel", () => {
+    const bouw = stapIndex(code, (s) => s.run?.includes("pnpm build") ?? false);
+    const droog = stapIndex(code, (s) => s.run?.includes("wrangler deploy --dry-run") ?? false);
+    expect(droog).toBeGreaterThan(bouw);
+    const stap = code.steps[droog];
+    expect(stap?.env).toEqual({ WRANGLER_SEND_METRICS: "false" });
+    expect(stap?.if).toBe("steps.preview.outputs.skip != 'true'");
   });
 
-  it("slaat over met een melding als de database-instellingen van de preview ontbreken", () => {
-    const controle = preview.steps.find((s) => s.run?.includes("PREVIEW_VITE_SUPABASE_URL"));
+  it("controleert de bundel met testwaarden op geheimen vóór het bewaren", () => {
+    const bouw = stapIndex(code, (s) => s.run?.includes("pnpm build") ?? false);
+    const geheimen = stapIndex(code, (s) => s.run === "pnpm guard:secrets");
+    const bewaar = stapIndex(code, (s) => s.uses?.startsWith("actions/upload-artifact@") ?? false);
+    expect(geheimen).toBeGreaterThan(bouw);
+    expect(bewaar).toBeGreaterThan(geheimen);
+  });
+
+  it("bewaart dist als laatste stap, dus alleen als alle controles groen zijn", () => {
+    const bewaar = code.steps.at(-1);
+    expect(bewaar?.uses).toMatch(/^actions\/upload-artifact@/);
+    expect(bewaar?.with?.name).toBe("preview-dist");
+    expect(bewaar?.with?.path).toBe("dist");
+    expect(bewaar?.if).toBe("steps.preview.outputs.skip != 'true'");
+  });
+
+  it("slaat de preview over met een melding bij een fork of zonder testwaarden", () => {
+    const controle = code.steps.find((s) => s.id === "preview");
+    expect(controle?.env?.EIGEN_REPO).toBe(
+      gh("github.event.pull_request.head.repo.full_name == github.repository"),
+    );
+    expect(controle?.run).toContain("PREVIEW_VITE_SUPABASE_URL");
     expect(controle?.run).toContain("::notice::");
     expect(controle?.run).toContain("skip=true");
   });
@@ -152,15 +183,18 @@ describe("preview-uitrollen.yml: de upload vanaf main", () => {
   const upload = job("preview", previewUitrollen);
   const stappen = upload.steps;
 
-  it("draait na de workflow Uitrollen, nooit direct op een pull request", () => {
+  it("draait na de Kwaliteitspoort, nooit direct op een pull request", () => {
     expect(previewUitrollen.on).toEqual({
-      workflow_run: { workflows: ["Uitrollen"], types: ["completed"] },
+      workflow_run: { workflows: ["Kwaliteitspoort"], types: ["completed"] },
     });
   });
 
-  it("draait alleen voor een geslaagde PR-run uit dezelfde repo", () => {
+  it("draait voor een PR-run uit dezelfde repo, ook als alleen de browsertest rood is", () => {
     expect(upload.if).toContain("github.event.workflow_run.event == 'pull_request'");
-    expect(upload.if).toContain("github.event.workflow_run.conclusion == 'success'");
+    // Het artifact beslist (de job Code bewaart het alleen als hij groen is), niet de uitkomst
+    // van de hele run; alleen een afgebroken run slaat over.
+    expect(upload.if).toContain("github.event.workflow_run.conclusion != 'cancelled'");
+    expect(upload.if).not.toContain("conclusion == 'success'");
     expect(upload.if).toContain(
       "github.event.workflow_run.head_repository.full_name == github.repository",
     );
@@ -302,10 +336,55 @@ describe("kwaliteitspoort", () => {
     expect(typen).toEqual(["opened", "synchronize", "reopened", "ready_for_review"]);
   });
 
-  it("draait de snelle job altijd, de zware alleen buiten een concept-PR", () => {
+  it("draait de snelle job altijd, de zware pas als Code groen is", () => {
     expect(job("checks", ci).if).toBeUndefined();
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: een uitdrukking van GitHub Actions, geen JavaScript-template
-    expect(job("database", ci).if).toBe("${{ !github.event.pull_request.draft }}");
+    expect((job("database", ci) as Job & { needs?: string }).needs).toBe("checks");
+    expect(job("database", ci).if).toBe("needs.checks.outputs.stand != 'niets'");
+  });
+
+  it("bepaalt in Code wat de databasejob doet: alles, alleen de database bij een concept met supabase/, of niets", () => {
+    const code = job("checks", ci) as Job & { outputs?: Record<string, string> };
+    expect(code.outputs?.stand).toBe(gh("steps.wat.outputs.stand"));
+    const wat = code.steps.find((s) => s.id === "wat");
+    expect(wat?.env).toEqual({
+      CONCEPT: gh("github.event.pull_request.draft"),
+      BASIS: gh("github.event.pull_request.base.sha"),
+    });
+    const run = wat?.run ?? "";
+    expect(run).toContain('if [ "$CONCEPT" != "true" ]; then');
+    expect(run).toContain('git diff --name-only "$BASIS"...HEAD -- supabase/');
+    for (const stand of ["alles", "database", "niets"]) expect(run).toContain(`stand=${stand}`);
+  });
+
+  it("draait bij een concept geen browser: de browserstappen alleen bij stand alles", () => {
+    const db = job("database", ci);
+    const browser = db.steps.filter(
+      (s) =>
+        !s.run?.startsWith("echo") &&
+        /playwright|Browser|browser/.test(`${s.name ?? ""} ${s.run ?? ""} ${s.uses ?? ""}`),
+    );
+    expect(browser.length).toBeGreaterThanOrEqual(4);
+    for (const s of browser.filter((s) => s.if)) {
+      if (s.if?.includes("failure()")) continue;
+      expect(s.if, s.name).toContain("needs.checks.outputs.stand == 'alles'");
+    }
+    const e2e = db.steps.find((s) => s.run === "pnpm test:e2e");
+    expect(e2e?.if).toContain("needs.checks.outputs.stand == 'alles'");
+    const rls = db.steps.find((s) => s.run === "pnpm test:rls");
+    expect(rls?.if).not.toContain("stand");
+  });
+
+  it("controleert de edge functions met deno check", () => {
+    const code = job("checks", ci);
+    const deno = code.steps.find((s) => s.run?.includes("deno check"));
+    expect(deno?.if).toBe("hashFiles('supabase/functions/**/*.ts') != ''");
+    expect(code.steps.some((s) => s.uses?.startsWith("denoland/setup-deno@"))).toBe(true);
+  });
+
+  it("draait in de job Code de RLS-guards: beveiliging per tabel en de A/B-test per tabel", () => {
+    const runs = job("checks", ci).steps.map((s) => s.run);
+    expect(runs).toContain("pnpm guard:rls");
+    expect(runs).toContain("pnpm guard:rls-tests");
   });
 
   it("bewaart de browser van Playwright tussen runs", () => {

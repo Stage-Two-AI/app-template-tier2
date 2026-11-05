@@ -1,0 +1,22 @@
+name: Droogloop aanvragen
+
+# Start de droogloop (droogloop.yml) voor een pull request die migraties wijzigt. Deze
+# workflow doet zelf niets: hij draait op de code van de PR en ziet dus geen enkele sleutel.
+# Hij is er omdat de droogloop, die de testdatabase wel mag aanraken, alleen vanaf main mag
+# draaien, en dat gaat met workflow_run achter een eerste workflow aan. Het filter op paden
+# houdt het goedkoop: alleen een PR die supabase/migrations/ wijzigt, start hem.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ["supabase/migrations/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  aanvragen:
+    name: Droogloop aanvragen
+    runs-on: ubuntu-latest
+    steps:
+      - name: Droogloop aanvragen
+        run: echo "::notice::Deze PR wijzigt migraties. De workflow Droogloop migraties oefent ze zo op de testdatabase."

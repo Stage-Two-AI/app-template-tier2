@@ -1,23 +1,23 @@
 name: Uitrollen
 
-# Productie bij een merge naar main; een preview per pull request, achter dezelfde
-# login als productie. De preview gaat in twee delen: de job "Preview" hieronder bouwt
-# de PR zonder sleutels en bewaart dist, en preview-uitrollen.yml (altijd de versie van
-# main) uploadt dat met de preview-sleutel. Zo ziet code uit een PR nooit een sleutel.
+# Productie bij een merge naar main. De preview per pull request staat hier niet meer: die
+# bouwt de job Code van de Kwaliteitspoort (ci.yml), met de openbare testwaarden en zonder
+# sleutels, en preview-uitrollen.yml (altijd de versie van main) uploadt dat met de
+# preview-sleutel. Zo wordt een PR één keer gebouwd, en ziet code uit een PR nooit een sleutel.
 #   production  CLOUDFLARE_API_TOKEN (alleen uitrollen), vars VITE_*, CLOUDFLARE_ACCOUNT_ID
 #   preview     een eigen CLOUDFLARE_API_TOKEN (alleen uitrollen), CLOUDFLARE_ACCOUNT_ID;
 #               alleen gebruikt door preview-uitrollen.yml
-#   repo-vars   PREVIEW_VITE_*: de openbare waarden van de test (ze staan toch in de bundel)
+#   repo-vars   PREVIEW_VITE_*: de openbare waarden van de test (ze staan toch in de bundel);
+#               gelezen door de job Code in ci.yml
 # De omgevingen production en preview zijn beperkt tot main.
 on:
   push:
     branches: [main]
-  pull_request:
 
 concurrency:
   group: uitrollen-${{ github.ref }}
-  # Een nieuwere preview mag een oudere afbreken; een productie-uitrol nooit.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Een productie-uitrol wordt nooit afgebroken.
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -36,8 +36,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+        # bash voor de vergelijking met =~ hieronder.
+        shell: bash
         run: |
           node scripts/guard-cloudflare.mjs
+          # Zonder DSN staat de foutbewaking stil uit; dan hoor je een storing pas als iemand
+          # belt. Geen reden om niet uit te rollen, wel om het bij elke uitrol hardop te zeggen.
+          if [ -z "$VITE_SENTRY_DSN" ]; then
+            echo "::warning::Foutbewaking (Sentry) staat uit voor deze app: VITE_SENTRY_DSN ontbreekt in omgeving production."
+          elif ! [[ "$VITE_SENTRY_DSN" =~ ^https://[0-9a-f]+@o[0-9]+\.ingest(\.[a-z]+)?\.sentry\.io/[0-9]+$ ]]; then
+            echo "::warning::VITE_SENTRY_DSN ziet er niet uit als een DSN van Sentry; controleer de waarde in omgeving production."
+          fi
           modus=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.databaseModus()))")
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "::notice::CLOUDFLARE_API_TOKEN ontbreekt in omgeving production. Uitrollen wordt overgeslagen."
@@ -78,68 +88,3 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
         run: pnpm exec wrangler deploy
-
-  preview:
-    name: Preview
-    # Alleen PR's uit deze repo: een fork krijgt geen preview. Deze job noemt geen
-    # omgeving en leest geen secrets; uploaden doet preview-uitrollen.yml.
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Is alles ingericht?
-        id: check
-        env:
-          PREVIEW_VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
-        run: |
-          node scripts/guard-cloudflare.mjs
-          modus=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.databaseModus()))")
-          if [ "$modus" != "geen" ] && [ -z "$PREVIEW_VITE_SUPABASE_URL" ]; then
-            echo "::notice::De repo-variabele PREVIEW_VITE_SUPABASE_URL ontbreekt. De preview is nog niet ingericht; er komt geen preview voor deze PR."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - if: steps.check.outputs.skip != 'true'
-        uses: pnpm/action-setup@v6
-
-      - if: steps.check.outputs.skip != 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - if: steps.check.outputs.skip != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Bouwen (testomgeving)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.PREVIEW_VITE_SUPABASE_ANON_KEY }}
-          VITE_SUPABASE_SCHEMA: ${{ vars.PREVIEW_VITE_SUPABASE_SCHEMA }}
-          VITE_INLOGDIENST: ${{ vars.PREVIEW_VITE_INLOGDIENST }}
-          VITE_SENTRY_DSN: ${{ vars.PREVIEW_VITE_SENTRY_DSN }}
-          VITE_OMGEVING: test
-        run: pnpm build
-
-      # De preview-upload gebruikt de wrangler.jsonc van main. Deze droogoefening haalt
-      # die van de PR al hier door wrangler, zonder sleutel, zodat een kapotte config de
-      # PR rood maakt in plaats van pas de productie-uitrol.
-      - name: Wrangler-config controleren (droog)
-        if: steps.check.outputs.skip != 'true'
-        env:
-          WRANGLER_SEND_METRICS: "false"
-        run: pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/wrangler-dry"
-
-      # preview-uitrollen.yml haalt dit op en uploadt het.
-      - name: Gebouwde preview bewaren
-        if: steps.check.outputs.skip != 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: preview-dist
-          path: dist
-          retention-days: 3
-          if-no-files-found: error

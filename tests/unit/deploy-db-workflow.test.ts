@@ -56,7 +56,9 @@ describe("deploy-db.yml", () => {
       `${EXPRESSIE} secrets.SUPABASE_TEST_DB_PASSWORD }}`,
       `${EXPRESSIE} secrets.SUPABASE_DB_PASSWORD }}`,
     ]);
-    expect(env[1]?.PROJECT_REF).toBe(`${EXPRESSIE} secrets.SUPABASE_PROJECT_REF }}`);
+    expect(env[1]?.PROJECT_REF).toBe(
+      `${EXPRESSIE} vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}`,
+    );
     expect(env[0]?.POOLER).toBe(
       `${EXPRESSIE} vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}`,
     );
@@ -80,15 +82,38 @@ describe("deploy-db.yml", () => {
     }
   });
 
+  it("leest de project-ref als variabele, met het secret als vangnet, nergens alleen als secret", () => {
+    expect(tekst).not.toMatch(/\{\{\s*secrets\.SUPABASE_PROJECT_REF\s*\}\}/);
+  });
+
   it("slaat met een melding over als wachtwoord of project-ref ontbreekt", () => {
-    const controle = migratiejobs[0]?.[1].steps.find((s) => s.name === "Zijn de secrets al gezet?");
+    const controle = migratiejobs[0]?.[1].steps.find((s) => s.name === "Is alles ingericht?");
     expect(controle?.env).toEqual({
-      PROJECT_REF: `${EXPRESSIE} secrets.SUPABASE_PROJECT_REF }}`,
+      // De project-ref is een variabele; het oude secret blijft als vangnet.
+      PROJECT_REF: `${EXPRESSIE} vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}`,
       WACHTWOORD: `${EXPRESSIE} secrets.SUPABASE_DB_PASSWORD }}`,
     });
     expect(controle?.run).toContain("::notice::");
     expect(controle?.run).toContain("skip=true");
     expect(controle?.run).toContain('-z "$WACHTWOORD"');
     expect(controle?.run).toContain('-z "$PROJECT_REF"');
+  });
+
+  it("maakt vlak vóór de migraties op productie een kopie in het schema herstel", () => {
+    const stappen = migratiejobs[0]?.[1].steps ?? [];
+    const kopie = stappen.findIndex((s) => s.run?.includes("node scripts/herstel-kopie.mjs"));
+    const productie = stappen.findIndex((s) => s.name === "Migraties toepassen");
+    const canary = stappen.findIndex((s) => s.name?.startsWith("Canary"));
+    expect(kopie).toBeGreaterThan(canary);
+    expect(productie).toBe(kopie + 1);
+    const stap = stappen[kopie];
+    expect(stap?.if).toBe("steps.check.outputs.skip != 'true'");
+    expect(stap?.env).toEqual(stappen[productie]?.env);
+    const run = stap?.run ?? "";
+    expect(run.indexOf("node scripts/db-url.mjs --mask")).toBeGreaterThanOrEqual(0);
+    expect(run.indexOf("HERSTEL_DB_URL=$(node scripts/db-url.mjs)")).toBeGreaterThan(
+      run.indexOf("--mask"),
+    );
+    expect(run).not.toContain(EXPRESSIE);
   });
 });
