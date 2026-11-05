@@ -197,6 +197,10 @@ describe("gedekteTabellen (guard:rls-tests)", () => {
       });
       await controleerAfscherming({ tabel: 'Orders', maakRijAlsA });
       // alleen de naam noemen telt niet: from("klanten")
+      // controleerAfscherming({ tabel: "uitgecommentarieerd" })
+      /* controleerAfscherming({
+       *   tabel: "voorbeeld",
+       */
     `;
     expect(gedekt(tekst)).toEqual(["notities", "orders"]);
   });

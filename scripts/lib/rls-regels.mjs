@@ -189,6 +189,8 @@ export function schrijfrechtenVoorLeesrollen(sql, leesrollen = []) {
  * telt niet; het moet die aanroep zijn.
  */
 export function gedekteTabellen(testtekst) {
+  // Een voorbeeld in commentaar (zoals in tests/rls/lib/afscherming.ts) telt niet.
+  const tekst = testtekst.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
   const aanroep = /controleerAfscherming\(\s*\{[\s\S]{0,200}?\btabel:\s*["'`](\w+)["'`]/g;
-  return new Set([...testtekst.matchAll(aanroep)].map((m) => m[1].toLowerCase()));
+  return new Set([...tekst.matchAll(aanroep)].map((m) => m[1].toLowerCase()));
 }
