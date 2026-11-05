@@ -19,6 +19,16 @@ Cloudflare-preview:
 - [ ] Er zit een test bij die vastlegt wat er nu anders is
 - [ ] Ik heb de preview zelf geopend en het werkt daar
 
+## Voor de architectuur
+
+<!-- Dit vult de assistent zelf in als de pull request op klaar gaat (route verder-werken,
+     stap 7); de bouwer hoeft er niets voor te doen. Na de merge komt het in
+     docs/logboek.md van de architectuur-repo. Is iets niet van toepassing, schrijf dan "nee". -->
+
+- Met de hand ingesteld (wat en waar):
+- Besluit (welk):
+- Raakt een ander onderdeel of een andere app (welk):
+
 ## Alleen invullen als het van toepassing is
 
 <!-- Wijzigt deze PR de database op een manier die gegevens kan vernietigen?
