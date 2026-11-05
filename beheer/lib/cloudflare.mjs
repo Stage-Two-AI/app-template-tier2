@@ -62,6 +62,65 @@ export function appNamen(app, voorvoegsel) {
     // previews nooit bij productie kunnen.
     test: `${vv}${app}-test`,
     testInlog: `${vv}${app}-test-inlog`,
+    // De openbare paden (`openbare_paden` in toegang.json): een eigen Access-app met de
+    // bypass-policy, alleen als de app zulke paden heeft.
+    openbaar: `${vv}${app}-openbaar`,
+  };
+}
+
+/**
+ * Wat een openbare pagina van een single-page app altijd nodig heeft: de gebouwde JS en CSS
+ * (`/assets/*`) en de bestanden uit `public/` (iconen en manifest). Zonder die bestanden
+ * krijgt een bezoeker zonder account een lege pagina. Ze staan los genoemd, zonder
+ * jokerteken midden in een naam.
+ */
+export const OPENBAAR_VAST = [
+  "/assets/*",
+  "/favicon.ico",
+  "/favicon.svg",
+  "/manifest.webmanifest",
+  "/apple-touch-icon.png",
+  "/icon-192.png",
+  "/icon-512.png",
+];
+
+/**
+ * De naam van de herbruikbare policy die openbare paden doorlaat (iedereen, zonder inlog).
+ * Geen groep mag zo heten (valideerToegang); zo botst hij nooit met de policy van een groep.
+ */
+export function openbaarPolicyNaam(voorvoegsel) {
+  return `${valideerVoorvoegsel(voorvoegsel)}openbaar`;
+}
+
+/** De body van die policy: iedereen, zonder inlog (bypass). */
+export function openbaarPolicy(naam) {
+  return { name: naam, decision: "bypass", include: [{ everyone: {} }], exclude: [], require: [] };
+}
+
+/** De adressen van de openbare app: de paden uit toegang.json plus de vaste bestanden. */
+export function openbareUris(hostname, paden) {
+  if (!/^[a-z0-9.-]+$/.test(hostname ?? ""))
+    throw new Error("de hostname voor de openbare paden ontbreekt");
+  return [...new Set([...paden, ...OPENBAAR_VAST])].map((p) => `${hostname}${p}`);
+}
+
+/**
+ * De openbare paden van een app: één self-hosted Access-app met een destination per pad
+ * en de bypass-policy. Cloudflare Access laat de specifiekste app winnen, dus deze paden
+ * zijn zonder inlog bereikbaar; de rest van de hostname blijft achter de deur. Alleen op
+ * het adres van de app, niet op de previews.
+ */
+export function openbaarApp({ naam, hostname, paden, policyId }) {
+  if (!Array.isArray(paden) || paden.length === 0) throw new Error("geen openbare paden");
+  if (!policyId) throw new Error("de bypass-policy voor de openbare paden ontbreekt");
+  const uris = openbareUris(hostname, paden);
+  return {
+    name: naam,
+    type: "self_hosted",
+    domain: uris[0],
+    destinations: uris.map((uri) => ({ type: "public", uri })),
+    app_launcher_visible: false,
+    policies: [{ id: policyId, precedence: 1 }],
   };
 }
 

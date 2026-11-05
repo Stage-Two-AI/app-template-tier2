@@ -4,9 +4,13 @@ import { test } from "node:test";
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import {
   aanmeldHookSql,
+  gegevensNaarTest,
+  groepenVanApp,
   hookFunctie,
   koppelPolicies,
   magAanmelden,
+  openbarePadenVanApp,
+  policyIdsVoorApp,
   policyVoorGroep,
   sqlTekst,
   synchroniseerPolicies,
@@ -66,6 +70,68 @@ test("validatie: een ongeldig domein of adres noemt groep en veld", () => {
         apps: { x: ["a"] },
       }),
     /groep "a", veld rollen.*onbekend/,
+  );
+});
+
+test("validatie: de lange vorm van een app, met groepen, openbare paden en gegevens_naar_test", () => {
+  const t = {
+    groepen: KLANT.groepen,
+    apps: {
+      direct: {
+        groepen: ["klant"],
+        openbare_paden: ["/bekijk/*", "/over"],
+        gegevens_naar_test: false,
+      },
+      kort: ["stagetwo"],
+    },
+  };
+  valideerToegang(t);
+  assert.deepEqual(groepenVanApp(t, "direct"), ["klant"]);
+  assert.deepEqual(groepenVanApp(t, "kort"), ["stagetwo"]);
+  assert.deepEqual(openbarePadenVanApp(t, "direct"), ["/bekijk/*", "/over"]);
+  assert.deepEqual(openbarePadenVanApp(t, "kort"), []);
+  assert.equal(gegevensNaarTest(t, "direct"), false);
+  assert.equal(gegevensNaarTest(t, "kort"), true, "standaard wel");
+  assert.equal(gegevensNaarTest({ ...t, apps: { x: { groepen: ["klant"] } } }, "x"), true);
+  assert.deepEqual(policyIdsVoorApp(t, "direct", { klant: "p1", stagetwo: "p2" }), ["p1"]);
+  assert.equal(magAanmelden("piet@klant.nl", t, "direct"), "ja");
+  assert.equal(magAanmelden("info@stagetwo.nl", t, "direct"), "nee");
+});
+
+test("validatie: openbare paden beginnen met /, hebben hoogstens een * aan het eind, en nooit de hele app", () => {
+  for (const fout of [
+    ["/"],
+    ["/*"],
+    ["bekijk/*"],
+    ["/a*b"],
+    ["/bekijk/**"],
+    ["/a b"],
+    "/bekijk/*",
+    [1],
+  ]) {
+    const t = {
+      groepen: KLANT.groepen,
+      apps: { direct: { groepen: ["klant"], openbare_paden: fout } },
+    };
+    assert.throws(() => valideerToegang(t), /openbare_paden/, JSON.stringify(fout));
+  }
+});
+
+test("validatie: een onbekend veld, een app zonder groepen in de lange vorm, en de groepsnaam openbaar zijn fouten", () => {
+  const met =
+    (apps, groepen = KLANT.groepen) =>
+    () =>
+      valideerToegang({ groepen, apps });
+  assert.throws(met({ direct: { groepen: ["klant"], publiek: ["/x"] } }), /veld publiek: onbekend/);
+  assert.throws(met({ direct: { openbare_paden: ["/x"] } }), /geen groepen gekozen/);
+  assert.throws(
+    met({ direct: { groepen: ["klant"], gegevens_naar_test: "nee" } }),
+    /true of false/,
+  );
+  assert.throws(met({ direct: "klant" }), /een lijst groepen, of een object/);
+  assert.throws(
+    met({ direct: ["openbaar"] }, { openbaar: { domeinen: ["klant.nl"] } }),
+    /groep "openbaar": die naam is van de policy voor de openbare paden/,
   );
 });
 

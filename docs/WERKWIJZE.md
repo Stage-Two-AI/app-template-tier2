@@ -117,6 +117,22 @@ Access alleen een lege pagina van Cloudflare ("There is nothing here yet"), ook 
 `preview_urls: true`; dat bleek bij finance op 15-10-2026. De Access op de Worker zelf
 dekt het workers.dev-adres al, dus er komt geen open deur bij.
 
+**Een pagina zonder inlog kan, maar alleen zo.** Soms moet iemand zonder account een
+pagina kunnen openen, bijvoorbeeld een link die je naar een klant stuurt
+(`/bekijk/<code>`). Zet het pad dan als `openbare_paden` bij de app in `toegang.json` van de
+beheer-repo; de inrichting zet er een eigen Access-app op die iedereen doorlaat, met de
+gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Twee regels:
+
+- Een openbare pagina haalt gegevens alleen op via een databasefunctie voor `anon` die zelf
+  beperkt wat terugkomt: één rij bij een lange willekeurige code, en alleen de velden die
+  de bezoeker mag zien. Nooit een tabel die `anon` met een RLS-policy openzet, want dan
+  kan iedereen met de anon key de hele tabel opvragen. Test het net als RLS: zonder inlog,
+  met een verkeerde code, verwacht niets.
+- De JavaScript van de app is daarna voor iedereen te downloaden, ook de schermen achter de
+  deur. Dat is geen nieuw risico (er staan nooit geheimen in de frontend, zie hierboven),
+  maar namen van tabellen en functies zijn dan wel zichtbaar. De gegevens zelf blijven
+  beschermd door RLS.
+
 In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
 lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de

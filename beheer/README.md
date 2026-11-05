@@ -199,6 +199,32 @@ een onbekende groep worden geweigerd; de melding noemt groep en veld.
 wachtwoord mogen inloggen. Ze komen nooit in een Access-policy en nooit in productie.
 `testgebruiker@stagetwo.nl` telt altijd mee, ook als hij er niet in staat.
 
+**De lange vorm van een app.** In plaats van alleen een lijst groepen mag een app ook een
+object zijn. De korte vorm blijft werken:
+
+```json
+"apps": {
+  "direct": { "groepen": ["kantoor"], "openbare_paden": ["/bekijk/*"], "gegevens_naar_test": false }
+}
+```
+
+- `openbare_paden`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
+  klant stuurt. Elk pad begint met `/` en mag eindigen op `*`; de hele app (`/` of `/*`)
+  kan niet. De inrichting maakt daarvoor één extra Access-app `<vv><app>-openbaar` op het
+  adres van de app (niet op de previews), met de herbruikbare policy `<vv>openbaar`
+  (beslissing bypass, iedereen). Die app wint van de deur, omdat hij specifieker is. De
+  gebouwde bestanden (`/assets/*`) en de bestanden uit `public/` (iconen en manifest) gaan
+  vanzelf mee, anders krijgt een bezoeker een lege pagina. Is de lijst leeg of weg, dan
+  haalt de volgende run die app weg, en de policy als geen enkele app hem nog gebruikt.
+  Toegang bijwerken doet dat ook, voor elke app die al een deur heeft. Staat er al een
+  Access-app zonder voorvoegsel op zo'n pad (een omweg met de hand), dan stopt de inrichting
+  tot je die weghaalt. Een groep mag daarom niet `openbaar` heten. Wat een openbare pagina
+  mag tonen, staat in `docs/WERKWIJZE.md` (hoofdstuk 2).
+- `gegevens_naar_test` (standaard `true`): met `false` zet Testdatabase verversen in de
+  beheer-repo voor deze app geen gegevens en bestanden van productie meer in de
+  testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een
+  gebruiker hangen en er toch niets te kopiëren valt.
+
 ## Alleen IT mag toegang.json wijzigen (bij een klant)
 
 `.github/CODEOWNERS` wijst `/beheer/toegang.json` aan een eigenaar toe. Op zichzelf
