@@ -24,7 +24,8 @@
  *   4   Access op de Worker zelf (vóór 3.6, zodat hij er staat vóór de eerste uitrol)
  *   T   met --testdatabase: een tweede Supabase-project `<vv><app>-test` met een eigen
  *       SaaS-app `<vv><app>-test-inlog`, provider en auth-config; de previews wijzen
- *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production.
+ *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production (de
+ *       canary van deploy-db.yml) en preview (de droogloop van migraties, droogloop.yml).
  *       Daar staat inloggen met e-mail aan, maar alleen samen met de aanmeld-hook van
  *       de testdatabase: e-mail alleen voor testaccounts, Cloudflare voor de groepen
  *   3.6 GitHub-variabelen en -secrets per omgeving
@@ -117,6 +118,13 @@ export const OMGEVINGEN = ["production", "preview"];
  * die omgeving.
  */
 export const SECRET_OMGEVING = "production";
+/**
+ * Het wachtwoord van de testdatabase staat ook in omgeving preview: daar draait de droogloop
+ * van migraties (droogloop.yml, via workflow_run altijd in de versie van main). App inrichten
+ * beperkt preview net als production tot main, dus code uit een PR komt er niet bij. Het
+ * wachtwoord van productie komt nooit in preview.
+ */
+export const TEST_SECRET_OMGEVINGEN = [SECRET_OMGEVING, "preview"];
 const GH_VARIABELEN = [
   // Alleen in omgeving production: daar migreert deploy-db.yml. Geen geheim (hij staat ook
   // in VITE_SUPABASE_URL), dus een variabele: dan is in de instellingen te zien op welke
@@ -488,8 +496,9 @@ async function zetVariabelen(d, env, repo, variabelen, gezet) {
 }
 
 /**
- * Zet variabelen per omgeving en op de repo (alleen wat anders is) en secrets in
- * omgeving production, via stdin. `productieVariabelen` komen alleen in production.
+ * Zet variabelen per omgeving en op de repo (alleen wat anders is) en secrets, via stdin.
+ * `productieVariabelen` komen alleen in production. Een secret staat in omgeving production,
+ * of in de omgevingen uit zijn `omgevingen`.
  */
 async function zetGithub(
   d,
@@ -504,17 +513,17 @@ async function zetGithub(
   if (Object.keys(repoVariabelen).length) {
     await zetVariabelen(d, null, repo, repoVariabelen, gezet);
   }
-  const namen = Object.keys(secrets);
-  if (namen.length) {
-    const bestaand = await leesGhSecretNamen(d, SECRET_OMGEVING, repo);
-    for (const naam of namen) {
-      const { waarde, altijd } = secrets[naam];
-      if (!waarde || (!altijd && bestaand.includes(naam))) continue;
+  const bestaand = {};
+  for (const [naam, { waarde, altijd, omgevingen = [SECRET_OMGEVING] }] of Object.entries(
+    secrets,
+  )) {
+    if (!waarde) continue;
+    for (const env of omgevingen) {
+      bestaand[env] ??= await leesGhSecretNamen(d, env, repo);
+      if (!altijd && bestaand[env].includes(naam)) continue;
       // Secrets gaan via stdin, nooit als argument: argumenten zijn zichtbaar in de proceslijst.
-      await d.gh(["secret", "set", naam, "--env", SECRET_OMGEVING, "--repo", repo], {
-        invoer: waarde,
-      });
-      gezet.push(`${SECRET_OMGEVING}/secret ${naam}`);
+      await d.gh(["secret", "set", naam, "--env", env, "--repo", repo], { invoer: waarde });
+      gezet.push(`${env}/secret ${naam}`);
     }
   }
   return gezet;
@@ -797,7 +806,13 @@ async function stapTestdatabase(arg, d, v, { policyIds, gewenstAuth, maskeer, st
     stap("T testdatabase: project", `aangemaakt (${project.ref}, ${REGIO})`);
     // Net als bij productie: meteen bewaren, het wachtwoord is alleen nu bekend.
     await zetGithub(d, arg.repo, {
-      secrets: { SUPABASE_TEST_DB_PASSWORD: { waarde: wachtwoord, altijd: true } },
+      secrets: {
+        SUPABASE_TEST_DB_PASSWORD: {
+          waarde: wachtwoord,
+          altijd: true,
+          omgevingen: TEST_SECRET_OMGEVINGEN,
+        },
+      },
     });
   }
   await d.supabase.wachtTotGezond(project.ref);
@@ -827,22 +842,34 @@ async function stapTestdatabase(arg, d, v, { policyIds, gewenstAuth, maskeer, st
     gewenstAuth: { ...gewenstAuth, ...hookInstellingen(functie) },
   });
   stap("T testdatabase: provider en auth-config", `${k.provider}; auth-config ${k.auth}`);
-  if (
-    v.testProject &&
-    !(await leesGhSecretNamen(d, SECRET_OMGEVING, arg.repo)).includes("SUPABASE_TEST_DB_PASSWORD")
-  ) {
-    // Het oude wachtwoord is niet op te vragen. Voor de testdatabase mag een nieuw: er
-    // staan alleen testgegevens in, en zonder dit secret slaat deploy-db.yml de canary
-    // over en gaan migraties meteen naar productie. Productie krijgt dit nooit.
+  const zonderWachtwoord = [];
+  if (v.testProject) {
+    for (const env of TEST_SECRET_OMGEVINGEN) {
+      const namen = await leesGhSecretNamen(d, env, arg.repo);
+      if (!namen.includes("SUPABASE_TEST_DB_PASSWORD")) zonderWachtwoord.push(env);
+    }
+  }
+  if (zonderWachtwoord.length) {
+    // Het oude wachtwoord is niet op te vragen. Voor de testdatabase mag een nieuw: zonder
+    // dit secret slaat deploy-db.yml de canary over (en gaan migraties meteen naar
+    // productie), en kan de droogloop in preview niet draaien. Een app van vóór versie 39
+    // heeft het nog niet in preview; dan komt er één keer een nieuw, in beide omgevingen.
+    // Productie krijgt dit nooit.
     const wachtwoord = (d.wachtwoord ?? nieuwWachtwoord)();
     maskeer(wachtwoord);
     await d.supabase.zetDatabaseWachtwoord(project.ref, wachtwoord);
     await zetGithub(d, arg.repo, {
-      secrets: { SUPABASE_TEST_DB_PASSWORD: { waarde: wachtwoord, altijd: true } },
+      secrets: {
+        SUPABASE_TEST_DB_PASSWORD: {
+          waarde: wachtwoord,
+          altijd: true,
+          omgevingen: TEST_SECRET_OMGEVINGEN,
+        },
+      },
     });
     stap(
       "T testdatabase: wachtwoord",
-      "ontbrak in de app-repo: nieuw gezet in Supabase en als secret",
+      `ontbrak in omgeving ${zonderWachtwoord.join(" en ")}: nieuw gezet in Supabase en als secret in ${TEST_SECRET_OMGEVINGEN.join(" en ")}`,
     );
   }
   // Voor stack.config.json (in git) de publishable key: de anon-JWT valt over guard:secrets.
@@ -1007,11 +1034,12 @@ export async function richtIn(arg, d) {
     );
   }
   // De testdatabase kan op een andere pooler staan dan productie (aws-0 tegenover aws-1);
-  // deploy-db.yml gebruikt deze voor de canary. Ontbreekt hij, dan valt die terug op productie.
+  // deploy-db.yml gebruikt deze voor de canary (production), droogloop.yml voor de droogloop
+  // van migraties (preview). Ontbreekt hij, dan vallen die terug op die van productie.
   const testPooler = test
     ? await supabase.poolerHost(test.ref).catch((fout) => {
         resultaat.waarschuwingen.push(
-          `de session pooler van de testdatabase was niet op te halen (${fout.message}); zet SUPABASE_TEST_POOLER_HOST in omgeving production met de hand, anders mislukt de canary in deploy-db.yml`,
+          `de session pooler van de testdatabase was niet op te halen (${fout.message}); zet SUPABASE_TEST_POOLER_HOST in de omgevingen production en preview met de hand, anders mislukken de canary in deploy-db.yml en de droogloop van migraties`,
         );
         return null;
       })
@@ -1207,8 +1235,9 @@ export async function ruimOp(arg, d) {
       if (!droog) await d.gh(["variable", "delete", naam, "--repo", arg.repo]);
       namen.push(`repo/${naam}`);
     }
-    // De secrets in omgeving production, en een oud repo-secret van vóór die omgeving.
-    for (const env of [SECRET_OMGEVING, null]) {
+    // De secrets in production (en het testwachtwoord in preview), en een oud repo-secret
+    // van vóór die omgevingen.
+    for (const env of [...TEST_SECRET_OMGEVINGEN, null]) {
       const secrets = await leesGhSecretNamen(d, env, arg.repo);
       for (const naam of [...GH_SECRETS, ...OUDE_SECRETS].filter((n) => secrets.includes(n))) {
         if (!droog) await d.gh(["secret", "delete", naam, ...envArgs(env), "--repo", arg.repo]);

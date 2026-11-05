@@ -1322,6 +1322,13 @@ test("testdatabase: eigen project en eigen SaaS-app, de previews wijzen erheen",
     "SUPABASE_DB_PASSWORD",
     "SUPABASE_TEST_DB_PASSWORD",
   ]);
+  // De droogloop van migraties (droogloop.yml) draait in omgeving preview: daar het
+  // wachtwoord en de pooler van de testdatabase, en nooit het wachtwoord van productie.
+  assert.deepEqual(w.staat.ghSecrets.preview, ["SUPABASE_TEST_DB_PASSWORD"]);
+  assert.equal(
+    w.staat.ghVariabelen.preview.SUPABASE_TEST_POOLER_HOST,
+    "aws-1-eu-central-1.pooler.supabase.com",
+  );
   assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, prod.ref);
   assert.equal(w.staat.ghVariabelen.preview.SUPABASE_PROJECT_REF, undefined);
   // In stack.config.json (git) de publishable key: de anon-JWT valt over guard:secrets.
@@ -1375,6 +1382,40 @@ test("testdatabase: bestaand testproject zonder wachtwoord-secret krijgt een nie
   assert.ok(d.geheimen.includes(WACHTWOORD), "het nieuwe wachtwoord is gemaskeerd");
   assert.equal(r.waarschuwingen.filter((x) => /TEST_DB/.test(x)).length, 0);
   assert.match(r.stappen.find((s) => s.stap === "T testdatabase: wachtwoord").actie, /nieuw gezet/);
+});
+
+test("testdatabase: een app van vóór versie 39 zonder het secret in preview krijgt één keer een nieuw, in beide omgevingen", async () => {
+  const w = nepWolk();
+  const d = opzet(w);
+  await richtIn(TEST_ARG, d);
+  const testProj = w.staat.projecten.find((p) => p.name.endsWith("-test"));
+  // Zo stond het tot versie 39: het testwachtwoord alleen in production.
+  w.staat.ghSecrets.preview = [];
+  w.aanroepen.length = 0;
+  const r = await richtIn(TEST_ARG, d);
+  const resets = w.aanroepen.filter(
+    (a) => a.methode === "PATCH" && a.pad?.endsWith("/database/password"),
+  );
+  assert.equal(resets.length, 1, "alleen de testdatabase, één keer");
+  assert.ok(resets[0].pad.includes(testProj.ref));
+  assert.deepEqual(w.staat.ghSecrets.preview, ["SUPABASE_TEST_DB_PASSWORD"]);
+  assert.ok(w.staat.ghSecrets.production.includes("SUPABASE_TEST_DB_PASSWORD"));
+  const gezet = w.aanroepen
+    .filter((a) => a.methode === "gh secret set")
+    .map((a) => `${a.args[a.args.indexOf("--env") + 1]}/${a.args[2]}`)
+    .sort();
+  assert.deepEqual(gezet, [
+    "preview/SUPABASE_TEST_DB_PASSWORD",
+    "production/SUPABASE_TEST_DB_PASSWORD",
+  ]);
+  assert.match(
+    r.stappen.find((s) => s.stap === "T testdatabase: wachtwoord").actie,
+    /ontbrak in omgeving preview: nieuw gezet in Supabase en als secret in production en preview/,
+  );
+  // Daarna staat het goed: geen nieuw wachtwoord meer.
+  w.aanroepen.length = 0;
+  await richtIn(TEST_ARG, d);
+  assert.ok(!w.aanroepen.some((a) => a.pad?.endsWith("/database/password")));
 });
 
 test("testdatabase: staat het wachtwoord-secret er, dan blijft het wachtwoord ongemoeid", async () => {
@@ -1447,6 +1488,7 @@ test("testdatabase: opruimen haalt het testproject, de test-SaaS-app en het secr
   assert.deepEqual(w.staat.projecten, []);
   assert.ok(!w.staat.apps.some((a) => a.name.endsWith("-test-inlog")));
   assert.ok(!(w.staat.ghSecrets.production ?? []).includes("SUPABASE_TEST_DB_PASSWORD"));
+  assert.ok(!(w.staat.ghSecrets.preview ?? []).includes("SUPABASE_TEST_DB_PASSWORD"));
   assert.ok(r.verwijderd.some((x) => x.naam.startsWith("cf-proef-cf-proef-test")));
 });
 
