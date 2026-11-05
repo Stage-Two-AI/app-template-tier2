@@ -183,6 +183,7 @@ test("droogloop: maakt niets aan en toont de volledige lijst geplande stappen", 
       "3.4 auth-config",
       "3.5 Access-app op de hostname",
       "4 Access op de Worker",
+      "S foutmeldingen (Sentry)",
       "3.6 GitHub-variabelen en -secrets",
     ],
   );
@@ -551,7 +552,8 @@ test("tweede run met alles al aanwezig maakt niets dubbel aan", async () => {
   assert.equal(w.staat.providers.length, 1);
   assert.ok(
     r.stappen
-      .filter((s) => s.stap !== "4 Access op de Worker")
+      // Zonder Sentry-sleutel zegt stap S elke run dat Sentry nog niet gekoppeld is.
+      .filter((s) => !["4 Access op de Worker", "S foutmeldingen (Sentry)"].includes(s.stap))
       .every((s) => /hergebruikt|ongewijzigd/.test(s.actie)),
     JSON.stringify(r.stappen),
   );
@@ -710,7 +712,9 @@ test("tijdelijke stand: een tweede run verandert niets", async () => {
   assert.deepEqual(w.schrijfacties(), []);
   assert.equal(w.staat.apps.length, 2, "inlogdienst en Worker-Access, verder niets");
   assert.ok(
-    r.stappen.every((s) => /hergebruikt|ongewijzigd|overgeslagen: tijdelijke stand/.test(s.actie)),
+    r.stappen
+      .filter((s) => s.stap !== "S foutmeldingen (Sentry)")
+      .every((s) => /hergebruikt|ongewijzigd|overgeslagen: tijdelijke stand/.test(s.actie)),
     JSON.stringify(r.stappen),
   );
 });

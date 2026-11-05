@@ -13,6 +13,16 @@
 
 const CF = "api.cloudflare.com/client/v4/accounts/acc";
 const SB = "api.supabase.com/v1";
+const SENTRY = "sentry.io/api/0";
+const INGEST = "o1.ingest.de.sentry.io";
+
+function leesBody(body) {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return body;
+  }
+}
 
 function antwoord(status, data) {
   return {
@@ -42,6 +52,9 @@ export function nepWolk({
   ghBestanden = {},
   faal = () => null,
   poolerFout = null,
+  // Sentry: teams en projecten ({ slug, id, keys? }) van organisatie "klant"; met
+  // aankomst false komt een proefmelding nooit aan.
+  sentry = {},
 } = {}) {
   const staat = {
     // Wordt true na een PUT van het script (de placeholder) en false na een DELETE.
@@ -64,6 +77,14 @@ export function nepWolk({
     teller: 0,
     // Een HTTP-status: dan faalt de pooler-endpoint met die status (bijvoorbeeld 500).
     poolerFout,
+    sentry: {
+      teams: structuredClone(sentry.teams ?? [{ slug: "klant" }]),
+      projecten: structuredClone(sentry.projecten ?? []),
+      aankomst: sentry.aankomst ?? true,
+      // De event-id's van de proefmeldingen die binnenkwamen (ook als ze niet "aankomen").
+      ontvangen: [],
+      aangekomen: new Set(),
+    },
   };
   const aanroepen = [];
   const nieuwId = (soort) => `${soort}-${++staat.teller}`;
@@ -76,7 +97,7 @@ export function nepWolk({
       opties.body instanceof FormData
         ? opties.body
         : opties.body
-          ? JSON.parse(opties.body)
+          ? leesBody(opties.body)
           : undefined;
     const pad = `${u.host}${u.pathname}`;
     aanroepen.push({ soort: "fetch", methode, pad, url, body, headers: opties.headers });
@@ -236,6 +257,44 @@ export function nepWolk({
       }
       return antwoord(404, { message: `geen nep-route ${methode} ${rest}` });
     }
+    if (pad.startsWith(SENTRY)) {
+      const rest = pad.slice(SENTRY.length);
+      const sn = staat.sentry;
+      let m = rest.match(/^\/organizations\/klant\/(projects|teams)\/$/);
+      if (m && methode === "GET") return antwoord(200, m[1] === "teams" ? sn.teams : sn.projecten);
+      m = rest.match(/^\/teams\/klant\/([^/]+)\/projects\/$/);
+      if (m && methode === "POST") {
+        if (!sn.teams.some((t) => t.slug === m[1]))
+          return antwoord(404, { detail: "team bestaat niet" });
+        const id = String(100 + sn.projecten.length);
+        const p = { slug: body.slug, name: body.name, id, team: m[1], platform: body.platform };
+        sn.projecten.push(p);
+        return antwoord(201, p);
+      }
+      m = rest.match(/^\/projects\/klant\/([^/]+)\/keys\/$/);
+      if (m && methode === "GET") {
+        const p = sn.projecten.find((x) => x.slug === m[1]);
+        if (!p) return antwoord(404, { detail: "project bestaat niet" });
+        return antwoord(
+          200,
+          p.keys ?? [{ isActive: true, dsn: { public: `https://abc${p.id}@${INGEST}/${p.id}` } }],
+        );
+      }
+      m = rest.match(/^\/projects\/klant\/([^/]+)\/events\/([0-9a-f]+)\/$/);
+      if (m && methode === "GET") {
+        return sn.aangekomen.has(m[2])
+          ? antwoord(200, { eventID: m[2] })
+          : antwoord(404, { detail: "Event not found" });
+      }
+      return antwoord(404, { detail: `geen nep-route ${methode} ${rest}` });
+    }
+    if (u.host === INGEST && /^\/api\/\d+\/envelope\/$/.test(u.pathname) && methode === "POST") {
+      const [kop] = String(body).split("\n");
+      const id = JSON.parse(kop).event_id;
+      staat.sentry.ontvangen.push(id);
+      if (staat.sentry.aankomst) staat.sentry.aangekomen.add(id);
+      return antwoord(200, { id });
+    }
     return antwoord(404, { message: `onbekende host ${u.host}` });
   }
 
@@ -334,7 +393,7 @@ export function nepWolk({
       })
       .map((a) => {
         if (a.soort === "fetch") {
-          const kort = a.pad.replace(CF, "cf").replace(SB, "sb");
+          const kort = a.pad.replace(CF, "cf").replace(SB, "sb").replace(SENTRY, "sentry");
           const type = a.body?.type ? ` ${a.body.type}` : "";
           return `${a.methode} ${kort}${type}`;
         }

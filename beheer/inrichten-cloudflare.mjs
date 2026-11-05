@@ -74,6 +74,7 @@ import {
   wachtOpDiscovery,
   workerApp,
 } from "./lib/cloudflare.mjs";
+import { koppelSentry, sentryUitOmgeving } from "./lib/sentry.mjs";
 import {
   afmeldSql,
   alleGebruikers,
@@ -588,6 +589,48 @@ async function leesGhBestand(d, repo, pad) {
   }
 }
 
+// ---------------------------------------------------------------- foutbewaking (Sentry)
+
+export const SENTRY_NIET_GEKOPPELD =
+  "Sentry nog niet gekoppeld: zet SENTRY_AUTH_TOKEN (en SENTRY_ORG) in de omgeving beheer en draai App inrichten opnieuw";
+
+/**
+ * Stap S. Met een Sentry-sleutel in de beheeromgeving (`d.sentry`): het project van deze
+ * app en zijn eigen DSN, met een proefmelding (zie lib/sentry.mjs). Zonder sleutel: de oude
+ * weg van de proef (één DSN uit de beheeromgeving, `d.sentryDsn`), of een duidelijke regel.
+ * Geeft `{ actie, dsn?, waarschuwing? }`; met `dsn` zet 3.6 hem in production, preview en
+ * als PREVIEW_VITE_SENTRY_DSN.
+ */
+async function stapSentry(arg, d, { droog }) {
+  const huidig = droog
+    ? undefined
+    : ((await leesGhVariabelen(d, SECRET_OMGEVING, arg.repo)).find(
+        (v) => v.name === "VITE_SENTRY_DSN",
+      )?.value ?? null);
+  if (d.sentry) {
+    const k = await koppelSentry(d.sentry, {
+      app: arg.app,
+      huidig,
+      droog,
+      slaap: d.slaap,
+      pogingen: d.sentryPogingen,
+      wachtMs: d.sentryWachtMs,
+    });
+    return { actie: k.actie, dsn: k.nieuw ? k.dsn : null, waarschuwing: k.waarschuwing };
+  }
+  if (d.sentryDsn) {
+    return {
+      actie: "DSN uit de beheeromgeving (VITE_SENTRY_DSN), dezelfde voor elke app",
+      dsn: d.sentryDsn,
+    };
+  }
+  if (huidig)
+    return {
+      actie: "staat aan (de DSN stond er al); zonder SENTRY_AUTH_TOKEN niet verder gecontroleerd",
+    };
+  return { actie: droog ? `gepland: niets. ${SENTRY_NIET_GEKOPPELD}` : SENTRY_NIET_GEKOPPELD };
+}
+
 // ---------------------------------------------------------------- stap 4
 
 /**
@@ -639,7 +682,7 @@ function geplandWorker(v, workerBestaat) {
   return PLACEHOLDER_GEPLAND;
 }
 
-function geplandeStappen(arg, v, workerBestaat, openbaarGepland = []) {
+function geplandeStappen(arg, v, workerBestaat, openbaarGepland = [], sentryGepland = "") {
   const bestaat = (x, tekst) => (x ? `bestaat al (${x.id ?? x.ref})` : `gepland: ${tekst}`);
   const policiesErAl = v.gewenst.every((g) => v.policies.some((p) => p.name === g.body.name));
   return [
@@ -682,6 +725,7 @@ function geplandeStappen(arg, v, workerBestaat, openbaarGepland = []) {
       ? [{ stap: "3.5b openbare paden", actie: openbaarGepland.join("; ") }]
       : []),
     { stap: "4 Access op de Worker", actie: geplandWorker(v, workerBestaat) },
+    { stap: "S foutmeldingen (Sentry)", actie: sentryGepland },
     {
       stap: "3.6 GitHub-variabelen en -secrets",
       actie: `gepland in ${arg.repo ?? "(geen repo)"}: variabelen in ${OMGEVINGEN.join(" en ")} (SUPABASE_PROJECT_REF alleen in ${SECRET_OMGEVING}), ${GH_PREVIEW_VARIABELEN.join(", ")} als repo-variabelen, secrets in omgeving ${SECRET_OMGEVING}`,
@@ -836,6 +880,7 @@ export async function richtIn(arg, d) {
       v,
       await d.cf.workerBestaat(arg.worker),
       openbaarGepland,
+      (await stapSentry(arg, d, { droog: true })).actie,
     );
     return resultaat;
   }
@@ -943,6 +988,11 @@ export async function richtIn(arg, d) {
   const w = await stapWorker(arg, d, v, policyIds);
   stap(w.stap, w.actie);
 
+  // S foutmeldingen: een eigen Sentry-project en DSN per app, vóór 3.6 zodat de DSN mee kan
+  const sentry = await stapSentry(arg, d, { droog: false });
+  stap("S foutmeldingen (Sentry)", sentry.actie);
+  if (sentry.waarschuwing) resultaat.waarschuwingen.push(sentry.waarschuwing);
+
   // 3.6 GitHub
   // Zonder pooler loopt de rest door; alleen deploy-db heeft hem nodig.
   const pooler = await supabase.poolerHost(project.ref).catch((fout) => {
@@ -974,8 +1024,8 @@ export async function richtIn(arg, d) {
       CLOUDFLARE_ACCOUNT_ID: d.accountId,
       ...(pooler ? { SUPABASE_POOLER_HOST: pooler } : {}),
       ...(testPooler ? { SUPABASE_TEST_POOLER_HOST: testPooler } : {}),
-      // Sentry staat alleen aan als de beheeromgeving een DSN heeft; anders niets.
-      ...(d.sentryDsn ? { VITE_SENTRY_DSN: d.sentryDsn } : {}),
+      // Sentry: de DSN van stap S, alleen als die nieuw is; een bestaande blijft staan.
+      ...(sentry.dsn ? { VITE_SENTRY_DSN: sentry.dsn } : {}),
     },
     // De preview draait op de testdatabase als die er is, anders op hetzelfde project.
     // Een eigen database gebruikt schema public.
@@ -984,7 +1034,7 @@ export async function richtIn(arg, d) {
       PREVIEW_VITE_SUPABASE_ANON_KEY: test?.anon ?? sleutels.anon,
       PREVIEW_VITE_SUPABASE_SCHEMA: "public",
       PREVIEW_VITE_INLOGDIENST: "cloudflare",
-      ...(d.sentryDsn ? { PREVIEW_VITE_SENTRY_DSN: d.sentryDsn } : {}),
+      ...(sentry.dsn ? { PREVIEW_VITE_SENTRY_DSN: sentry.dsn } : {}),
     },
     // De project-ref alleen in production, waar deploy-db.yml migreert; het wachtwoord
     // staat er al (direct na het aanmaken van het project).
@@ -1424,7 +1474,12 @@ if (
     arg.hostname ??= config?.hostname ?? null;
     arg.worker = config?.worker ?? null;
     arg.stand = config?.stand ?? null;
-    for (const naam of ["CLOUDFLARE_PROEF_TOKEN", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"])
+    for (const naam of [
+      "CLOUDFLARE_PROEF_TOKEN",
+      "SUPABASE_ACCESS_TOKEN",
+      "GH_TOKEN",
+      "SENTRY_AUTH_TOKEN",
+    ])
       maskeer(process.env[naam]);
     const ghNodig = !arg.droogloop && ["inrichten", "opruimen"].includes(modus);
     if (ghNodig) eis("GH_TOKEN");
@@ -1447,7 +1502,10 @@ if (
         .map((x) => x.trim())
         .filter(Boolean),
       groepenIdp: leesGroepenIdp(process.env.CLOUDFLARE_GROEPEN_IDP),
-      // Optioneel: met een DSN zet de inrichting Sentry aan (zie beheer/README.md).
+      // Optioneel: met SENTRY_AUTH_TOKEN en SENTRY_ORG krijgt elke app een eigen
+      // Sentry-project en DSN. Zonder sleutel nog de oude weg van de proef: één DSN
+      // (VITE_SENTRY_DSN) voor elke app. Zie beheer/README.md.
+      sentry: modus === "inrichten" ? sentryUitOmgeving(process.env) : null,
       sentryDsn: process.env.VITE_SENTRY_DSN?.trim() || undefined,
       maskeer,
     };

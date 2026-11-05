@@ -62,7 +62,10 @@ Verder in omgeving `proef-beheer`, als variabelen (geen secrets):
 | `CLOUDFLARE_TEAM_DOMAIN` | de teamnaam uit P1, bijvoorbeeld `stagetwo` of `stagetwo.cloudflareaccess.com` |
 | `CLOUDFLARE_IDP_IDS` | optioneel: id's van de toegestane inlogmethoden, met komma's. Leeg = alleen one-time PIN. Een gewijzigde lijst zet een volgende run ook op bestaande Access-apps (met één methode meteen doorsturen) |
 | `CLOUDFLARE_GROEPEN_IDP` | optioneel: `azureAD:<id>` als een groep `idp_groepen` gebruikt |
-| `VITE_SENTRY_DSN` | optioneel: zet hier de DSN van het Sentry-project om Sentry in de app aan te zetten; de inrichting zet hem dan als `VITE_SENTRY_DSN` in `production` en `preview` en als `PREVIEW_VITE_SENTRY_DSN` op de repo. Leeg = Sentry uit |
+| `SENTRY_ORG` | optioneel, samen met het secret `SENTRY_AUTH_TOKEN`: de slug van de organisatie in Sentry. Dan krijgt elke app een eigen Sentry-project en DSN (zie "Foutbewaking" hieronder) |
+| `SENTRY_TEAM` | optioneel: het team in Sentry voor nieuwe projecten. Alleen nodig als de organisatie meer dan één team heeft |
+| `SENTRY_URL` | optioneel: `https://de.sentry.io` voor een organisatie in de EU-regio. Leeg = `https://sentry.io` |
+| `VITE_SENTRY_DSN` | alleen voor de proef, als er geen `SENTRY_AUTH_TOKEN` is: één DSN die de inrichting bij elke app zet. Bij een klant niet gebruiken: met één DSN zie je in Sentry niet uit welke app een fout komt |
 
 Beperk de omgevingen `proef-beheer`, `production` en `preview` tot de tak `main`
 (Settings > Environments > Deployment branches). Dat kan ook voor `preview`, omdat de
@@ -75,9 +78,9 @@ Wat de inrichting in de app-repo zet:
 
 | Waar | Wat |
 |---|---|
-| omgevingen `production` en `preview`, variabelen | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_INLOGDIENST`, `CLOUDFLARE_ACCOUNT_ID`, en `VITE_SENTRY_DSN` als de beheeromgeving die heeft |
+| omgevingen `production` en `preview`, variabelen | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_INLOGDIENST`, `CLOUDFLARE_ACCOUNT_ID`, en `VITE_SENTRY_DSN` (de DSN van het eigen Sentry-project, als die nog ontbrak) |
 | omgeving `production`, variabele | `SUPABASE_PROJECT_REF`: de database waar `deploy-db.yml` op migreert. Geen geheim (hij staat ook in `VITE_SUPABASE_URL`), dus zichtbaar in de instellingen van de app |
-| repo-variabelen | `PREVIEW_VITE_SUPABASE_URL`, `PREVIEW_VITE_SUPABASE_ANON_KEY`, `PREVIEW_VITE_SUPABASE_SCHEMA` (`public`), `PREVIEW_VITE_INLOGDIENST`, en `PREVIEW_VITE_SENTRY_DSN` als de beheeromgeving `VITE_SENTRY_DSN` heeft |
+| repo-variabelen | `PREVIEW_VITE_SUPABASE_URL`, `PREVIEW_VITE_SUPABASE_ANON_KEY`, `PREVIEW_VITE_SUPABASE_SCHEMA` (`public`), `PREVIEW_VITE_INLOGDIENST`, en `PREVIEW_VITE_SENTRY_DSN` (dezelfde DSN als hierboven) |
 | omgeving `production`, secrets | `SUPABASE_DB_PASSWORD`, en met `--testdatabase` ook `SUPABASE_TEST_DB_PASSWORD` (ontbreekt dat bij een bestaande testdatabase, dan zet een volgende run een nieuw testwachtwoord; productie nooit) |
 
 **De project-ref was tot versie 39 een secret.** Een volgende run zet hem als variabele en
@@ -87,6 +90,22 @@ versie 39: `vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF`); staat d
 een oudere versie, dan blijft het secret staan en meldt het resultaat dat. Werk de app dan
 bij en draai de inrichting nog een keer. Opruimen haalt de variabele en een achtergebleven
 oud secret allebei weg.
+
+**Foutbewaking (Sentry).** Staat in de beheeromgeving het secret `SENTRY_AUTH_TOKEN` met
+de variabele `SENTRY_ORG`, dan zorgt stap S van de inrichting voor één Sentry-project per
+app, met de naam van de app (`<app>`, zonder voorvoegsel; de organisatie in Sentry is van de
+klant). Bestaat het project, dan gebruikt hij dat; anders maakt hij het aan, in `SENTRY_TEAM`
+of in het enige team van de organisatie. Zijn DSN komt als `VITE_SENTRY_DSN` in `production`
+en `preview` en als `PREVIEW_VITE_SENTRY_DSN` op de repo. Daarna stuurt hij één proefmelding
+rechtstreeks naar die DSN (omgeving `proef`) en kijkt hij tot twee minuten of die in Sentry
+aankomt; zo niet, dan een waarschuwing in het resultaat. Een DSN die er al staat (met de hand
+gezet) blijft staan: de stap vult alleen aan wat ontbreekt, en stuurt dan geen proefmelding.
+Zonder sleutel staat in het resultaat: "Sentry nog niet gekoppeld: zet SENTRY_AUTH_TOKEN (en
+SENTRY_ORG) in de omgeving beheer en draai App inrichten opnieuw". De sleutel is een token van
+een interne integratie in Sentry (Settings, Custom Integrations, Internal Integration) met
+Project: Write (aanmaken en de DSN lezen), Team: Read en Issue & Event: Read (de proefmelding terugzien).
+Opruimen haalt de variabelen weg, maar laat het Sentry-project staan (met de geschiedenis van
+de fouten); dat verwijder je zo nodig in Sentry.
 
 **Testdatabase (`--testdatabase`).** Voor een app met een eigen database (`database: true`
 in `stack.config.json`) maakt de inrichting een tweede Supabase-project
@@ -114,7 +133,7 @@ bijwerken doet hetzelfde bij elke run, ook voor een testdatabase van vóór vers
 
 De PR-job in `uitrollen.yml` noemt geen omgeving en leest daarom de `PREVIEW_`-
 repovariabelen (geen secrets, ze staan toch in de bundel). `PREVIEW_VITE_SENTRY_DSN` zet
-het script alleen met een `VITE_SENTRY_DSN` in de beheeromgeving. Ontbreekt `PREVIEW_VITE_SUPABASE_URL` bij een app met
+het script samen met `VITE_SENTRY_DSN` (zie "Foutbewaking"). Ontbreekt `PREVIEW_VITE_SUPABASE_URL` bij een app met
 database, dan meldt de PR-job dat en komt er geen preview.
 
 De databasesecrets staan in omgeving `production`, niet op de repo: een workflow op een
