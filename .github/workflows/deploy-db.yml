@@ -103,6 +103,16 @@ jobs:
       # production de variabele SUPABASE_POOLER_HOST (zie Supabase > Connect > Session
       # pooler, bijvoorbeeld aws-0-eu-central-1.pooler.supabase.com); dan gaat het via
       # de session pooler op IPv4, met gebruiker postgres.<ref>.
+      #
+      # Voorlopige migraties: de workflow Migratie op test van de beheer-repo zet de migraties
+      # van een open pull request alvast op de testdatabase, met een regel in de geschiedenis.
+      # Die versies staan niet in supabase/migrations/ van main, en daarop weigert
+      # `supabase db push` (ook met --include-all). Daarom gaan die regels even opzij, naar de
+      # tabel supabase_migrations.canary_opzij, en na de push terug, ook als de push mislukt.
+      # De tabellen zelf blijven ongemoeid, en de opgeslagen SQL blijft bewaard (daarmee ziet
+      # Migratie op test of een voorlopige migratie sindsdien is gewijzigd). Bleef er van een
+      # afgebroken run iets in canary_opzij staan, dan gaat dat eerst terug. psql staat op de
+      # runners van GitHub klaar (net als voor de kopie in herstel).
       - name: Canary - migraties toepassen op de testdatabase
         if: steps.check.outputs.skip != 'true' && steps.canary.outputs.doen == 'true'
         env:
@@ -115,7 +125,42 @@ jobs:
           # Eerst het masker voor het gecodeerde wachtwoord, dan pas het adres.
           node scripts/db-url.mjs --mask
           DB_URL=$(node scripts/db-url.mjs)
-          pnpm exec supabase db push --db-url "$DB_URL" --include-all
+          sql() { psql "$DB_URL" -X -q -A -t -v ON_ERROR_STOP=1 -c "$1"; }
+
+          terugzetten() {
+            sql "do \$\$ begin
+              if to_regclass('supabase_migrations.canary_opzij') is not null then
+                insert into supabase_migrations.schema_migrations
+                  select * from supabase_migrations.canary_opzij on conflict (version) do nothing;
+                drop table supabase_migrations.canary_opzij;
+              end if;
+            end \$\$;"
+          }
+
+          # Eerst wat een afgebroken run nog opzij had staan.
+          terugzetten
+
+          lokaal=$(ls supabase/migrations/*.sql 2>/dev/null | sed 's#.*/##; s#_.*##' | grep -E '^[0-9]+$' | sort -u || true)
+          op_test=""
+          if [ "$(sql "select to_regclass('supabase_migrations.schema_migrations') is not null")" = "t" ]; then
+            op_test=$(sql "select version from supabase_migrations.schema_migrations" | grep -E '^[0-9]+$' | sort -u || true)
+          fi
+          voorlopig=$(comm -13 <(printf '%s\n' "$lokaal") <(printf '%s\n' "$op_test") | grep . | tr '\n' ' ' || true)
+
+          if [ -n "${voorlopig// }" ]; then
+            echo "::notice::Voorlopige migraties van een andere pull request op de testdatabase, even opzij gezet: $voorlopig"
+            lijst=$(printf "'%s'," $voorlopig)
+            sql "create table if not exists supabase_migrations.canary_opzij (like supabase_migrations.schema_migrations including all);
+              insert into supabase_migrations.canary_opzij
+                select * from supabase_migrations.schema_migrations where version in (${lijst%,})
+                on conflict (version) do nothing;
+              delete from supabase_migrations.schema_migrations where version in (${lijst%,});"
+          fi
+          # Ook als de push mislukt gaan de regels terug; daarna telt de uitkomst van de push.
+          uitkomst=0
+          pnpm exec supabase db push --db-url "$DB_URL" --include-all || uitkomst=$?
+          terugzetten
+          exit "$uitkomst"
 
       # Terug kunnen zonder point-in-time-recovery: vlak vóór een migratie die bestaande
       # gegevens omzet (UPDATE of DELETE), een kopie van de tabellen die hij raakt in het

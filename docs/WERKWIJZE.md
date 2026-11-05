@@ -287,7 +287,10 @@ Wat erop draait:
   Inloggen gaat daar als testgebruiker, zie hieronder.
 - **Migraties, als eerste.** Bij een merge past Actions de migraties eerst toe op de
   testdatabase (de canary) en pas daarna op productie. Faalt het op de testdatabase, dan
-  blijft productie zoals hij was.
+  blijft productie zoals hij was. Staan er migraties van een andere, nog open PR al op de
+  testdatabase (workflow **Migratie op test** in de beheer-repo, voor een werkende preview),
+  dan zet de canary die regels in de migratiegeschiedenis even opzij en daarna terug; hun
+  tabellen blijven staan.
 
 In `stack.config.json` staat welk project het is; het databasewachtwoord ervan is het
 Actions-secret `SUPABASE_TEST_DB_PASSWORD`:

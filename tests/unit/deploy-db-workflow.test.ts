@@ -99,6 +99,51 @@ describe("deploy-db.yml", () => {
     expect(controle?.run).toContain('-z "$PROJECT_REF"');
   });
 
+  it("zet in de canary voorlopige migraties van andere PR's even opzij, en daarna terug", () => {
+    // Migratie op test (beheer-repo) zet de migraties van een open PR al op de testdatabase,
+    // met een regel in de geschiedenis. Zonder deze stap weigert `supabase db push` daar.
+    const canary = migratiejobs[0]?.[1].steps.find((s) => s.name?.startsWith("Canary"));
+    const run = canary?.run ?? "";
+    const adres = run.indexOf("DB_URL=$(node scripts/db-url.mjs)");
+    const push = run.indexOf("supabase db push");
+    const plek = (tekst: string, vanaf = 0) => run.indexOf(tekst, vanaf);
+
+    // De versies op test die niet in supabase/migrations/ van main staan.
+    const lokaal = plek("ls supabase/migrations/*.sql");
+    const opTest = plek("select version from supabase_migrations.schema_migrations");
+    const verschil = plek("comm -13");
+    expect(lokaal).toBeGreaterThan(adres);
+    expect(opTest).toBeGreaterThan(adres);
+    expect(verschil).toBeGreaterThan(Math.max(lokaal, opTest));
+
+    // Opzij: eerst bewaren in canary_opzij, dan pas weghalen uit de geschiedenis, vóór de push.
+    const bewaren = plek("insert into supabase_migrations.canary_opzij");
+    const weghalen = plek("delete from supabase_migrations.schema_migrations");
+    expect(bewaren).toBeGreaterThan(verschil);
+    expect(weghalen).toBeGreaterThan(bewaren);
+    expect(push).toBeGreaterThan(weghalen);
+    expect(run).toContain("::notice::Voorlopige migraties");
+
+    // Terug: de bewaarde regels (met hun SQL) gaan terug, ook als de push mislukt, en daarna
+    // telt de uitkomst van de push. Een restant van een afgebroken run gaat eerst terug.
+    expect(run).toMatch(
+      /insert into supabase_migrations\.schema_migrations\s+select \* from supabase_migrations\.canary_opzij/,
+    );
+    expect(run).toContain("drop table supabase_migrations.canary_opzij");
+    expect(run).toMatch(/supabase db push --db-url "\$DB_URL" --include-all \|\| uitkomst=\$\?/);
+    const aanroepen = [...run.matchAll(/^\s*terugzetten\s*$/gm)].map((m) => m.index ?? -1);
+    expect(aanroepen.length).toBe(2);
+    expect(aanroepen[0]).toBeLessThan(verschil);
+    expect(aanroepen[1]).toBeGreaterThan(push);
+    expect(plek('exit "$uitkomst"')).toBeGreaterThan(aanroepen[1] ?? 0);
+
+    // Geen `migration repair`: dat gooit de opgeslagen SQL weg, en daarmee ziet Migratie op
+    // test niet meer of een voorlopige migratie sindsdien is gewijzigd.
+    expect(run).not.toContain("migration repair");
+    // Alleen versies van cijfers komen in de SQL terecht.
+    expect(run.match(/grep -E '\^\[0-9\]\+\$'/g)?.length).toBe(2);
+  });
+
   it("maakt vlak vóór de migraties op productie een kopie in het schema herstel", () => {
     const stappen = migratiejobs[0]?.[1].steps ?? [];
     const kopie = stappen.findIndex((s) => s.run?.includes("node scripts/herstel-kopie.mjs"));
