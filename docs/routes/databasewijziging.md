@@ -188,7 +188,10 @@ Bevestigd: destructieve migratie
    `stack.config.json` staat). Faalt het daar, dan stopt het hier en blijft productie
    onaangeroerd. Lees dan de log van de workflow "Database bijwerken" en repareer met
    een nieuwe migratie.
-2. Daarna dezelfde migratie op **productie**.
+2. Daarna dezelfde migratie op **productie**. Op welk Supabase-project dat is, staat in de
+   instellingen van de repo: variabele `SUPABASE_PROJECT_REF` in omgeving `production`
+   (Settings > Environments). Een app die nog niet opnieuw is ingericht, heeft hem nog als
+   secret; dat werkt ook.
 3. GitHub Actions zet de nieuwe versie op Cloudflare neer.
 
 Migraties draaien **alleen bij een merge naar `main`**, nooit op een PR. Een PR mag

@@ -56,7 +56,9 @@ describe("deploy-db.yml", () => {
       `${EXPRESSIE} secrets.SUPABASE_TEST_DB_PASSWORD }}`,
       `${EXPRESSIE} secrets.SUPABASE_DB_PASSWORD }}`,
     ]);
-    expect(env[1]?.PROJECT_REF).toBe(`${EXPRESSIE} secrets.SUPABASE_PROJECT_REF }}`);
+    expect(env[1]?.PROJECT_REF).toBe(
+      `${EXPRESSIE} vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}`,
+    );
     expect(env[0]?.POOLER).toBe(
       `${EXPRESSIE} vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}`,
     );
@@ -80,10 +82,15 @@ describe("deploy-db.yml", () => {
     }
   });
 
+  it("leest de project-ref als variabele, met het secret als vangnet, nergens alleen als secret", () => {
+    expect(tekst).not.toMatch(/\{\{\s*secrets\.SUPABASE_PROJECT_REF\s*\}\}/);
+  });
+
   it("slaat met een melding over als wachtwoord of project-ref ontbreekt", () => {
-    const controle = migratiejobs[0]?.[1].steps.find((s) => s.name === "Zijn de secrets al gezet?");
+    const controle = migratiejobs[0]?.[1].steps.find((s) => s.name === "Is alles ingericht?");
     expect(controle?.env).toEqual({
-      PROJECT_REF: `${EXPRESSIE} secrets.SUPABASE_PROJECT_REF }}`,
+      // De project-ref is een variabele; het oude secret blijft als vangnet.
+      PROJECT_REF: `${EXPRESSIE} vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}`,
       WACHTWOORD: `${EXPRESSIE} secrets.SUPABASE_DB_PASSWORD }}`,
     });
     expect(controle?.run).toContain("::notice::");
