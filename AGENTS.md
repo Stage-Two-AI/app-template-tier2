@@ -153,6 +153,10 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   wijziging aan het contract en dus een aanvraag bij de eigenaar, geen bestand hier.
 - **Elke nieuwe tabel krijgt RLS aan, een `grant` én policies**, plus een test in
   `tests/rls/` die controleert dat gebruiker A niet bij de gegevens van B komt.
+- **Geen `using (true)`** voor `anon` of zonder `to`-regel. Voor `to authenticated` alleen
+  op een tabel die met een reden in `open_tabellen` in `stack.config.json` staat (vraag de
+  gebruiker of iedereen binnen dit echt mag zien). Een rol in `leesrollen` (waarmee een
+  andere app deze database leest) krijgt alleen `select`.
 - **Heeft de app geen database, verzin er dan geen.** Moet de app iets bewaren of op
   vaste tijden iets doen, dan is dat het signaal om `database` om te zetten (Supabase,
   met Storage voor bestanden en `pg_cron` voor terugkerende taken). Gebruik nooit

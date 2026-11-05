@@ -52,6 +52,10 @@ for (const line of raw.split("\n")) {
 const apiUrl = values.get("API_URL");
 const anonKey = values.get("ANON_KEY");
 const serviceRoleKey = values.get("SERVICE_ROLE_KEY");
+// Het adres van de lokale database (postgres:postgres op 127.0.0.1, geen geheim). Voor de
+// tests die de policies en rechten in de database zelf lezen (tests/rls/open-policies.test.ts)
+// en voor supabase/testrol.sql in de browsertest.
+const dbUrl = values.get("DB_URL") ?? "";
 
 if (!apiUrl || !anonKey || !serviceRoleKey) {
   console.error("✗ De statusuitvoer bevatte niet alle verwachte waarden.");
@@ -70,6 +74,7 @@ const testEnv = [
   `SUPABASE_URL=${apiUrl}`,
   `SUPABASE_ANON_KEY=${anonKey}`,
   `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`, // guard-secrets:allow
+  `SUPABASE_DB_URL=${dbUrl}`,
   "",
 ].join("\n");
 

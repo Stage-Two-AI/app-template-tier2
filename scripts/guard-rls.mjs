@@ -1,7 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fail, pass, skip } from "./lib/changed-files.mjs";
-import { bezitDatabase } from "./lib/stack-config.mjs";
+import {
+  leesMigraties,
+  problemenMetOpenPolicies,
+  schrijfrechtenVoorLeesrollen,
+  tabellenInPublic,
+} from "./lib/rls-regels.mjs";
+import { bezitDatabase, leesRollen, openTabellen } from "./lib/stack-config.mjs";
 
 /**
  * In een browser-app is de database je beveiliging: er is geen tussenlaag die
@@ -9,52 +13,56 @@ import { bezitDatabase } from "./lib/stack-config.mjs";
  * is dus geen slordigheid maar een datalek, en het is er een die je van buiten
  * niet ziet, want de app werkt gewoon.
  *
- * Deze guard leest álle migraties (niet alleen de gewijzigde) en eist dat elke
- * tabel in het schema `public` RLS aan heeft staan én minstens één policy heeft.
+ * Deze guard leest álle migraties (niet alleen de gewijzigde) en eist:
+ *
+ * 1. elke tabel in het schema `public` heeft RLS aan én minstens één policy;
+ * 2. geen policy met `using (true)` of `with check (true)` voor `anon` of `public`, en voor
+ *    `authenticated` (of een eigen rol) alleen op een tabel in `open_tabellen` in
+ *    stack.config.json, met een reden;
+ * 3. een leesrol (`leesrollen` in stack.config.json, de rol waarmee een andere app deze
+ *    database leest) krijgt nergens insert, update, delete of truncate.
+ *
+ * Dit is de snelle controle op de tekst van de migraties, al bij een concept-PR. De echte
+ * poort voor 2 en 3 is tests/rls/open-policies.test.ts: die leest de policies en rechten uit
+ * de database zelf, ook als ze in een functie zijn gemaakt.
  */
 if (!bezitDatabase()) {
   skip("deze app bezit geen database, dus ook geen tabellen om te beveiligen");
 }
 
-const MIGRATIONS_DIR = "supabase/migrations";
-
-function stripComments(sql) {
-  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
-}
-
-function readAllMigrations() {
-  let names;
-  try {
-    names = readdirSync(MIGRATIONS_DIR)
-      .filter((name) => name.endsWith(".sql"))
-      .sort();
-  } catch {
-    return null;
-  }
-  return names
-    .map((name) => stripComments(readFileSync(join(MIGRATIONS_DIR, name), "utf8")))
-    .join("\n");
-}
-
-const sql = readAllMigrations();
+const sql = leesMigraties();
 if (sql === null) pass("nog geen migraties");
 
-const tables = new Set();
+const tables = tabellenInPublic(sql);
 
-const createTable = /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?("?[\w.]+"?)/gi;
-for (const match of sql.matchAll(createTable)) {
-  const raw = (match[1] ?? "").replaceAll('"', "");
-  const parts = raw.split(".");
-  const schema = parts.length > 1 ? parts[0] : "public";
-  const table = parts.at(-1);
-  if (schema === "public" && table) tables.add(table);
+const open = openTabellen();
+const leesrollen = leesRollen();
+const openProblemen = problemenMetOpenPolicies(sql, open);
+const schrijvendeLeesrollen = schrijfrechtenVoorLeesrollen(sql, leesrollen);
+
+if (openProblemen.length > 0) {
+  fail("Er is een policy die iedereen alle rijen geeft (using (true)).", [
+    ...openProblemen.map((p) => `- ${p}`),
+    "",
+    "Zo'n policy laat iedereen met die rol alle rijen zien of schrijven. Twee wegen:",
+    "",
+    "  - Hoort elke gebruiker alleen zijn eigen rijen te zien? Maak de policy smal:",
+    "      using (auth.uid() = owner_id)",
+    "  - Mag iedereen die binnen is dit echt zien (een kalender, een lijst producten)?",
+    "    Zet de tabel dan met een reden in stack.config.json:",
+    '      "open_tabellen": { "<tabel>": "<waarom iedereen binnen dit mag zien>" }',
+    "    Dat mag alleen voor `to authenticated` of een eigen rol, nooit voor anon of public.",
+  ]);
 }
 
-const dropTable = /\bdrop\s+table\s+(?:if\s+exists\s+)?("?[\w.]+"?)/gi;
-for (const match of sql.matchAll(dropTable)) {
-  const raw = (match[1] ?? "").replaceAll('"', "");
-  const table = raw.split(".").at(-1);
-  if (table) tables.delete(table);
+if (schrijvendeLeesrollen.length > 0) {
+  fail("Een leesrol krijgt schrijfrechten.", [
+    ...schrijvendeLeesrollen.map((p) => `- ${p}`),
+    "",
+    "Een rol in `leesrollen` (stack.config.json) is de rol waarmee een andere app deze",
+    "database leest. Die mag alleen lezen: geef hem `select`, bij voorkeur op views in `api`.",
+    "Schrijven gaat via een functie in de app die de database beheert.",
+  ]);
 }
 
 if (tables.size === 0) pass("geen tabellen in het schema public");
@@ -89,6 +97,6 @@ fail("Er is een tabel zonder werkende beveiliging.", [
   "",
   "Let op: RLS aanzetten zonder policy betekent dat niemand er meer bij kan.",
   "Een policy zonder RLS betekent dat iedereen er bij kan. Je hebt ze allebei nodig.",
-  "En schrijf er een test bij in tests/rls/ die controleert dat gebruiker A",
-  "niet bij de gegevens van gebruiker B komt.",
+  "En schrijf er een test bij in tests/rls/ met controleerAfscherming (tests/rls/lib/afscherming.ts):",
+  "die controleert dat gebruiker B niet bij de gegevens van gebruiker A komt.",
 ]);

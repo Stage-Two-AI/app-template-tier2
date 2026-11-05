@@ -72,6 +72,26 @@ rijen mag hij dan zien (`policy`). Vergeet je de grant, dan krijgt de app
 `permission denied for table` terwijl je policies kloppen. Dat is niet onveilig,
 maar wel stuk, en de RLS-test laat het meteen zien.
 
+**Geen `using (true)`, tenzij de tabel bewust open staat.** Een policy met `using (true)` of
+`with check (true)` geeft iedereen met die rol alle rijen. Voor `anon` of zonder `to`-regel
+(dan geldt hij voor iedereen met de openbare sleutel) blokkeert de poort hem altijd. Voor
+`to authenticated` (of een eigen rol) alleen als de tabel met een reden in
+`stack.config.json` staat:
+
+```json
+"open_tabellen": { "feestdagen": "kalender voor iedereen binnen, geen persoonsgegevens" }
+```
+
+Vraag de gebruiker of iedereen die binnen is dit echt mag zien, en zet zijn antwoord als
+reden. De controle staat twee keer in de poort: `guard:rls` leest de migraties (al bij een
+concept), en `tests/rls/open-policies.test.ts` leest de policies uit de database zelf.
+
+**Een leesrol schrijft niet.** Leest een andere app deze database via een eigen rol
+(bijvoorbeeld `intern_lezer` op een datalake), dan staat die rol in `stack.config.json` bij
+`"leesrollen": ["intern_lezer"]`. Zo'n rol krijgt alleen `select`, bij voorkeur op views in
+`api`. Elke `grant insert`, `update` of `delete` aan die rol is rood: schrijven gaat via een
+functie in de app die de database beheert.
+
 ## Stap 3: Schrijf de RLS-test
 
 Voor elke nieuwe tabel, in `tests/rls/`. Het patroon staat in `tests/rls/items.test.ts`:

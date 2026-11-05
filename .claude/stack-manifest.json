@@ -54,10 +54,12 @@
       "scripts/lib/stack-config.mjs",
       "scripts/lib/db-types.mjs",
       "scripts/lib/destructief.mjs",
+      "scripts/lib/rls-regels.mjs",
       "scripts/lib/cloudflare-config.mjs",
       "scripts/guard-tests.mjs",
       "scripts/guard-migrations.mjs",
       "scripts/guard-rls.mjs",
+      "scripts/open-tabellen-opnemen.mjs",
       "scripts/guard-secrets.mjs",
       "scripts/guard-escape-hatches.mjs",
       "scripts/guard-template.mjs",
@@ -92,7 +94,10 @@
       "tests/unit/guard-template.test.ts",
       "tests/unit/mail.test.ts",
       "tests/unit/testlogin.test.ts",
-      "tests/unit/uitrollen-workflow.test.ts"
+      "tests/unit/uitrollen-workflow.test.ts",
+      "tests/unit/rls-regels.test.ts",
+      "tests/rls/open-policies.test.ts",
+      "tests/rls/lib/database.ts"
     ],
     "sleutelsSamenvoegen": {
       "package.json": ["scripts", "devDependencies"]
