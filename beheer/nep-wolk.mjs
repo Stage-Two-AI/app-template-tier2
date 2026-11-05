@@ -38,6 +38,8 @@ export function nepWolk({
   providers = [],
   ghVariabelen = {},
   ghSecrets = {},
+  // Bestanden op de standaardtak van de app-repo, voor `gh api repos/<repo>/contents/<pad>`.
+  ghBestanden = {},
   faal = () => null,
   poolerFout = null,
 } = {}) {
@@ -288,6 +290,13 @@ export function nepWolk({
     aanroepen.push({ soort: "gh", methode: `gh ${args[0]} ${args[1]}`, args, invoer });
     const env = args.includes("--env") ? args[args.indexOf("--env") + 1] : "repo";
     const [soort, actie, naam] = args;
+    if (soort === "api") {
+      const m = actie.match(/^repos\/[^/]+\/[^/]+\/contents\/(.+)$/);
+      if (m && Object.hasOwn(ghBestanden, m[1])) {
+        return Buffer.from(ghBestanden[m[1]], "utf8").toString("base64");
+      }
+      throw new Error(`gh api ${actie} gaf 1: gh: Not Found (HTTP 404)`);
+    }
     if (soort === "variable" && actie === "list") {
       const v = staat.ghVariabelen[env] ?? {};
       return JSON.stringify(Object.entries(v).map(([name, value]) => ({ name, value })));
@@ -321,7 +330,7 @@ export function nepWolk({
       .filter((a) => {
         if (a.soort === "fetch") return a.methode !== "GET";
         if (a.soort === "admin") return !["listProviders", "listUsers"].includes(a.methode);
-        return !a.args.includes("list");
+        return !a.args.includes("list") && a.args[0] !== "api";
       })
       .map((a) => {
         if (a.soort === "fetch") {

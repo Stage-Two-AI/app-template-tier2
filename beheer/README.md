@@ -76,8 +76,17 @@ Wat de inrichting in de app-repo zet:
 | Waar | Wat |
 |---|---|
 | omgevingen `production` en `preview`, variabelen | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_INLOGDIENST`, `CLOUDFLARE_ACCOUNT_ID`, en `VITE_SENTRY_DSN` als de beheeromgeving die heeft |
+| omgeving `production`, variabele | `SUPABASE_PROJECT_REF`: de database waar `deploy-db.yml` op migreert. Geen geheim (hij staat ook in `VITE_SUPABASE_URL`), dus zichtbaar in de instellingen van de app |
 | repo-variabelen | `PREVIEW_VITE_SUPABASE_URL`, `PREVIEW_VITE_SUPABASE_ANON_KEY`, `PREVIEW_VITE_SUPABASE_SCHEMA` (`public`), `PREVIEW_VITE_INLOGDIENST`, en `PREVIEW_VITE_SENTRY_DSN` als de beheeromgeving `VITE_SENTRY_DSN` heeft |
-| omgeving `production`, secrets | `SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD`, en met `--testdatabase` ook `SUPABASE_TEST_DB_PASSWORD` (ontbreekt dat bij een bestaande testdatabase, dan zet een volgende run een nieuw testwachtwoord; productie nooit) |
+| omgeving `production`, secrets | `SUPABASE_DB_PASSWORD`, en met `--testdatabase` ook `SUPABASE_TEST_DB_PASSWORD` (ontbreekt dat bij een bestaande testdatabase, dan zet een volgende run een nieuw testwachtwoord; productie nooit) |
+
+**De project-ref was tot versie 39 een secret.** Een volgende run zet hem als variabele en
+haalt het oude secret `SUPABASE_PROJECT_REF` dan eenmalig weg, met een regel in het
+resultaat. Dat gebeurt alleen als `deploy-db.yml` van de app de variabele al leest (vanaf
+versie 39: `vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF`); staat de app nog op
+een oudere versie, dan blijft het secret staan en meldt het resultaat dat. Werk de app dan
+bij en draai de inrichting nog een keer. Opruimen haalt de variabele en een achtergebleven
+oud secret allebei weg.
 
 **Testdatabase (`--testdatabase`).** Voor een app met een eigen database (`database: true`
 in `stack.config.json`) maakt de inrichting een tweede Supabase-project
@@ -111,7 +120,7 @@ database, dan meldt de PR-job dat en komt er geen preview.
 De databasesecrets staan in omgeving `production`, niet op de repo: een workflow op een
 PR-tak kan repo-secrets lezen, maar niet die van een omgeving die tot `main` beperkt is.
 `deploy-db.yml` draait zijn migratiejob daarom in omgeving `production` en migreert met
-`supabase db push --db-url`, gebouwd uit `SUPABASE_PROJECT_REF` en
+`supabase db push --db-url`, gebouwd uit de variabele `SUPABASE_PROJECT_REF` en het secret
 `SUPABASE_DB_PASSWORD`. Er komt geen access token van Supabase in de app-repo: dat geeft
 rechten op alle projecten van de organisatie en blijft in de beheer-omgeving.
 

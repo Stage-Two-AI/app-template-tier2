@@ -109,6 +109,10 @@ export const OMGEVINGEN = ["production", "preview"];
  */
 export const SECRET_OMGEVING = "production";
 const GH_VARIABELEN = [
+  // Alleen in omgeving production: daar migreert deploy-db.yml. Geen geheim (hij staat ook
+  // in VITE_SUPABASE_URL), dus een variabele: dan is in de instellingen te zien op welke
+  // database de migraties landen.
+  "SUPABASE_PROJECT_REF",
   "VITE_SUPABASE_URL",
   "VITE_SUPABASE_ANON_KEY",
   "VITE_INLOGDIENST",
@@ -128,7 +132,13 @@ const GH_PREVIEW_VARIABELEN = [
   "PREVIEW_VITE_INLOGDIENST",
   "PREVIEW_VITE_SENTRY_DSN",
 ];
-const GH_SECRETS = ["SUPABASE_PROJECT_REF", "SUPABASE_DB_PASSWORD", "SUPABASE_TEST_DB_PASSWORD"];
+const GH_SECRETS = ["SUPABASE_DB_PASSWORD", "SUPABASE_TEST_DB_PASSWORD"];
+/**
+ * Tot versie 39 stond de project-ref als secret in omgeving production. Opruimen haalt een
+ * achtergebleven oud secret ook weg; de inrichting ruimt het op zodra de app het niet meer
+ * leest (zie ruimOudeProjectRefOp).
+ */
+const OUDE_SECRETS = ["SUPABASE_PROJECT_REF"];
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 
 // ---------------------------------------------------------------- argumenten
@@ -354,12 +364,17 @@ async function zetVariabelen(d, env, repo, variabelen, gezet) {
 
 /**
  * Zet variabelen per omgeving en op de repo (alleen wat anders is) en secrets in
- * omgeving production, via stdin.
+ * omgeving production, via stdin. `productieVariabelen` komen alleen in production.
  */
-async function zetGithub(d, repo, { variabelen = {}, repoVariabelen = {}, secrets = {} }) {
+async function zetGithub(
+  d,
+  repo,
+  { variabelen = {}, productieVariabelen = {}, repoVariabelen = {}, secrets = {} },
+) {
   const gezet = [];
-  if (Object.keys(variabelen).length) {
-    for (const env of OMGEVINGEN) await zetVariabelen(d, env, repo, variabelen, gezet);
+  for (const env of OMGEVINGEN) {
+    const hier = { ...variabelen, ...(env === SECRET_OMGEVING ? productieVariabelen : {}) };
+    if (Object.keys(hier).length) await zetVariabelen(d, env, repo, hier, gezet);
   }
   if (Object.keys(repoVariabelen).length) {
     await zetVariabelen(d, null, repo, repoVariabelen, gezet);
@@ -405,6 +420,48 @@ export function standaardGh(env = process.env) {
       );
       kind.stdin.end(invoer ?? "");
     });
+}
+
+/**
+ * Eenmalig opruimen: tot versie 39 stond de project-ref als secret in omgeving production;
+ * nu is het een variabele. Het oude secret gaat pas weg als deploy-db.yml van de app de
+ * variabele leest (vanaf versie 39: `vars.SUPABASE_PROJECT_REF || secrets...`). Een app op
+ * een oudere versie leest alleen het secret; zonder zou hij geen migraties meer draaien.
+ * Geeft `{ stap?, waarschuwing? }` voor het resultaat.
+ */
+export async function ruimOudeProjectRefOp(d, repo) {
+  const secrets = await leesGhSecretNamen(d, SECRET_OMGEVING, repo);
+  if (!secrets.includes("SUPABASE_PROJECT_REF")) return {};
+  const workflow = await leesGhBestand(d, repo, ".github/workflows/deploy-db.yml");
+  if (!workflow?.includes("vars.SUPABASE_PROJECT_REF")) {
+    return {
+      waarschuwing:
+        "het oude secret SUPABASE_PROJECT_REF blijft voorlopig in omgeving production: deploy-db.yml van de app leest de nieuwe variabele nog niet. Werk de app bij naar versie 39 of later (/stagetwo-tier2:updaten) en draai App inrichten daarna nog een keer; dan ruimt die het op",
+    };
+  }
+  await d.gh([
+    "secret",
+    "delete",
+    "SUPABASE_PROJECT_REF",
+    "--env",
+    SECRET_OMGEVING,
+    "--repo",
+    repo,
+  ]);
+  return {
+    stap: "opgeruimd: de project-ref staat nu als variabele SUPABASE_PROJECT_REF in omgeving production",
+  };
+}
+
+/** Een bestand op de standaardtak van een repo, als tekst; null als het er niet is. */
+async function leesGhBestand(d, repo, pad) {
+  try {
+    const inhoud = await d.gh(["api", `repos/${repo}/contents/${pad}`, "-q", ".content"]);
+    return Buffer.from(String(inhoud).replace(/\s/g, ""), "base64").toString("utf8");
+  } catch (fout) {
+    if (/404|Not Found/.test(fout.message)) return null;
+    throw fout;
+  }
 }
 
 // ---------------------------------------------------------------- stap 4
@@ -500,7 +557,7 @@ function geplandeStappen(arg, v, workerBestaat) {
     { stap: "4 Access op de Worker", actie: geplandWorker(v, workerBestaat) },
     {
       stap: "3.6 GitHub-variabelen en -secrets",
-      actie: `gepland in ${arg.repo ?? "(geen repo)"}: variabelen in ${OMGEVINGEN.join(" en ")}, ${GH_PREVIEW_VARIABELEN.join(", ")} als repo-variabelen, secrets in omgeving ${SECRET_OMGEVING}`,
+      actie: `gepland in ${arg.repo ?? "(geen repo)"}: variabelen in ${OMGEVINGEN.join(" en ")} (SUPABASE_PROJECT_REF alleen in ${SECRET_OMGEVING}), ${GH_PREVIEW_VARIABELEN.join(", ")} als repo-variabelen, secrets in omgeving ${SECRET_OMGEVING}`,
     },
   ];
 }
@@ -656,9 +713,8 @@ export async function richtIn(arg, d) {
     // Het wachtwoord is alleen nu bekend: meteen bewaren, vóór een latere stap kan
     // mislukken. Anders is het voorgoed weg en moet het in het dashboard opnieuw.
     await zetGithub(d, arg.repo, {
-      variabelen: {},
+      productieVariabelen: { SUPABASE_PROJECT_REF: project.ref },
       secrets: {
-        SUPABASE_PROJECT_REF: { waarde: project.ref, altijd: true },
         SUPABASE_DB_PASSWORD: { waarde: wachtwoord, altijd: true },
       },
     });
@@ -777,16 +833,17 @@ export async function richtIn(arg, d) {
       PREVIEW_VITE_INLOGDIENST: "cloudflare",
       ...(d.sentryDsn ? { PREVIEW_VITE_SENTRY_DSN: d.sentryDsn } : {}),
     },
-    // Het wachtwoord staat er al (direct na het aanmaken van het project); hier alleen
-    // nog de project-ref voor een project dat al bestond.
-    secrets: {
-      SUPABASE_PROJECT_REF: { waarde: project.ref, altijd: false },
-    },
+    // De project-ref alleen in production, waar deploy-db.yml migreert; het wachtwoord
+    // staat er al (direct na het aanmaken van het project).
+    productieVariabelen: { SUPABASE_PROJECT_REF: project.ref },
   });
   stap(
     "3.6 GitHub-variabelen en -secrets",
     gezet.length ? `gezet: ${gezet.join(", ")}` : "ongewijzigd",
   );
+  const oud = await ruimOudeProjectRefOp(d, arg.repo);
+  if (oud.stap) stap("3.6 oud secret SUPABASE_PROJECT_REF", oud.stap);
+  if (oud.waarschuwing) resultaat.waarschuwingen.push(oud.waarschuwing);
   if (!wachtwoord) {
     resultaat.waarschuwingen.push(
       "het project bestond al; SUPABASE_DB_PASSWORD is niet opnieuw gezet (alleen bij aanmaken bekend)",
@@ -942,7 +999,7 @@ export async function ruimOp(arg, d) {
     // De secrets in omgeving production, en een oud repo-secret van vóór die omgeving.
     for (const env of [SECRET_OMGEVING, null]) {
       const secrets = await leesGhSecretNamen(d, env, arg.repo);
-      for (const naam of GH_SECRETS.filter((n) => secrets.includes(n))) {
+      for (const naam of [...GH_SECRETS, ...OUDE_SECRETS].filter((n) => secrets.includes(n))) {
         if (!droog) await d.gh(["secret", "delete", naam, ...envArgs(env), "--repo", arg.repo]);
         namen.push(`${env ?? "repo"}/secret ${naam}`);
       }
