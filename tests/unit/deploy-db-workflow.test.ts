@@ -98,4 +98,22 @@ describe("deploy-db.yml", () => {
     expect(controle?.run).toContain('-z "$WACHTWOORD"');
     expect(controle?.run).toContain('-z "$PROJECT_REF"');
   });
+
+  it("maakt vlak vóór de migraties op productie een kopie in het schema herstel", () => {
+    const stappen = migratiejobs[0]?.[1].steps ?? [];
+    const kopie = stappen.findIndex((s) => s.run?.includes("node scripts/herstel-kopie.mjs"));
+    const productie = stappen.findIndex((s) => s.name === "Migraties toepassen");
+    const canary = stappen.findIndex((s) => s.name?.startsWith("Canary"));
+    expect(kopie).toBeGreaterThan(canary);
+    expect(productie).toBe(kopie + 1);
+    const stap = stappen[kopie];
+    expect(stap?.if).toBe("steps.check.outputs.skip != 'true'");
+    expect(stap?.env).toEqual(stappen[productie]?.env);
+    const run = stap?.run ?? "";
+    expect(run.indexOf("node scripts/db-url.mjs --mask")).toBeGreaterThanOrEqual(0);
+    expect(run.indexOf("HERSTEL_DB_URL=$(node scripts/db-url.mjs)")).toBeGreaterThan(
+      run.indexOf("--mask"),
+    );
+    expect(run).not.toContain(EXPRESSIE);
+  });
 });

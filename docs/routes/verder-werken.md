@@ -223,7 +223,8 @@ in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat 
 | `guard:secrets` | er staat mogelijk een sleutel in de code of in de bundel. **Altijd zelf naar kijken**, dit is de gevaarlijkste |
 | `guard:rls` | er is een tabel zonder beveiliging, een policy met `using (true)` buiten `open_tabellen`, of een leesrol die mag schrijven |
 | `guard:rls-tests` | een tabel heeft geen A/B-test in `tests/rls/` (`controleerAfscherming`) en staat niet in `open_tabellen`. In deze versie nog een waarschuwing, vanaf de volgende uitgave rood |
-| `guard:migrations` | je migratie kan data vernietigen; lees de melding en bevestig bewust |
+| `guard:migrations` | je migratie kan data vernietigen (lees de melding en bevestig bewust), of een `update`/`delete` mist de regel `-- verwachting:` |
+| Droogloop migraties | je migratie raakt op de testdatabase meer, minder of andere rijen dan de regels `-- verwachting:` zeggen. Lees de reactie in de PR: klopt de migratie niet, repareer hem; klopt alleen het bereik niet, pas het aan |
 | `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stagetwo-tier2:updaten` |
 | `guard:cloudflare` | `wrangler.jsonc` vraagt om opslag van Cloudflare (D1, R2, KV, Durable Objects), Worker-code of een sleutel die niet op de lijst staat. Gegevens horen in Supabase: haal de sleutel weg |
 | `db:types:check` | de gegenereerde types lopen achter. `pnpm db:types:uit-ci` haalt ze uit deze run; committen en pushen |

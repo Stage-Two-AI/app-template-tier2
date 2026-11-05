@@ -9,6 +9,7 @@ import {
 } from "./lib/changed-files.mjs";
 import { destructieveRegels } from "./lib/destructief.mjs";
 import { bezitDatabase, databaseModus } from "./lib/stack-config.mjs";
+import { problemenMetVerwachting } from "./lib/verwachting.mjs";
 
 /**
  * De migratiepijplijn is het enige onderdeel van deze stack dat data onherstelbaar
@@ -16,6 +17,11 @@ import { bezitDatabase, databaseModus } from "./lib/stack-config.mjs";
  * guard zorgt dat dat nooit per ongeluk gebeurt.
  *
  * Bevestigen doe je met de regel `Bevestigd: destructieve migratie` in de PR-tekst.
+ *
+ * Daarnaast: een migratie die bestaande gegevens omzet (UPDATE of DELETE) zet bovenin per
+ * geraakte tabel hoeveel rijen hij verwacht (`-- verwachting: <tabel> <min>-<max>`, zie
+ * scripts/lib/verwachting.mjs). Ontbreekt die regel, dan is deze guard rood; de droogloop op
+ * de testdatabase toetst daarna of het aantal klopt.
  */
 /**
  * Migratiebestanden die in de repo staan, los van wat er in deze PR gewijzigd is.
@@ -68,6 +74,7 @@ const migrations = files.filter((file) => /^supabase\/migrations\/.*\.sql$/.test
 if (migrations.length === 0) pass("geen migraties gewijzigd");
 
 const findings = [];
+const zonderVerwachting = [];
 for (const file of migrations) {
   let sql;
   try {
@@ -76,6 +83,22 @@ for (const file of migrations) {
     continue; // bestand is hernoemd of verwijderd
   }
   for (const naam of destructieveRegels(sql)) findings.push(`${file}: ${naam}`);
+  for (const probleem of problemenMetVerwachting(sql))
+    zonderVerwachting.push(`${file}: ${probleem}`);
+}
+
+if (zonderVerwachting.length > 0) {
+  fail("Een migratie die gegevens omzet, zegt niet hoeveel rijen ze verwacht te raken.", [
+    ...zonderVerwachting.map((regel) => `- ${regel}`),
+    "",
+    "Zet bovenin de migratie per tabel met een UPDATE of DELETE een regel, met een bereik:",
+    "",
+    "  -- verwachting: public.klanten 120-140",
+    "",
+    "Tel het op de testdatabase (een kopie van productie) met een select met hetzelfde filter,",
+    "en neem een ruim maar eerlijk bereik. De droogloop draait de migratie op de testdatabase",
+    "en is rood als het aantal erbuiten valt. Zie docs/routes/databasewijziging.md.",
+  ]);
 }
 
 if (findings.length === 0) pass(`${migrations.length} migratie(s) gewijzigd, niets destructiefs`);

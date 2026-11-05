@@ -117,6 +117,24 @@ jobs:
           DB_URL=$(node scripts/db-url.mjs)
           pnpm exec supabase db push --db-url "$DB_URL" --include-all
 
+      # Terug kunnen zonder point-in-time-recovery: vlak vóór een migratie die bestaande
+      # gegevens omzet (UPDATE of DELETE), een kopie van de tabellen die hij raakt in het
+      # schema `herstel`, met datum en tijd in de naam. Kopieën ouder dan veertien dagen
+      # gaan weg. Mislukt de kopie, dan stopt de job hier en draait de migratie niet.
+      # De weg terug staat in docs/routes/databasewijziging.md.
+      - name: Kopie van de geraakte tabellen (herstel)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
+          WACHTWOORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          POOLER: ${{ vars.SUPABASE_POOLER_HOST }}
+        run: |
+          # Eerst het masker voor het gecodeerde wachtwoord, dan pas het adres.
+          node scripts/db-url.mjs --mask
+          HERSTEL_DB_URL=$(node scripts/db-url.mjs)
+          export HERSTEL_DB_URL
+          node scripts/herstel-kopie.mjs
+
       # De Supabase CLI zit als devDependency in package.json, dus hier draait exact
       # dezelfde versie als op de machine van de bouwer. Dat voorkomt verrassingen.
       - name: Migraties toepassen

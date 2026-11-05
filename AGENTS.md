@@ -148,6 +148,9 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   `supabase/functions/voorbeeld-met-geheim/`), en zeg de gebruiker dat de owner hem moet zetten.
 - **Databasewijzigingen altijd als migratie** in `supabase/migrations/`, nooit
   handmatig in de Supabase-console. Draai daarna `pnpm db:types` en commit het resultaat.
+- **Een migratie met `update` of `delete`** zet bovenin per tabel
+  `-- verwachting: <tabel> <min>-<max>` (het aantal rijen dat hij raakt). De droogloop toetst
+  dat op de testdatabase; zie stap 6 van `docs/routes/databasewijziging.md`.
 - **Gebruikt deze app een gedeelde database** (`"database": "gedeeld"`), schrijf dan hier
   géén migratie. Het schema is van een andere repo. Je praat uitsluitend met het schema
   `api`: views om te lezen, functies om te schrijven. Mis je daar iets, dan is dat een
