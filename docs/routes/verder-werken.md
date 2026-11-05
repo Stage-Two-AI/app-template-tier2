@@ -80,7 +80,11 @@ beoordelaar van je werk, dus wat de tests niet dekken, dekt niemand.
 - **Nieuwe functionaliteit?** Leg het nieuwe gedrag vast in een test.
 - **Bug opgelost?** Schrijf eerst een test die de bug reproduceert, en repareer dan
   tot hij groen is. Anders komt dezelfde bug over drie maanden terug.
-- **Nieuwe tabel of gewijzigde policy?** Een RLS-test in `tests/rls/`.
+- **Nieuwe tabel of gewijzigde policy?** Een RLS-test in `tests/rls/` (`controleerAfscherming`).
+- **Nieuw onderdeel (een eigen hoofdscherm met een eigen pad)?** Een regel in
+  `src/onderdelen.ts`. De browsertest `e2e/onderdelen.spec.ts` opent het dan vanzelf en kijkt
+  of het zonder fout opent en zijn kop toont; `tests/unit/onderdelen.test.ts` is rood als een
+  nieuw pad in de router niet in die lijst staat.
 
 De CI blokkeert een PR die productiecode wijzigt zonder één enkele test aan te raken.
 

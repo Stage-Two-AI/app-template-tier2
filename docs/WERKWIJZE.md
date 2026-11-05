@@ -456,6 +456,13 @@ het staat er. Niet de randgevallen. Breekt die route, dan is de app waardeloos, 
 dat is de test die het meest telt. Hij raakt in één keer de hele keten: build,
 inloggen, database, RLS en de interface.
 
+Daarnaast opent de browsertest **elk onderdeel** van de app (`e2e/onderdelen.spec.ts`): per
+regel in `src/onderdelen.ts` het hoofdscherm, met de vraag of het zonder fout opent en zijn kop
+toont. Zo komt een onderdeel dat bij het openen stukgaat (een route die weg is, een rol die niet
+klopt, een query op een kolom die niet meer bestaat) niet groen door de poort. Een unittest
+houdt die lijst bij met de router. Heeft de app rollen, dan geeft `supabase/testrol.sql` ook
+de e2e-gebruiker zijn rol.
+
 Uitbreiden doe je **reactief**: elke keer dat er in productie iets stukgaat, komt er
 een test bij die precies dat geval afdekt. Zo groeit het vangnet mee met je echte
 fouten in plaats van met bedachte scenario's.

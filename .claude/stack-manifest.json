@@ -99,7 +99,10 @@
       "tests/unit/rls-regels.test.ts",
       "tests/rls/open-policies.test.ts",
       "tests/rls/lib/database.ts",
-      "tests/rls/lib/afscherming.ts"
+      "tests/rls/lib/afscherming.ts",
+      "tests/unit/onderdelen.test.ts",
+      "e2e/onderdelen.spec.ts",
+      "e2e/inloggen.ts"
     ],
     "sleutelsSamenvoegen": {
       "package.json": ["scripts", "devDependencies"]
