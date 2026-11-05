@@ -36,8 +36,18 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+        # bash voor de vergelijking met =~ hieronder.
+        shell: bash
         run: |
           node scripts/guard-cloudflare.mjs
+          # Zonder DSN staat de foutbewaking stil uit; dan hoor je een storing pas als iemand
+          # belt. Geen reden om niet uit te rollen, wel om het bij elke uitrol hardop te zeggen.
+          if [ -z "$VITE_SENTRY_DSN" ]; then
+            echo "::warning::Foutbewaking (Sentry) staat uit voor deze app: VITE_SENTRY_DSN ontbreekt in omgeving production."
+          elif ! [[ "$VITE_SENTRY_DSN" =~ ^https://[0-9a-f]+@o[0-9]+\.ingest(\.[a-z]+)?\.sentry\.io/[0-9]+$ ]]; then
+            echo "::warning::VITE_SENTRY_DSN ziet er niet uit als een DSN van Sentry; controleer de waarde in omgeving production."
+          fi
           modus=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.databaseModus()))")
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "::notice::CLOUDFLARE_API_TOKEN ontbreekt in omgeving production. Uitrollen wordt overgeslagen."

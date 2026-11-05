@@ -74,6 +74,30 @@ describe("uitrollen.yml", () => {
     expect(deploy?.if).toContain("skip != 'true'");
   });
 
+  it("waarschuwt bij elke productie-uitrol als Sentry uit staat of de DSN vreemd is", () => {
+    const controle = job("productie").steps.find((s) => s.name === "Is alles ingericht?");
+    expect(controle?.env?.VITE_SENTRY_DSN).toBe(gh("vars.VITE_SENTRY_DSN"));
+    expect(controle?.shell).toBe("bash");
+    const run = controle?.run ?? "";
+    expect(run).toContain('if [ -z "$VITE_SENTRY_DSN" ]; then');
+    expect(run).toContain("::warning::Foutbewaking (Sentry) staat uit");
+    expect(run).toContain("::warning::VITE_SENTRY_DSN ziet er niet uit als een DSN van Sentry");
+    // Een waarschuwing, geen stop: de regels over Sentry zetten geen skip.
+    const sentryDeel = run.slice(run.indexOf("VITE_SENTRY_DSN"));
+    expect(sentryDeel.split("fi")[0]).not.toContain("skip=true");
+  });
+
+  it("herkent een echte DSN van Sentry, en geen vreemde waarde", () => {
+    const run = job("productie").steps.find((s) => s.name === "Is alles ingericht?")?.run ?? "";
+    const patroon = /=~ \^(.+)\$ \]\]/.exec(run)?.[1];
+    expect(patroon).toBeDefined();
+    const dsn = new RegExp(`^${patroon}$`);
+    expect(dsn.test("https://abc123@o1.ingest.sentry.io/42")).toBe(true);
+    expect(dsn.test("https://abc123@o4507.ingest.de.sentry.io/4508")).toBe(true);
+    expect(dsn.test("https://sentry.io/abc")).toBe(false);
+    expect(dsn.test("abc123")).toBe(false);
+  });
+
   it("slaat productie over met een melding als de uitrolsleutel ontbreekt", () => {
     const controle = job("productie").steps.find((s) => s.run?.includes("CLOUDFLARE_API_TOKEN"));
     expect(controle?.run).toContain("::notice::");
