@@ -217,6 +217,7 @@ in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat 
 | Check | Wat het betekent |
 |---|---|
 | `typecheck` | de code klopt niet met zichzelf of met het databaseschema. Haal de types op met `pnpm db:types:uit-ci` als je net een migratie hebt gemaakt |
+| Typecontrole edge functions (deno check) | een functie in `supabase/functions/` klopt niet met zichzelf. Die draait op Deno en valt buiten `pnpm typecheck`; de fout staat in het log van de job Code |
 | `lint` | opmaak of stijl. `pnpm lint:fix` lost het meeste vanzelf op |
 | `test` | gedrag is stuk, of de test klopt niet meer. Kijk eerst welke van de twee |
 | `guard:tests` | je wijzigde code zonder test. Voeg er een toe |
