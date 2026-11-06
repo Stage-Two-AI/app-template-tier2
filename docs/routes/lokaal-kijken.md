@@ -44,8 +44,9 @@ cd <map>
 pnpm install
 ```
 
-Lukt dit niet binnen tien minuten, vraag het dan aan Stage Two in plaats van door te
-worstelen. Dit is inrichting, geen bouwen.
+Lukt dit niet binnen tien minuten, draai dan `/stagetwo-tier2:installatie` in plaats van door
+te worstelen: die zet Git, Node en pnpm op deze computer goed en zegt wat er nog ontbreekt. Dit
+is inrichting, geen bouwen.
 
 ## Welke database
 
@@ -63,7 +64,8 @@ van productie. De gegevens erin zijn een kopie van productie, elke nacht ververs
 hoe een scherm eruitziet met echte gegevens, zonder dat je productie kunt raken.
 
 Welk project dat is, staat in `stack.config.json` onder `testdatabase`. Staat dat blok
-er niet, dan heeft deze app geen testdatabase: vraag Stage Two.
+er niet, dan heeft deze app nog geen testdatabase. Die maakt de owner van je organisatie met
+de workflow App inrichten in de beheer-repo; die opent daarna een pull request met dat blok.
 
 ```bash
 pnpm env:test      # schrijft .env.local met de testdatabase erin
@@ -72,7 +74,8 @@ pnpm env:test      # schrijft .env.local met de testdatabase erin
 Staat de publieke sleutel van de testdatabase in `stack.config.json`
 (`testdatabase.anon_key`), dan is dat alles. Staat hij er niet, dan vraagt dit de eerste
 keer om een login bij Supabase op deze computer (`pnpm exec supabase login`, opent de
-browser); vraag Stage Two liever de sleutel in de config te zetten, want een
+browser); laat liever de owner de sleutel in de config zetten (App inrichten in de beheer-repo
+doet dat), want een
 werkcomputer hoort geen toegang tot Supabase te hebben. Lukt het niet, dan zegt het script
 precies wat je met de hand in `.env.local` zet: de URL van het testproject, de publieke
 anon-sleutel (Supabase dashboard > Project Settings > API keys > anon / public) en het
@@ -111,7 +114,7 @@ Lukt het niet, dan zegt het script waarom. De gewone oorzaken:
 | Melding | Wat je doet |
 |---|---|
 | geen beheer-repo gevonden | je hebt geen toegang tot de beheer-repo; vraag de owner van je organisatie. Heet hij anders, zet dan `STAGETWO_BEHEER_REPO=<naam>` |
-| geen geldige `testlogin-<app>` | Testdatabase verversen heeft nog niet gedraaid voor deze app; start die workflow in de beheer-repo, of vraag Stage Two |
+| geen geldige `testlogin-<app>` | Testdatabase verversen heeft nog niet gedraaid voor deze app; start die workflow in de beheer-repo, of vraag de owner van je organisatie dat te doen |
 | inloggen als testgebruiker lukt niet | het wachtwoord is die nacht vernieuwd; draai `pnpm testlogin` opnieuw |
 | je ziet geen gegevens | de app heeft rollen en de testgebruiker nog geen; zie hieronder, `supabase/testrol.sql` |
 

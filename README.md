@@ -135,8 +135,8 @@ nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken, tot o
 uur per maand (meer tijd op afspraak). Het abonnement
 houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je bedrijf. Niet in
 het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer werk aan je
-apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
-btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
+apps. Dat werk doen je bouwers zelf met hun assistent; wie er hulp bij wil, kan het op verzoek
+door Stage Two laten doen, op nacalculatie tegen €120 per uur exclusief btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
 ook zonder abonnement, als pull request die een bouwer goedkeurt; de versies van de
 GitHub-workflows komen met een nieuwe versie van de template; alleen een beveiligingsupdate kan
 Dependabot tussendoor voorstellen. Hoogt die alleen de versie van een GitHub Action op, dan laat

@@ -59,7 +59,7 @@ const fout = controleerTypes(types);
 if (fout) {
   console.error(`✗ De types uit run ${runId} zien er niet goed uit: ${fout}.`);
   console.error(
-    `  ${TARGET} is niet aangepast. Draai de Kwaliteitspoort opnieuw, of meld het bij Stage Two.`,
+    `  ${TARGET} is niet aangepast. Draai de Kwaliteitspoort opnieuw en daarna dit commando; blijft het zo, laat Claude dan in /stagetwo-tier2:verder-werken naar het log kijken.`,
   );
   process.exit(1);
 }

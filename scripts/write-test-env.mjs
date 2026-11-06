@@ -37,13 +37,12 @@ try {
 if (!test) {
   console.error("✗ Deze app heeft geen testdatabase ingesteld.");
   console.error("");
-  console.error("  In stack.config.json ontbreekt het blok `testdatabase`. Dat is de keuze van");
-  console.error("  Stage Two bij het opzetten. Twee opties:");
+  console.error("  In stack.config.json ontbreekt het blok `testdatabase`. Twee opties:");
   console.error(
     "    - lokaal kijken met een eigen database in Docker: `pnpm db:start && pnpm env:local`",
   );
   console.error(
-    "    - vraag Stage Two om een testdatabase voor deze app (docs/WERKWIJZE.md, hoofdstuk 3)",
+    "    - laat de owner een testdatabase maken met App inrichten in de beheer-repo (docs/WERKWIJZE.md, hoofdstuk 3)",
   );
   process.exit(1);
 }
@@ -88,7 +87,7 @@ if (!anonKey) {
   console.error("✗ Kon de publieke sleutel van de testdatabase niet ophalen.");
   console.error("");
   console.error(
-    "  Het makkelijkst: vraag Stage Two de publieke sleutel in stack.config.json te zetten",
+    "  Het makkelijkst: laat de owner de publieke sleutel in stack.config.json zetten (App inrichten)",
   );
   console.error(
     "  (`testdatabase.anon_key`). Of: nog niet ingelogd bij Supabase op deze computer:",

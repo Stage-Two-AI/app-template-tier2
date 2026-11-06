@@ -118,7 +118,7 @@ function sleutelFouten(object, toegestaan, padVoorvoegsel) {
       fouten.push(`${pad} hoort er niet in: gegevens staan in Supabase, niet bij Cloudflare.`);
     } else {
       fouten.push(
-        `${pad} staat niet op de lijst van toegestane sleutels. Deze stack serveert alleen de gebouwde bestanden en gegevens staan in Supabase; is deze sleutel echt nodig, meld het dan bij Stage Two.`,
+        `${pad} staat niet op de lijst van toegestane sleutels. Deze stack serveert alleen de gebouwde bestanden en gegevens staan in Supabase; haal hem weg, en zoek met Claude in /stagetwo-tier2:verder-werken een weg zonder deze sleutel.`,
       );
     }
   }

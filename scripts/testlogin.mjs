@@ -169,7 +169,7 @@ export function envWaarde(waarde) {
   if (/^[A-Za-z0-9_.@+-]+$/.test(w)) return w;
   if (/['"\\$`\s]/.test(w)) {
     stop(
-      `Het wachtwoord uit de testlogin bevat tekens die niet in ${BESTAND} passen; meld dit bij Stage Two.`,
+      `Het wachtwoord uit de testlogin bevat tekens die niet in ${BESTAND} passen; draai Testdatabase verversen in de beheer-repo opnieuw, dan komt er een nieuw wachtwoord.`,
     );
   }
   return `'${w}'`;
@@ -246,7 +246,7 @@ export function haalTestloginOp() {
   if (!artifact) {
     stop(
       `Geen geldige ${naam} in ${beheer}.`,
-      "Die maakt Testdatabase verversen elke nacht; draai die workflow in de beheer-repo (of vraag Stage Two).",
+      "Die maakt Testdatabase verversen elke nacht; draai die workflow in de beheer-repo (of vraag de owner van je organisatie dat te doen).",
     );
   }
   const run = artifact.workflow_run?.id;
@@ -270,7 +270,7 @@ export function haalTestloginOp() {
   if (login.project_ref !== test.project_ref) {
     stop(
       `De testlogin hoort bij project ${login.project_ref}, maar de testdatabase van deze app is ${test.project_ref}.`,
-      "Ik zet hem niet op deze computer. Meld dit bij Stage Two.",
+      "Ik zet hem niet op deze computer. Kijk met Claude in /stagetwo-tier2:verder-werken of `testdatabase` in stack.config.json klopt, en draai daarna Testdatabase verversen in de beheer-repo opnieuw.",
     );
   }
   if (typeof login.email !== "string" || !/^[^@\s]+@[^@\s]+$/.test(login.email)) {

@@ -92,7 +92,7 @@ export const env = parsed.data;
 /**
  * Heeft deze build een database? Zonder de Supabase-waarden niet, en dan toont de app
  * de startpagina in plaats van het inlogscherm. Dat is de stand van een verse app
- * met `"database": false`, en van elke app tot Stage Two de database heeft gekoppeld.
+ * met `"database": false`, en van elke app tot de database is gekoppeld (App inrichten in de beheer-repo).
  */
 export const heeftDatabase = Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_ANON_KEY);
 

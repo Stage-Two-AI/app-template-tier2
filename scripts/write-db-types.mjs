@@ -17,7 +17,12 @@ if (!kanGenereren()) {
   console.error("✗ SUPABASE_ACCESS_TOKEN ontbreekt.");
   console.error("  Deze app gebruikt de database van een andere app, dus de types komen");
   console.error("  uit dát Supabase-project en niet uit een lokale database.");
-  console.error("  Vraag het token bij Stage Two; zie docs/WERKWIJZE.md hoofdstuk 3.");
+  console.error(
+    "  Zet een eigen token van Supabase in SUPABASE_ACCESS_TOKEN (Account > Access Tokens),",
+  );
+  console.error(
+    "  of haal de types zonder token uit de laatste run van de Kwaliteitspoort: `pnpm db:types:uit-ci`.",
+  );
   process.exit(1);
 }
 
