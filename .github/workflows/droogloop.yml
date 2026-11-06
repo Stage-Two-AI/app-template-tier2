@@ -12,8 +12,10 @@ name: Droogloop migraties
 #   geen migratie die gegevens omzet          groen, "niets te oefenen"
 #   wel, en de droogloop valt binnen bereik   groen
 #   wel, buiten het bereik of een fout        rood, met de uitkomst
-#   wel, maar de sleutels ontbreken           rood: App inrichten in de beheer-repo opnieuw
-#                                             starten (updaten biedt dat aan)
+#   wel, maar de sleutels ontbreken           rood, tenzij de PR-tekst de regel
+#                                             `Bevestigd: droogloop zonder testdatabase` heeft
+#                                             (dan groen); de owner zet de sleutels met App
+#                                             inrichten in de eigen beheer-repo
 #   wel, maar de PR komt uit een fork         rood: een fork krijgt nooit de testdatabase;
 #                                             zet de migratie op een branch in deze repo
 #
@@ -144,30 +146,43 @@ jobs:
           git fetch --no-tags origin "$HEAD_SHA"
           node scripts/droogloop.mjs klaarzetten
 
+      # Ontbreken de sleutels, dan blokkeert dat de bouwer niet: met de regel
+      # `Bevestigd: droogloop zonder testdatabase` in de PR-tekst is de status groen (de tekst
+      # wordt live opgehaald, dus "Re-run failed jobs" is genoeg). De owner zet de sleutels
+      # met App inrichten in de eigen beheer-repo; daarna oefent de droogloop weer.
       - name: Is de testdatabase bereikbaar?
         id: check
         env:
           TEST_DB_PASSWORD: ${{ secrets.SUPABASE_TEST_DB_PASSWORD }}
           POOLER: ${{ vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.nummer }}
         run: |
           testref=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.testDatabase()?.project_ref ?? ''))")
-          # Kort voor de status (hoogstens 140 tekens), lang voor de reactie en het logboek.
-          opnieuw="Start App inrichten voor deze app opnieuw in de beheer-repo (Actions, App inrichten); updaten in de plugin biedt dat aan en doet het voor je."
           if [ -z "$testref" ]; then
-            kort="Nog geen testdatabase. Start App inrichten in de beheer-repo opnieuw (updaten biedt dat aan)."
-            reden="Deze app heeft nog geen testdatabase (blok testdatabase in stack.config.json). $opnieuw"
+            mist="Deze app heeft nog geen testdatabase (blok testdatabase in stack.config.json)."
           elif [ -z "$TEST_DB_PASSWORD" ] || [ -z "$POOLER" ]; then
-            kort="Sleutels ontbreken in omgeving preview. Start App inrichten in de beheer-repo opnieuw (updaten biedt dat aan)."
-            reden="Het wachtwoord of de pooler van de testdatabase ontbreekt in omgeving preview (SUPABASE_TEST_DB_PASSWORD, SUPABASE_TEST_POOLER_HOST). $opnieuw"
+            mist="Het wachtwoord of de pooler van de testdatabase staat nog niet in omgeving preview (SUPABASE_TEST_DB_PASSWORD, SUPABASE_TEST_POOLER_HOST)."
           fi
-          if [ -n "${reden:-}" ]; then
-            echo "::error::$reden"
-            echo "reden=$reden" >> "$GITHUB_OUTPUT"
-            echo "kort=$kort" >> "$GITHUB_OUTPUT"
-            echo "doen=false" >> "$GITHUB_OUTPUT"
-          else
+          if [ -z "${mist:-}" ]; then
             echo "testref=$testref" >> "$GITHUB_OUTPUT"
             echo "doen=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "doen=false" >> "$GITHUB_OUTPUT"
+          oplossen="De owner van de beheer-repo lost het op: Actions, App inrichten, Run workflow, met deze app (of /updaten in de plugin start het als je dat mag)."
+          body=""
+          if [ -n "$PR" ]; then body=$(gh api "repos/$REPO/pulls/$PR" --jq '.body // ""'); fi
+          if printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*Bevestigd:[[:space:]]*droogloop zonder testdatabase[[:space:]]*$'; then
+            echo "bevestigd=true" >> "$GITHUB_OUTPUT"
+            echo "kort=Niet geoefend: de sleutels voor de testdatabase ontbreken. Bevestigd in de PR-tekst." >> "$GITHUB_OUTPUT"
+            echo "reden=$mist Bevestigd in de PR-tekst, dus deze PR kan door zonder droogloop. $oplossen" >> "$GITHUB_OUTPUT"
+            echo "::warning::$mist Bevestigd in de PR-tekst."
+          else
+            echo "kort=Niet geoefend: sleutels ontbreken. Zet 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst, of laat de owner App inrichten." >> "$GITHUB_OUTPUT"
+            echo "reden=$mist Wil je toch door: zet de regel 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst en kies bij deze run 'Re-run failed jobs'. $oplossen" >> "$GITHUB_OUTPUT"
+            echo "::error::$mist Zet 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst (Re-run failed jobs), of laat de owner App inrichten."
           fi
 
       # Het adres bouwt scripts/db-url.mjs, zoals in deploy-db.yml: eerst het masker voor het
@@ -198,6 +213,7 @@ jobs:
           DOEN: ${{ steps.check.outputs.doen }}
           REDEN: ${{ steps.check.outputs.reden }}
           KORT: ${{ steps.check.outputs.kort }}
+          BEVESTIGD: ${{ steps.check.outputs.bevestigd }}
           GESLAAGD: ${{ steps.droog.outputs.geslaagd }}
           SAMENVATTING: ${{ steps.droog.outputs.samenvatting }}
           MAP: ${{ runner.temp }}/droogloop
@@ -208,7 +224,7 @@ jobs:
             tekst=$(cat "$MAP/verslag.md")
           elif [ "$DOEN" = "false" ]; then
             tekst="$markering
-          **Droogloop op de testdatabase**: niet gedraaid, dus rood. $REDEN"
+          **Droogloop op de testdatabase**: niet gedraaid. $REDEN"
           else
             tekst="$markering
           **Droogloop op de testdatabase**: kon niet draaien. Zie $RUN_URL"
@@ -224,7 +240,8 @@ jobs:
             fi
           fi
           # De status op de commit van de PR.
-          if [ "$DOEN" = "false" ]; then staat=failure; SAMENVATTING="$KORT"
+          if [ "$DOEN" = "false" ] && [ "$BEVESTIGD" = "true" ]; then staat=success; SAMENVATTING="$KORT"
+          elif [ "$DOEN" = "false" ]; then staat=failure; SAMENVATTING="$KORT"
           elif [ "$GESLAAGD" = "true" ]; then staat=success
           elif [ "$GESLAAGD" = "false" ]; then staat=failure
           else staat=error; SAMENVATTING="De droogloop kon niet draaien; zie de run."; fi
@@ -233,7 +250,7 @@ jobs:
             -f target_url="$RUN_URL" > /dev/null
 
       - name: Rood als de droogloop niet groen is
-        if: steps.check.outputs.doen == 'false' || steps.droog.outputs.geslaagd == 'false'
+        if: (steps.check.outputs.doen == 'false' && steps.check.outputs.bevestigd != 'true') || steps.droog.outputs.geslaagd == 'false'
         env:
           REDEN: ${{ steps.check.outputs.reden }}
           SAMENVATTING: ${{ steps.droog.outputs.samenvatting }}

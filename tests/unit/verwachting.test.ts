@@ -276,15 +276,16 @@ describe("droogloop-aanvragen.yml en droogloop.yml", () => {
     expect(stap?.env?.WACHTWOORD).toBe(`${EXPRESSIE} secrets.SUPABASE_TEST_DB_PASSWORD }}`);
   });
 
-  it("ontbreken de sleutels, dan rood met de uitleg dat App inrichten opnieuw moet (updaten biedt het aan)", () => {
+  it("ontbreken de sleutels, dan blokkeert dat niet: een bevestigingsregel in de PR-tekst maakt hem groen", () => {
     const check = job.steps.find((s) => s.name === "Is de testdatabase bereikbaar?");
-    expect(check?.run).toContain(
-      "Start App inrichten in de beheer-repo opnieuw (updaten biedt dat aan)",
-    );
+    expect(check?.run).toContain('gh api "repos/$REPO/pulls/$PR" --jq');
+    expect(check?.run).toContain("Bevestigd:[[:space:]]*droogloop zonder testdatabase");
+    expect(check?.run).toContain("De owner van de beheer-repo lost het op");
+    expect(check?.run).not.toContain("Stage Two");
     const uitslag = job.steps.find((s) => s.name === "Uitslag in de PR");
     expect(uitslag?.if).toBe("always()");
     expect(uitslag?.run).toContain(
-      'if [ "$DOEN" = "false" ]; then staat=failure; SAMENVATTING="$KORT"',
+      'if [ "$DOEN" = "false" ] && [ "$BEVESTIGD" = "true" ]; then staat=success',
     );
   });
 
@@ -294,7 +295,7 @@ describe("droogloop-aanvragen.yml en droogloop.yml", () => {
     expect(uitslag?.run).toContain("<!-- droogloop -->");
     const rood = job.steps.at(-1);
     expect(rood?.if).toBe(
-      "steps.check.outputs.doen == 'false' || steps.droog.outputs.geslaagd == 'false'",
+      "(steps.check.outputs.doen == 'false' && steps.check.outputs.bevestigd != 'true') || steps.droog.outputs.geslaagd == 'false'",
     );
     expect(rood?.run).toContain("exit 1");
   });
