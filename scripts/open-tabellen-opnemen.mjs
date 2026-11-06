@@ -6,8 +6,8 @@ import { openTabellen } from "./lib/stack-config.mjs";
  * Eenmalig bij het bijwerken van een bestaande app naar de versie waarin de poort open
  * policies (`using (true)`) controleert: neemt de tabellen die nu al zo'n policy hebben op in
  * `open_tabellen` in stack.config.json, met de reden "bestond al vóór versie <n>, nog
- * nalopen". Anders wordt de update-PR zelf rood. Daarna loopt de bouwer de lijst na en zet
- * hij per tabel de echte reden, of maakt hij de policy smal.
+ * nalopen". Anders wordt de update-PR zelf rood. Daarna vult /stagetwo-tier2:updaten in de
+ * update-PR per tabel de echte reden in, uit de migratie en de code; de bouwer hoeft niets.
  *
  * Een open policy voor `anon` of `public` neemt dit script niet op: die blijft rood, want
  * daarmee ziet iedereen met de openbare sleutel alles. Die noemt het script apart.
