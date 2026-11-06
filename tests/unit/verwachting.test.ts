@@ -196,6 +196,7 @@ type Stap = {
 };
 type Job = {
   if?: string;
+  needs?: string;
   environment?: string;
   permissions?: Record<string, string>;
   steps: Stap[];
@@ -208,27 +209,47 @@ describe("droogloop-aanvragen.yml en droogloop.yml", () => {
   const aanvraag = lees("droogloop-aanvragen.yml");
   const droog = lees("droogloop.yml");
   const job = droog.jobs.droogloop as Job;
+  const bepalen = droog.jobs.bepalen as Job;
 
-  it("de aanvraag draait alleen op een PR die migraties wijzigt, en raakt niets aan", () => {
-    expect((aanvraag.on.pull_request as { paths: string[] }).paths).toEqual([
-      "supabase/migrations/**",
-    ]);
+  it("de aanvraag draait op elke PR (de status is verplicht), zonder sleutels en zonder code uit de PR", () => {
+    expect((aanvraag.on.pull_request as { paths?: string[] }).paths).toBeUndefined();
     const tekst = JSON.stringify(aanvraag);
     expect(tekst).not.toContain("secrets.");
     expect(tekst).not.toContain("environment");
     expect(tekst).not.toContain("actions/checkout");
   });
 
-  it("de droogloop draait na de aanvraag, vanaf main, in omgeving preview", () => {
+  it("de overgang: zolang main de droogloop niet heeft, zet de aanvraag zelf de status, alleen voor een PR uit deze repo", () => {
+    const stappen = (aanvraag.jobs.aanvragen as Job).steps;
+    const overgang = stappen.find((s) => s.name?.startsWith("Overgang"));
+    expect(overgang?.if).toBe("github.event.pull_request.head.repo.full_name == github.repository");
+    expect(overgang?.run).toContain("contents/.github/workflows/droogloop.yml?ref=$BASIS");
+    expect(overgang?.run).toContain('context="Droogloop migraties"');
+    expect(overgang?.run).toContain("Niets te oefenen");
+  });
+
+  it("eerst bepalen, zonder omgeving: niets te oefenen is meteen groen, een fork die gegevens omzet rood", () => {
     expect(droog.on).toEqual({
       workflow_run: { workflows: ["Droogloop aanvragen"], types: ["completed"] },
     });
-    expect(job.if).toContain(
+    expect(bepalen.environment).toBeUndefined();
+    expect(bepalen.permissions).toEqual({ contents: "read", statuses: "write" });
+    const status = bepalen.steps.find((s) => s.name === "Status op de PR");
+    expect(status?.run).toContain('status success "Niets te oefenen');
+    expect(status?.run).toContain('status failure "PR uit een fork');
+    expect(status?.env?.EIGEN_REPO).toContain(
       "github.event.workflow_run.head_repository.full_name == github.repository",
     );
+  });
+
+  it("de droogloop draait daarna, vanaf main, in omgeving preview, alleen als er iets te oefenen is", () => {
+    expect(job.needs).toBe("bepalen");
+    expect(job.if).toBe("needs.bepalen.outputs.oefenen == 'true'");
     expect(job.environment).toBe("preview");
-    const checkout = job.steps.find((s) => s.uses?.startsWith("actions/checkout@"));
-    expect(checkout?.with?.ref).toBe("main");
+    for (const j of [job, bepalen]) {
+      const checkout = j.steps.find((s) => s.uses?.startsWith("actions/checkout@"));
+      expect(checkout?.with?.ref).toBe("main");
+    }
     expect(job.permissions).toEqual({
       contents: "read",
       "pull-requests": "write",
@@ -237,7 +258,7 @@ describe("droogloop-aanvragen.yml en droogloop.yml", () => {
   });
 
   it("draait niets uit de PR: geen installatie, de migraties alleen via scripts/droogloop.mjs", () => {
-    for (const s of job.steps) {
+    for (const s of [...bepalen.steps, ...job.steps]) {
       expect(s.run ?? "", s.name).not.toMatch(/pnpm|npm |npx /);
       expect(s.run ?? "", s.name).not.toContain(EXPRESSIE);
     }
@@ -255,12 +276,26 @@ describe("droogloop-aanvragen.yml en droogloop.yml", () => {
     expect(stap?.env?.WACHTWOORD).toBe(`${EXPRESSIE} secrets.SUPABASE_TEST_DB_PASSWORD }}`);
   });
 
+  it("ontbreken de sleutels, dan rood met de uitleg dat App inrichten opnieuw moet (updaten biedt het aan)", () => {
+    const check = job.steps.find((s) => s.name === "Is de testdatabase bereikbaar?");
+    expect(check?.run).toContain(
+      "Start App inrichten in de beheer-repo opnieuw (updaten biedt dat aan)",
+    );
+    const uitslag = job.steps.find((s) => s.name === "Uitslag in de PR");
+    expect(uitslag?.if).toBe("always()");
+    expect(uitslag?.run).toContain(
+      'if [ "$DOEN" = "false" ]; then staat=failure; SAMENVATTING="$KORT"',
+    );
+  });
+
   it("zet een status op de commit van de PR en is rood buiten de verwachting", () => {
     const uitslag = job.steps.find((s) => s.name === "Uitslag in de PR");
     expect(uitslag?.run).toContain('context="Droogloop migraties"');
     expect(uitslag?.run).toContain("<!-- droogloop -->");
     const rood = job.steps.at(-1);
-    expect(rood?.if).toBe("steps.droog.outputs.geslaagd == 'false'");
+    expect(rood?.if).toBe(
+      "steps.check.outputs.doen == 'false' || steps.droog.outputs.geslaagd == 'false'",
+    );
     expect(rood?.run).toContain("exit 1");
   });
 });
