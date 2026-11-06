@@ -25,12 +25,23 @@ try {
   versie = `versie ${readFileSync(".claude/stack-version", "utf8").trim()}`;
 } catch {}
 
+/** Waarvoor een policy geldt (`for select`, ...); zonder `for` is het alles. */
+function opdrachtVan(naam) {
+  const kop = new RegExp(
+    `create\\s+policy\\s+"?${naam.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"?\\s+on\\s+[^;]*?\\bfor\\s+(select|insert|update|delete|all)\\b`,
+    "i",
+  );
+  return (kop.exec(sql)?.[1] ?? "all").toLowerCase();
+}
+
 const bestaand = openTabellen();
 const erbij = {};
 const nooit = [];
 for (const p of openPolicies(sql)) {
   if (p.rollen.includes("anon") || p.rollen.includes("public")) {
-    nooit.push(`${p.tabel} (policy "${p.naam}", ${p.rollen.join(", ")})`);
+    nooit.push(
+      `${p.tabel} (policy "${p.naam}", ${p.rollen.join(", ")}, for ${opdrachtVan(p.naam)})`,
+    );
   } else if (!(p.tabel in bestaand)) {
     erbij[p.tabel] = `bestond al vóór ${versie}, nog nalopen`;
   }
