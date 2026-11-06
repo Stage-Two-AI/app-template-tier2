@@ -101,10 +101,11 @@ en `preview` en als `PREVIEW_VITE_SENTRY_DSN` op de repo. Daarna stuurt hij éé
 rechtstreeks naar die DSN (omgeving `proef`) en kijkt hij tot twee minuten of die in Sentry
 aankomt; zo niet, dan een waarschuwing in het resultaat. Een DSN die er al staat (met de hand
 gezet) blijft staan: de stap vult alleen aan wat ontbreekt, en stuurt dan geen proefmelding.
-Zonder sleutel staat in het resultaat: "Sentry nog niet gekoppeld: dat regelt Stage Two in de
-projectfase met sentry-koppelen.mjs uit de plugin". Dat script (`skills/installatie/scripts/` in
-de plugin) zet het token zonder dat iemand de waarde ziet (gh vraagt erom), zet `SENTRY_ORG` en
-start App inrichten opnieuw; de klant doet hier niets. De sleutel is een token van
+Zonder sleutel staat in het resultaat dat Sentry nog niet gekoppeld is en dat fouten uit
+productie dan niet in Sentry komen. Koppelen doet in de projectfase Stage Two en daarna de owner
+van de beheer-repo, met zijn eigen Sentry-account, met `sentry-koppelen.mjs`
+(`skills/installatie/scripts/` in de plugin): dat zet het token zonder dat iemand de waarde ziet
+(gh vraagt erom), zet `SENTRY_ORG` en start App inrichten opnieuw. De sleutel is een token van
 een interne integratie in Sentry (Settings, Custom Integrations, Internal Integration) met
 Project: Write (aanmaken en de DSN lezen), Team: Read en Issue & Event: Read (de proefmelding terugzien).
 Opruimen haalt de variabelen weg, maar laat het Sentry-project staan (met de geschiedenis van

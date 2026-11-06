@@ -601,7 +601,7 @@ async function leesGhBestand(d, repo, pad) {
 // ---------------------------------------------------------------- foutbewaking (Sentry)
 
 export const SENTRY_NIET_GEKOPPELD =
-  "Sentry nog niet gekoppeld: dat regelt Stage Two in de projectfase met sentry-koppelen.mjs uit de plugin (skills/installatie/scripts), dat SENTRY_AUTH_TOKEN en SENTRY_ORG in de omgeving beheer zet en App inrichten opnieuw start";
+  "Sentry nog niet gekoppeld, dus fouten uit productie komen niet in Sentry. Koppelen doet in de projectfase Stage Two en daarna de owner van de beheer-repo, met zijn eigen Sentry-account: sentry-koppelen.mjs uit de plugin (skills/installatie/scripts) zet SENTRY_AUTH_TOKEN en SENTRY_ORG in de omgeving beheer en start App inrichten opnieuw";
 
 /**
  * Stap S. Met een Sentry-sleutel in de beheeromgeving (`d.sentry`): het project van deze

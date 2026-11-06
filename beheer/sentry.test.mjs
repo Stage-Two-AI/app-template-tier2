@@ -158,7 +158,7 @@ test("Sentry: zonder sleutel een duidelijke regel in het resultaat, en niets bij
   );
   assert.match(
     SENTRY_NIET_GEKOPPELD,
-    /Stage Two in de projectfase met sentry-koppelen\.mjs uit de plugin.*App inrichten opnieuw start/,
+    /daarna de owner van de beheer-repo, met zijn eigen Sentry-account: sentry-koppelen\.mjs uit de plugin.*App inrichten opnieuw/,
   );
   assert.ok(!w.aanroepen.some((a) => a.pad?.includes("sentry.io")));
   assert.equal(w.staat.ghVariabelen.production.VITE_SENTRY_DSN, undefined);
