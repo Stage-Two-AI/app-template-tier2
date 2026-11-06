@@ -10,14 +10,25 @@ name: Uitrollen
 #   repo-vars   PREVIEW_VITE_*: de openbare waarden van de test (ze staan toch in de bundel);
 #               gelezen door de job Code in ci.yml
 # De omgevingen production en preview zijn beperkt tot main.
+#
+# Eén uitzondering op "alleen productie": de job Overgang. Een workflow_run-workflow leest GitHub
+# altijd van main. In de eerste update-PR naar versie 39 of later staat op main dus nog de oude
+# preview-uitrollen.yml, die wacht op een geslaagde run van "Uitrollen" met het artifact
+# `preview-dist`. De nieuwe Kwaliteitspoort bouwt dat artifact wel, maar daar luistert de oude
+# niet naar, en zonder deze job kreeg die PR geen preview. Daarom draait Uitrollen op een PR die
+# preview-uitrollen.yml zelf wijzigt (dat is precies die update-PR), en bouwt Overgang dan het
+# artifact zoals de oude job Preview dat deed, maar alleen als main nog de oude versie heeft.
+# Na de merge luistert main naar de Kwaliteitspoort en slaat Overgang zichzelf over.
 on:
   push:
     branches: [main]
+  pull_request:
+    paths: [.github/workflows/preview-uitrollen.yml]
 
 concurrency:
   group: uitrollen-${{ github.ref }}
-  # Een productie-uitrol wordt nooit afgebroken.
-  cancel-in-progress: false
+  # Een productie-uitrol wordt nooit afgebroken; een nieuwere push op de PR mag de oude afbreken.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -88,3 +99,76 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           WRANGLER_SEND_METRICS: "false"
         run: pnpm exec wrangler deploy
+
+  overgang:
+    name: Preview (overgang)
+    # Alleen voor een PR uit deze repo; noemt geen omgeving en leest geen secrets.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Wacht main nog op Uitrollen?
+        id: oud
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          main=$(gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/.github/workflows/preview-uitrollen.yml?ref=main" 2>/dev/null || true)
+          if printf '%s\n' "$main" | grep -Eq '^ +workflows: \[Uitrollen\]'; then
+            echo "bouwen=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main heeft de nieuwe Preview uitrollen al; de preview komt van de Kwaliteitspoort. Hier hoeft niets te gebeuren."
+          fi
+
+      - if: steps.oud.outputs.bouwen == 'true'
+        uses: actions/checkout@v7
+
+      - if: steps.oud.outputs.bouwen == 'true'
+        uses: pnpm/action-setup@v6
+
+      - if: steps.oud.outputs.bouwen == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - if: steps.oud.outputs.bouwen == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Is de preview ingericht?
+        id: preview
+        if: steps.oud.outputs.bouwen == 'true'
+        env:
+          PREVIEW_VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
+        run: |
+          modus=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.databaseModus()))")
+          if [ "$modus" != "geen" ] && [ -z "$PREVIEW_VITE_SUPABASE_URL" ]; then
+            echo "::notice::De repo-variabele PREVIEW_VITE_SUPABASE_URL ontbreekt. De preview is nog niet ingericht; er komt geen preview voor deze PR."
+          else
+            echo "klaar=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bouwen (testomgeving)
+        if: steps.preview.outputs.klaar == 'true'
+        env:
+          VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.PREVIEW_VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_SCHEMA: ${{ vars.PREVIEW_VITE_SUPABASE_SCHEMA }}
+          VITE_INLOGDIENST: ${{ vars.PREVIEW_VITE_INLOGDIENST }}
+          VITE_SENTRY_DSN: ${{ vars.PREVIEW_VITE_SENTRY_DSN }}
+          VITE_OMGEVING: test
+        run: pnpm build
+
+      - name: Guard - geheimen in repo en bundel
+        if: steps.preview.outputs.klaar == 'true'
+        run: pnpm guard:secrets
+
+      - name: Gebouwde preview bewaren
+        if: steps.preview.outputs.klaar == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-dist
+          path: dist
+          retention-days: 3
+          if-no-files-found: error
