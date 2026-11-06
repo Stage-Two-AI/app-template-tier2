@@ -224,22 +224,25 @@ object zijn. De korte vorm blijft werken:
 
 ```json
 "apps": {
-  "direct": { "groepen": ["kantoor"], "openbare_paden": ["/bekijk/*"], "gegevens_naar_test": false }
+  "direct": { "groepen": ["kantoor"], "publiek": ["/bekijk/*"], "gegevens_naar_test": false }
 }
 ```
 
-- `openbare_paden`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
+- `publiek`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
   klant stuurt. Elk pad begint met `/` en mag eindigen op `*`; de hele app (`/` of `/*`)
-  kan niet. De inrichting maakt daarvoor één extra Access-app `<vv><app>-openbaar` op het
-  adres van de app (niet op de previews), met de herbruikbare policy `<vv>openbaar`
+  kan niet. De inrichting maakt daarvoor één extra Access-app `<vv><app>-publiek` op het
+  adres van de app (niet op de previews), met de herbruikbare policy `<vv>publiek`
   (beslissing bypass, iedereen). Die app wint van de deur, omdat hij specifieker is. De
   gebouwde bestanden (`/assets/*`) en de bestanden uit `public/` (iconen en manifest) gaan
   vanzelf mee, anders krijgt een bezoeker een lege pagina. Is de lijst leeg of weg, dan
   haalt de volgende run die app weg, en de policy als geen enkele app hem nog gebruikt.
   Toegang bijwerken doet dat ook, voor elke app die al een deur heeft. Staat er al een
   Access-app zonder voorvoegsel op zo'n pad (een omweg met de hand), dan stopt de inrichting
-  tot je die weghaalt. Een groep mag daarom niet `openbaar` heten. Wat een openbare pagina
-  mag tonen, staat in `docs/WERKWIJZE.md` (hoofdstuk 2).
+  tot je die weghaalt. Een groep mag niet `publiek` heten (zo heet die policy). Wat een
+  publieke pagina mag tonen, staat in `docs/WERKWIJZE.md` (hoofdstuk 2). Het veld heet en
+  werkt hetzelfde als `publiek` in tier 1. Eén verschil: tier 1 kent ook een site die bijna
+  helemaal publiek is (`["/*"]` met `dicht`); tier 2 niet, want zonder de deur kan niemand
+  inloggen bij de database van de app.
 - `gegevens_naar_test` (standaard `true`): met `false` zet Testdatabase verversen in de
   beheer-repo voor deze app geen gegevens en bestanden van productie meer in de
   testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een

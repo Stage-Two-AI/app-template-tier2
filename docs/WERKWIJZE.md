@@ -119,11 +119,11 @@ dekt het workers.dev-adres al, dus er komt geen open deur bij.
 
 **Een pagina zonder inlog kan, maar alleen zo.** Soms moet iemand zonder account een
 pagina kunnen openen, bijvoorbeeld een link die je naar een klant stuurt
-(`/bekijk/<code>`). Zet het pad dan als `openbare_paden` bij de app in `toegang.json` van de
+(`/bekijk/<code>`). Zet het pad dan als `publiek` bij de app in `toegang.json` van de
 beheer-repo; de inrichting zet er een eigen Access-app op die iedereen doorlaat, met de
 gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Twee regels:
 
-- Een openbare pagina haalt gegevens alleen op via een databasefunctie voor `anon` die zelf
+- Een publieke pagina haalt gegevens alleen op via een databasefunctie voor `anon` die zelf
   beperkt wat terugkomt: één rij bij een lange willekeurige code, en alleen de velden die
   de bezoeker mag zien. Nooit een tabel die `anon` met een RLS-policy openzet, want dan
   kan iedereen met de anon key de hele tabel opvragen. Test het net als RLS: zonder inlog,

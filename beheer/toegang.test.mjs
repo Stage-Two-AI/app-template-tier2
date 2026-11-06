@@ -9,9 +9,9 @@ import {
   hookFunctie,
   koppelPolicies,
   magAanmelden,
-  openbarePadenVanApp,
   policyIdsVoorApp,
   policyVoorGroep,
+  publiekVanApp,
   sqlTekst,
   synchroniseerPolicies,
   TESTGEBRUIKER,
@@ -73,13 +73,13 @@ test("validatie: een ongeldig domein of adres noemt groep en veld", () => {
   );
 });
 
-test("validatie: de lange vorm van een app, met groepen, openbare paden en gegevens_naar_test", () => {
+test("validatie: de lange vorm van een app, met groepen, publieke paden en gegevens_naar_test", () => {
   const t = {
     groepen: KLANT.groepen,
     apps: {
       direct: {
         groepen: ["klant"],
-        openbare_paden: ["/bekijk/*", "/over"],
+        publiek: ["/bekijk/*", "/over"],
         gegevens_naar_test: false,
       },
       kort: ["stagetwo"],
@@ -88,8 +88,8 @@ test("validatie: de lange vorm van een app, met groepen, openbare paden en gegev
   valideerToegang(t);
   assert.deepEqual(groepenVanApp(t, "direct"), ["klant"]);
   assert.deepEqual(groepenVanApp(t, "kort"), ["stagetwo"]);
-  assert.deepEqual(openbarePadenVanApp(t, "direct"), ["/bekijk/*", "/over"]);
-  assert.deepEqual(openbarePadenVanApp(t, "kort"), []);
+  assert.deepEqual(publiekVanApp(t, "direct"), ["/bekijk/*", "/over"]);
+  assert.deepEqual(publiekVanApp(t, "kort"), []);
   assert.equal(gegevensNaarTest(t, "direct"), false);
   assert.equal(gegevensNaarTest(t, "kort"), true, "standaard wel");
   assert.equal(gegevensNaarTest({ ...t, apps: { x: { groepen: ["klant"] } } }, "x"), true);
@@ -98,7 +98,7 @@ test("validatie: de lange vorm van een app, met groepen, openbare paden en gegev
   assert.equal(magAanmelden("info@stagetwo.nl", t, "direct"), "nee");
 });
 
-test("validatie: openbare paden beginnen met /, hebben hoogstens een * aan het eind, en nooit de hele app", () => {
+test("validatie: publieke paden beginnen met /, hebben hoogstens een * aan het eind, en nooit de hele app", () => {
   for (const fout of [
     ["/"],
     ["/*"],
@@ -111,27 +111,27 @@ test("validatie: openbare paden beginnen met /, hebben hoogstens een * aan het e
   ]) {
     const t = {
       groepen: KLANT.groepen,
-      apps: { direct: { groepen: ["klant"], openbare_paden: fout } },
+      apps: { direct: { groepen: ["klant"], publiek: fout } },
     };
-    assert.throws(() => valideerToegang(t), /openbare_paden/, JSON.stringify(fout));
+    assert.throws(() => valideerToegang(t), /publiek/, JSON.stringify(fout));
   }
 });
 
-test("validatie: een onbekend veld, een app zonder groepen in de lange vorm, en de groepsnaam openbaar zijn fouten", () => {
+test("validatie: een onbekend veld, een app zonder groepen in de lange vorm, en de groepsnaam publiek zijn fouten", () => {
   const met =
     (apps, groepen = KLANT.groepen) =>
     () =>
       valideerToegang({ groepen, apps });
-  assert.throws(met({ direct: { groepen: ["klant"], publiek: ["/x"] } }), /veld publiek: onbekend/);
-  assert.throws(met({ direct: { openbare_paden: ["/x"] } }), /geen groepen gekozen/);
+  assert.throws(met({ direct: { groepen: ["klant"], dicht: ["/x"] } }), /veld dicht: onbekend/);
+  assert.throws(met({ direct: { publiek: ["/x"] } }), /geen groepen gekozen/);
   assert.throws(
     met({ direct: { groepen: ["klant"], gegevens_naar_test: "nee" } }),
     /true of false/,
   );
   assert.throws(met({ direct: "klant" }), /een lijst groepen, of een object/);
   assert.throws(
-    met({ direct: ["openbaar"] }, { openbaar: { domeinen: ["klant.nl"] } }),
-    /groep "openbaar": die naam is van de policy voor de openbare paden/,
+    met({ direct: ["publiek"] }, { publiek: { domeinen: ["klant.nl"] } }),
+    /groep "publiek": die naam is van de policy voor de publieke paden/,
   );
 });
 

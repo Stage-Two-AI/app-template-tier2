@@ -65,12 +65,12 @@ import {
   issuerVoor,
   metGewenst,
   metPolicies,
-  openbaarApp,
-  openbaarPolicy,
-  openbaarPolicyNaam,
-  openbareUris,
   PROEF_VOORVOEGSEL,
   policyIdsVanApp,
+  publiekApp,
+  publiekeUris,
+  publiekPolicy,
+  publiekPolicyNaam,
   valideerVoorvoegsel,
   wachtOpDiscovery,
   workerApp,
@@ -100,10 +100,10 @@ import {
   hookFunctie,
   kaleNaamConflicten,
   koppelPolicies,
-  OPENBAAR_GROEP,
-  openbarePadenVanApp,
+  PUBLIEK_GROEP,
   policyIdsVoorApp,
   policyNaam,
+  publiekVanApp,
   synchroniseerPolicies,
   testaccountsVan,
   trekIn,
@@ -295,7 +295,7 @@ async function verken(arg, d, { schrijven }) {
   const hostname = tijdelijk ? `${arg.worker}.${subdomein}.workers.dev` : arg.hostname;
 
   const fouten = [...kaleNaamConflicten(t, policies, vv)];
-  for (const naam of [namen.deur, namen.inlog, namen.testInlog, namen.worker, namen.openbaar]) {
+  for (const naam of [namen.deur, namen.inlog, namen.testInlog, namen.worker, namen.publiek]) {
     const kaal = naam.slice(vv.length);
     if (apps.some((a) => a.name === kaal)) {
       fouten.push(`Access-app "${kaal}" bestaat al zonder voorvoegsel ${vv}`);
@@ -308,11 +308,11 @@ async function verken(arg, d, { schrijven }) {
   );
   if (opHost)
     fouten.push(`Access-app "${opHost.name}" (zonder voorvoegsel) bewaakt ${hostname} al`);
-  // Een openbaar pad dat al in een Access-app van iemand anders staat (een omweg met de
+  // Een publiek pad dat al in een Access-app van iemand anders staat (een omweg met de
   // hand): eerst die weghalen, anders weet niemand welke app wint.
-  const paden = openbarePadenVanApp(t, arg.app);
+  const paden = publiekVanApp(t, arg.app);
   if (paden.length) {
-    const uris = new Set(openbareUris(hostname, paden));
+    const uris = new Set(publiekeUris(hostname, paden));
     for (const a of apps) {
       if (a.name?.startsWith(vv)) continue;
       const dubbel = [a.domain, ...(a.destinations ?? []).map((x) => x.uri)].filter((u) =>
@@ -320,7 +320,7 @@ async function verken(arg, d, { schrijven }) {
       );
       if (dubbel.length) {
         fouten.push(
-          `Access-app "${a.name}" (zonder voorvoegsel) staat al op ${[...new Set(dubbel)].join(", ")}; haal die eerst weg, de inrichting zet de openbare paden zelf`,
+          `Access-app "${a.name}" (zonder voorvoegsel) staat al op ${[...new Set(dubbel)].join(", ")}; haal die eerst weg, de inrichting zet de publieke paden zelf`,
         );
       }
     }
@@ -356,25 +356,25 @@ async function verken(arg, d, { schrijven }) {
     testProject: projecten.find((p) => p.name === namen.test) ?? null,
     testInlog: apps.find((a) => a.name === namen.testInlog) ?? null,
     workerAccess: apps.find((a) => a.name === namen.worker) ?? null,
-    openbaar: apps.find((a) => a.name === namen.openbaar) ?? null,
+    publiek: apps.find((a) => a.name === namen.publiek) ?? null,
   };
 }
 
-// ---------------------------------------------------------------- openbare paden
+// ---------------------------------------------------------------- publieke paden
 
 function urisVanApp(a) {
   return (a?.destinations ?? []).map((x) => x.uri);
 }
 
 /**
- * Zorgt dat de bypass-policy van de openbare paden bestaat; geeft zijn id. Met `droog`
+ * Zorgt dat de bypass-policy van de publieke paden bestaat; geeft zijn id. Met `droog`
  * schrijft hij niets en is het id een plaatshouder als de policy er nog niet is.
  */
-async function zorgVoorOpenbaarPolicy(d, policies, vv, { droog, acties }) {
-  const naam = openbaarPolicyNaam(vv);
+async function zorgVoorPubliekPolicy(d, policies, vv, { droog, acties }) {
+  const naam = publiekPolicyNaam(vv);
   const er = policies.find((p) => p.name === naam);
   if (er) {
-    const gewenst = openbaarPolicy(naam);
+    const gewenst = publiekPolicy(naam);
     const anders =
       er.decision !== gewenst.decision ||
       JSON.stringify(er.include ?? []) !== JSON.stringify(gewenst.include);
@@ -386,35 +386,35 @@ async function zorgVoorOpenbaarPolicy(d, policies, vv, { droog, acties }) {
   }
   if (droog) {
     acties.push(`gepland: policy ${naam} (iedereen, zonder inlog)`);
-    return "<openbaar>";
+    return "<publiek>";
   }
-  const nieuw = await d.cf.maakPolicy(openbaarPolicy(naam));
+  const nieuw = await d.cf.maakPolicy(publiekPolicy(naam));
   policies.push(nieuw);
   acties.push(`policy ${naam} aangemaakt (iedereen, zonder inlog)`);
   return nieuw.id;
 }
 
 /**
- * De openbare paden van één app gelijk aan toegang.json: de Access-app `<vv><app>-openbaar`
+ * De publieke paden van één app gelijk aan toegang.json: de Access-app `<vv><app>-publiek`
  * aanmaken, bijwerken of (bij een lege lijst) weghalen. `hostname` is het adres van de app:
  * het eigen domein, of in de tijdelijke stand het workers.dev-adres. Geeft een lijst acties.
  */
-async function zetOpenbarePaden(d, { t, app, vv, hostname, apps, policies, droog }) {
-  const naam = appNamen(app, vv).openbaar;
-  const paden = openbarePadenVanApp(t, app);
+async function zetPubliekePaden(d, { t, app, vv, hostname, apps, policies, droog }) {
+  const naam = appNamen(app, vv).publiek;
+  const paden = publiekVanApp(t, app);
   const er = apps.find((a) => a.name === naam);
   const acties = [];
   if (!paden.length) {
     if (er) {
       if (!droog) await d.cf.verwijderApp(er.id);
       acties.push(
-        `${droog ? "gepland: " : ""}${naam} ${droog ? "weghalen" : "weggehaald"} (geen openbare paden meer)`,
+        `${droog ? "gepland: " : ""}${naam} ${droog ? "weghalen" : "weggehaald"} (geen publieke paden meer)`,
       );
     }
     return acties;
   }
-  const policyId = await zorgVoorOpenbaarPolicy(d, policies, vv, { droog, acties });
-  const body = openbaarApp({ naam, hostname, paden, policyId });
+  const policyId = await zorgVoorPubliekPolicy(d, policies, vv, { droog, acties });
+  const body = publiekApp({ naam, hostname, paden, policyId });
   const lijst = paden.join(" ");
   if (!er) {
     if (droog)
@@ -447,14 +447,14 @@ async function zetOpenbarePaden(d, { t, app, vv, hostname, apps, policies, droog
   return acties;
 }
 
-/** Heeft geen enkele app nog openbare paden, dan de bypass-policy weg. */
-async function ruimOpenbaarPolicyOp(d, t, policies, vv, { droog }) {
-  const naam = openbaarPolicyNaam(vv);
+/** Heeft geen enkele app nog publieke paden, dan de bypass-policy weg. */
+async function ruimPubliekPolicyOp(d, t, policies, vv, { droog }) {
+  const naam = publiekPolicyNaam(vv);
   const er = policies.find((p) => p.name === naam);
-  if (!er || Object.keys(t.apps).some((app) => openbarePadenVanApp(t, app).length)) return [];
+  if (!er || Object.keys(t.apps).some((app) => publiekVanApp(t, app).length)) return [];
   if (!droog) await d.cf.verwijderPolicy(er.id);
   return [
-    `${droog ? "gepland: " : ""}policy ${naam} ${droog ? "weghalen" : "weggehaald"} (geen openbare paden meer)`,
+    `${droog ? "gepland: " : ""}policy ${naam} ${droog ? "weghalen" : "weggehaald"} (geen publieke paden meer)`,
   ];
 }
 
@@ -691,7 +691,7 @@ function geplandWorker(v, workerBestaat) {
   return PLACEHOLDER_GEPLAND;
 }
 
-function geplandeStappen(arg, v, workerBestaat, openbaarGepland = [], sentryGepland = "") {
+function geplandeStappen(arg, v, workerBestaat, publiekGepland = [], sentryGepland = "") {
   const bestaat = (x, tekst) => (x ? `bestaat al (${x.id ?? x.ref})` : `gepland: ${tekst}`);
   const policiesErAl = v.gewenst.every((g) => v.policies.some((p) => p.name === g.body.name));
   return [
@@ -730,8 +730,8 @@ function geplandeStappen(arg, v, workerBestaat, openbaarGepland = [], sentryGepl
       stap: "3.5 Access-app op de hostname",
       actie: v.tijdelijk ? GEEN_DEUR : bestaat(v.deur, `${v.namen.deur} op ${v.hostname}`),
     },
-    ...(openbaarGepland.length
-      ? [{ stap: "3.5b openbare paden", actie: openbaarGepland.join("; ") }]
+    ...(publiekGepland.length
+      ? [{ stap: "3.5b publieke paden", actie: publiekGepland.join("; ") }]
       : []),
     { stap: "4 Access op de Worker", actie: geplandWorker(v, workerBestaat) },
     { stap: "S foutmeldingen (Sentry)", actie: sentryGepland },
@@ -893,7 +893,7 @@ export async function richtIn(arg, d) {
     waarschuwingen: [],
   };
   if (arg.droogloop) {
-    const openbaarGepland = await zetOpenbarePaden(d, {
+    const publiekGepland = await zetPubliekePaden(d, {
       t: v.t,
       app: arg.app,
       vv: arg.voorvoegsel,
@@ -906,7 +906,7 @@ export async function richtIn(arg, d) {
       arg,
       v,
       await d.cf.workerBestaat(arg.worker),
-      openbaarGepland,
+      publiekGepland,
       (await stapSentry(arg, d, { droog: true })).actie,
     );
     return resultaat;
@@ -997,8 +997,8 @@ export async function richtIn(arg, d) {
     );
   } else stap("3.5 Access-app op de hostname", `hergebruikt (${deur.id})`);
 
-  // 3.5b de openbare paden: een eigen Access-app met de bypass-policy, op hetzelfde adres
-  const openbaar = await zetOpenbarePaden(d, {
+  // 3.5b de publieke paden: een eigen Access-app met de bypass-policy, op hetzelfde adres
+  const publiek = await zetPubliekePaden(d, {
     t: v.t,
     app: arg.app,
     vv: arg.voorvoegsel,
@@ -1007,7 +1007,7 @@ export async function richtIn(arg, d) {
     policies: [...v.policies],
     droog: false,
   });
-  if (openbaar.length) stap("3.5b openbare paden", openbaar.join("; "));
+  if (publiek.length) stap("3.5b publieke paden", publiek.join("; "));
 
   // 4 Access op de Worker, vóór 3.6: pas met de GitHub-variabelen kan er uitgerold
   // worden, en dan moet de deur er al staan. Zo nodig zet deze stap eerst een
@@ -1139,7 +1139,7 @@ export async function ruimOp(arg, d) {
   const eigenTest = (app) => !d.toegang?.apps?.[`${app}-test`] || !arg.app;
   const testNamen = appsUitBestand.filter(eigenTest).map((app) => appNamen(app, vv));
   const appNamenSet = new Set([
-    ...namen.flatMap((n) => [n.deur, n.inlog, n.worker, n.openbaar]),
+    ...namen.flatMap((n) => [n.deur, n.inlog, n.worker, n.publiek]),
     ...testNamen.map((n) => n.testInlog),
   ]);
   const projectNamen = new Set([...namen.map((n) => n.project), ...testNamen.map((n) => n.test)]);
@@ -1152,15 +1152,15 @@ export async function ruimOp(arg, d) {
   const andereApps = Object.keys(d.toegang?.apps ?? {}).filter(
     (app) => !appsUitBestand.includes(app),
   );
-  // De bypass-policy van de openbare paden telt als groep "openbaar": hij gaat mee, tenzij een
-  // andere app in toegang.json nog openbare paden heeft.
+  // De bypass-policy van de publieke paden telt als groep "publiek": hij gaat mee, tenzij een
+  // andere app in toegang.json nog publieke paden heeft.
   const gebruiktDoor = (groep) =>
     andereApps.filter((app) =>
-      groep === OPENBAAR_GROEP
-        ? openbarePadenVanApp(d.toegang, app).length > 0
+      groep === PUBLIEK_GROEP
+        ? publiekVanApp(d.toegang, app).length > 0
         : groepenVanApp(d.toegang, app).includes(groep),
     );
-  const policyNamen = new Set([...kandidaten, OPENBAAR_GROEP].map((g) => policyNaam(g, vv)));
+  const policyNamen = new Set([...kandidaten, PUBLIEK_GROEP].map((g) => policyNaam(g, vv)));
 
   const alleApps = await cf.apps();
   const allePolicies = await cf.policies();
@@ -1174,7 +1174,7 @@ export async function ruimOp(arg, d) {
   const blijvendePolicies = [];
   const policies = allePolicies.filter((p) => {
     if (!policyNamen.has(p.name)) return false;
-    const groep = [...kandidaten, OPENBAAR_GROEP].find((g) => policyNaam(g, vv) === p.name);
+    const groep = [...kandidaten, PUBLIEK_GROEP].find((g) => policyNaam(g, vv) === p.name);
     const andereApps = gebruiktDoor(groep);
     const door = andereApps.length ? andereApps : hangtAan(p).map((naam) => `Access-app ${naam}`);
     if (door.length) blijvendePolicies.push({ policy: p, door });
@@ -1319,11 +1319,11 @@ async function trekInOp(d, t, app, ref, { test = false } = {}) {
 }
 
 /**
- * De openbare paden van elke app die al is ingericht (er staat een deur of een Access op
+ * De publieke paden van elke app die al is ingericht (er staat een deur of een Access op
  * de Worker), op het adres van die deur: het eigen domein, of anders het workers.dev-adres.
  * Daarna de bypass-policy weg als geen app hem nog gebruikt.
  */
-async function openbarePadenVoorAlle(d, t, vv, { apps, policies, droog }) {
+async function publiekePadenVoorAlle(d, t, vv, { apps, policies, droog }) {
   const acties = [];
   const lijst = [...apps];
   const pols = [...policies];
@@ -1332,13 +1332,13 @@ async function openbarePadenVoorAlle(d, t, vv, { apps, policies, droog }) {
     const deur =
       lijst.find((a) => a.name === namen.deur) ?? lijst.find((a) => a.name === namen.worker);
     if (!deur?.domain) {
-      if (openbarePadenVanApp(t, app).length) {
-        acties.push(`openbare paden van ${app} wachten op App inrichten (er is nog geen deur)`);
+      if (publiekVanApp(t, app).length) {
+        acties.push(`publieke paden van ${app} wachten op App inrichten (er is nog geen deur)`);
       }
       continue;
     }
     acties.push(
-      ...(await zetOpenbarePaden(d, {
+      ...(await zetPubliekePaden(d, {
         t,
         app,
         vv,
@@ -1349,7 +1349,7 @@ async function openbarePadenVoorAlle(d, t, vv, { apps, policies, droog }) {
       })),
     );
   }
-  acties.push(...(await ruimOpenbaarPolicyOp(d, t, pols, vv, { droog })));
+  acties.push(...(await ruimPubliekPolicyOp(d, t, pols, vv, { droog })));
   return acties;
 }
 
@@ -1379,10 +1379,10 @@ export async function werkToegangBij(arg, d) {
         );
       }
     }
-    const openbaar = await openbarePadenVoorAlle(d, t, vv, { apps, policies, droog: true });
+    const publiek = await publiekePadenVoorAlle(d, t, vv, { apps, policies, droog: true });
     return {
       droogloop: true,
-      acties: ["gepland: policies gelijkzetten, apps koppelen, intrekken", ...openbaar, ...hooks],
+      acties: ["gepland: policies gelijkzetten, apps koppelen, intrekken", ...publiek, ...hooks],
     };
   }
   const sync = await synchroniseerPolicies(cf, t, {
@@ -1391,7 +1391,7 @@ export async function werkToegangBij(arg, d) {
     voorvoegsel: vv,
   });
   const gekoppeld = await koppelPolicies(cf, t, apps, sync.ids, vv);
-  const openbaar = await openbarePadenVoorAlle(d, t, vv, { apps, policies, droog: false });
+  const publiek = await publiekePadenVoorAlle(d, t, vv, { apps, policies, droog: false });
 
   const ingetrokken = {};
   const toegelaten = {};
@@ -1442,7 +1442,7 @@ export async function werkToegangBij(arg, d) {
     acties: [
       ...sync.acties,
       ...gekoppeld,
-      ...openbaar,
+      ...publiek,
       ...hooks,
       ...weg.map((n) => `policy ${n} verwijderd`),
     ],

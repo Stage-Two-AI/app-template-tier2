@@ -4,14 +4,14 @@
  *   {
  *     "groepen": { "<groep>": { "domeinen": [], "adressen": [], "idp_groepen": [], "uitsluiten": [] } },
  *     "apps":    { "<app>": ["<groep>", ...] }
- *                  of { "<app>": { "groepen": ["<groep>", ...], "openbare_paden": ["/bekijk/*"],
+ *                  of { "<app>": { "groepen": ["<groep>", ...], "publiek": ["/bekijk/*"],
  *                                  "gegevens_naar_test": false } },
  *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
  *
  * De lange vorm van een app is optioneel; de korte (alleen de groepen) blijft werken.
- * `openbare_paden`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
- * klant stuurt. Ze krijgen een eigen Access-app met een bypass-policy (zie openbaarApp in
+ * `publiek`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
+ * klant stuurt. Ze krijgen een eigen Access-app met een bypass-policy (zie publiekApp in
  * cloudflare.mjs); de gebouwde bestanden en iconen gaan vanzelf mee. `gegevens_naar_test`
  * (standaard true): met false kopieert Testdatabase verversen voor deze app geen gegevens en
  * bestanden van productie meer, maar ververst hij de testlogin wel.
@@ -39,14 +39,14 @@ const DOMEIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}
 const ADRES = /^[a-z0-9._%+-]+@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const IDP_GROEP = /^[^'"\\\n]{1,200}$/;
 /**
- * Een openbaar pad: begint met /, alleen veilige tekens, hoogstens één * aan het eind. De
+ * Een publiek pad: begint met /, alleen veilige tekens, hoogstens één * aan het eind. De
  * hele app openzetten ("/" of "/*") kan niet: dan valt de deur weg.
  */
 const PAD = /^\/[a-zA-Z0-9._~/-]*\*?$/;
 const geldigPad = (p) => typeof p === "string" && PAD.test(p) && p !== "/" && p !== "/*";
-const APP_VELDEN = ["groepen", "openbare_paden", "gegevens_naar_test"];
-/** Die naam is van de policy van de openbare paden (openbaarPolicyNaam). */
-export const OPENBAAR_GROEP = "openbaar";
+const APP_VELDEN = ["groepen", "publiek", "gegevens_naar_test"];
+/** Die naam is van de policy van de publieke paden (publiekPolicyNaam). */
+export const PUBLIEK_GROEP = "publiek";
 
 /** De gekozen groepen van een app, in beide vormen van het bestand. */
 export function groepenVanApp(t, app) {
@@ -54,10 +54,10 @@ export function groepenVanApp(t, app) {
   return Array.isArray(w) ? w : (w?.groepen ?? []);
 }
 
-/** De openbare paden van een app (leeg als er geen zijn). */
-export function openbarePadenVanApp(t, app) {
+/** De publieke paden van een app (leeg als er geen zijn). */
+export function publiekVanApp(t, app) {
   const w = t?.apps?.[app];
-  return Array.isArray(w) ? [] : (w?.openbare_paden ?? []);
+  return Array.isArray(w) ? [] : (w?.publiek ?? []);
 }
 
 /** Kopieert Testdatabase verversen gegevens en bestanden voor deze app? Standaard ja. */
@@ -93,9 +93,9 @@ export function valideerToegang(t) {
     fouten.push('"apps" ontbreekt of is geen object');
   if (fouten.length) throw new Error(`toegang.json: ${fouten.join("; ")}`);
 
-  if (Object.hasOwn(groepen, OPENBAAR_GROEP)) {
+  if (Object.hasOwn(groepen, PUBLIEK_GROEP)) {
     fouten.push(
-      `groep "${OPENBAAR_GROEP}": die naam is van de policy voor de openbare paden; kies een andere naam`,
+      `groep "${PUBLIEK_GROEP}": die naam is van de policy voor de publieke paden; kies een andere naam`,
     );
   }
   for (const [naam, groep] of Object.entries(groepen)) {
@@ -149,10 +149,10 @@ export function valideerToegang(t) {
         if (!APP_VELDEN.includes(veld) && !veld.startsWith("$"))
           fouten.push(`app "${app}", veld ${veld}: onbekend veld (wel: ${APP_VELDEN.join(", ")})`);
       }
-      const paden = waarde.openbare_paden ?? [];
+      const paden = waarde.publiek ?? [];
       if (!Array.isArray(paden) || paden.some((p) => !geldigPad(p))) {
         fouten.push(
-          `app "${app}": openbare_paden is een lijst paden die met / beginnen, met hoogstens een * aan het eind (bijvoorbeeld "/bekijk/*"); de hele app ("/" of "/*") kan niet`,
+          `app "${app}": publiek is een lijst paden die met / beginnen, met hoogstens een * aan het eind (bijvoorbeeld "/bekijk/*"); de hele app ("/" of "/*") kan niet`,
         );
       }
       if (
@@ -315,10 +315,10 @@ export async function synchroniseerPolicies(
       }
     }
   }
-  // De policy van de openbare paden is geen groep; die beheert de inrichting apart.
+  // De policy van de publieke paden is geen groep; die beheert de inrichting apart.
   const namen = new Set([
     ...gewenst.map((g) => g.body.name),
-    policyNaam(OPENBAAR_GROEP, voorvoegsel),
+    policyNaam(PUBLIEK_GROEP, voorvoegsel),
   ]);
   const overbodig = huidig.filter((p) => isEigenPolicy(p.name, voorvoegsel) && !namen.has(p.name));
   return { ids, acties, overbodig };
