@@ -28,7 +28,9 @@ De uitgangspunten waar alles uit volgt:
   een nieuwe versie en zet met `/stagetwo-tier2:updaten` per app het update-voorstel klaar; een
   bouwer keurt het goed. Het abonnement houdt de omgeving niet bij: beheer en werking blijven
   na de overdracht bij je bedrijf. Systeembeheer, een garantie op beschikbaarheid en meer werk
-  aan je apps (op verzoek, op nacalculatie tegen €120 per uur exclusief btw) vallen erbuiten.
+  aan je apps vallen erbuiten: dat werk doen je bouwers zelf met hun assistent, en wie er hulp
+  bij wil, kan het op verzoek door Stage Two laten doen, op nacalculatie tegen €120 per uur
+  exclusief btw.
   Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor, als
   pull request, ook zonder abonnement. De versies van de GitHub-workflows in
   `.github/workflows/` komen met een nieuwe versie van de template, omdat die workflows van de
@@ -137,7 +139,8 @@ In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
 lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de
 inrichting in de beheer-repo: tijdens het project door Stage Two, na de overdracht door de
-owner van je organisatie, of op verzoek door Stage Two.
+owner van je organisatie (wie er hulp bij wil, kan het op verzoek als betaald werk door Stage
+Two laten doen).
 
 **Geen opslag bij Cloudflare.** Gegevens staan in Supabase. `wrangler.jsonc` mag alleen
 sleutels bevatten die op de lijst van `scripts/lib/cloudflare-config.mjs` staan, bovenaan
@@ -261,8 +264,11 @@ zonder database (een site, een rekenhulp) start je op tier 1; de afweging hierbo
 de keuze tussen tier 1 en tier 2. De regel erachter is
 één app per verzameling gegevens: gaat het over gegevens die al in een app zitten, dan
 bouw je het in die app. De stand "gedeeld" (een aparte app op de database van een andere
-app, bijvoorbeeld een portaal voor mensen van buiten) is een keuze van Stage Two, omdat
-die een eigen beveiligingsopzet vraagt.
+app, bijvoorbeeld een portaal voor mensen van buiten) is een bewuste keuze, omdat die een
+eigen beveiligingsopzet vraagt. App inrichten in de beheer-repo doet hem niet vanzelf: zet
+hem met Claude op een rij in `/stagetwo-tier2:verder-werken` (het contract in het schema `api`
+van de eigenaar, en `stack.config.json`). Wie er hulp bij wil, kan het op verzoek als betaald
+werk door Stage Two laten doen.
 
 ### De testdatabase: preview en lokaal kijken raken nooit productie
 

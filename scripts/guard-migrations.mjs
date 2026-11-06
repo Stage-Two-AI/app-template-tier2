@@ -56,8 +56,9 @@ if (!bezitDatabase()) {
       "",
       "Wat je wél doet:",
       "  - hoort de wijziging bij het schema? Doe hem in de repo die de database bezit.",
-      "  - heeft deze app echt een eigen database nodig? Dan is dat een beslissing van",
-      "    Stage Two, niet een bestand erbij. Vraag het Stage Two.",
+      "  - heeft deze app echt een eigen database nodig? Dan is dat een keuze voor de hele",
+      "    app, niet een bestand erbij: zet het met Claude op een rij in",
+      "    /stagetwo-tier2:verder-werken; de owner richt de database in met de beheer-repo.",
       "",
       "Verwijder deze bestanden om de poort weer groen te krijgen.",
     ]);

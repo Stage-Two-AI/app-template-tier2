@@ -104,10 +104,51 @@ describe("uitrollen.yml", () => {
   });
 });
 
-describe("uitrollen.yml: alleen productie", () => {
-  it("draait alleen bij een push op main en heeft geen preview-job meer", () => {
-    expect(uitrollen.on).toEqual({ push: { branches: ["main"] } });
-    expect(Object.keys(uitrollen.jobs)).toEqual(["productie"]);
+describe("uitrollen.yml: productie, plus de overgang voor de eerste update-PR", () => {
+  const overgang = job("overgang");
+
+  it("draait bij een push op main, en op een PR alleen als die preview-uitrollen.yml wijzigt", () => {
+    expect(uitrollen.on).toEqual({
+      push: { branches: ["main"] },
+      pull_request: { paths: [".github/workflows/preview-uitrollen.yml"] },
+    });
+    expect(Object.keys(uitrollen.jobs).sort()).toEqual(["overgang", "productie"]);
+    expect(job("productie").if).toContain("github.event_name == 'push'");
+  });
+
+  it("de overgang draait alleen op een PR uit deze repo, zonder omgeving en zonder secrets", () => {
+    expect(overgang.if).toContain("github.event_name == 'pull_request'");
+    expect(overgang.if).toContain(
+      "github.event.pull_request.head.repo.full_name == github.repository",
+    );
+    expect(omgeving(overgang)).toBeUndefined();
+    expect(JSON.stringify(overgang)).not.toContain("secrets.");
+    expect(overgang.permissions).toEqual({ contents: "read" });
+  });
+
+  it("bouwt alleen als main nog de oude Preview uitrollen heeft (die op Uitrollen wacht)", () => {
+    const eerste = overgang.steps[0];
+    expect(eerste?.id).toBe("oud");
+    expect(eerste?.run).toContain("?ref=main");
+    for (const stap of overgang.steps.slice(1)) {
+      expect(stap.if ?? "", stap.name ?? stap.uses ?? stap.run).toMatch(
+        /steps\.(oud|preview)\.outputs\./,
+      );
+    }
+    // Dezelfde zoekregel als in de stap: raak bij de oude versie, mis bij de nieuwe van deze template.
+    const patroon = /'(\^ \+workflows: \\\[Uitrollen\\\])'/.exec(eerste?.run ?? "")?.[1];
+    expect(patroon).toBeDefined();
+    const regel = new RegExp(patroon ?? "", "m");
+    expect(regel.test("on:\n  workflow_run:\n    workflows: [Uitrollen]\n")).toBe(true);
+    expect(regel.test(readFileSync(join(WORKFLOWS, "preview-uitrollen.yml"), "utf8"))).toBe(false);
+  });
+
+  it("bewaart preview-dist, het artifact waar de oude Preview uitrollen op main naar zoekt", () => {
+    const bewaren = overgang.steps.at(-1);
+    expect(bewaren?.uses).toMatch(/^actions\/upload-artifact@/);
+    expect(bewaren?.with?.name).toBe("preview-dist");
+    const bouwen = overgang.steps.find((s) => s.run === "pnpm build");
+    expect(bouwen?.env?.VITE_OMGEVING).toBe("test");
   });
 });
 

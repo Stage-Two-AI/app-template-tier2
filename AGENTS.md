@@ -13,7 +13,7 @@
 
 <!-- stack:begin -->
 <!-- Alles hieronder komt uit de app-template en wordt bijgewerkt met
-     /stagetwo-tier2:updaten, als pull request. Wijzig het niet hier; meld het bij Stage Two. -->
+     /stagetwo-tier2:updaten, als pull request. Wijzig het niet hier; zie "Wat je niet aanpast" onderaan. -->
 
 Dit bestand geldt voor **elke** agent die in deze repo werkt: Claude Code, Codex, Cursor,
 Copilot of een mens zonder agent. Er is geen tweede set afspraken ergens anders.
@@ -70,7 +70,7 @@ eigen computer dus nooit. Zet nooit de sleutels van productie in `.env.local`.
 | `pnpm build` | productiebuild |
 | `pnpm test` | unittests |
 | `pnpm db:types:uit-ci` | databasetypes ophalen uit de laatste run van de Kwaliteitspoort (geen Docker nodig) |
-| `pnpm db:start` | lokale Supabase starten; vraagt Docker, alleen voor Stage Two |
+| `pnpm db:start` | lokale Supabase starten; vraagt Docker. Voor lokaal kijken is `pnpm env:test` genoeg, zonder Docker |
 | `pnpm env:local` | `.env.local` en `.env.test` schrijven op basis van die database |
 | `pnpm env:test` | `.env.local` laten wijzen naar de testdatabase van de app (geen Docker nodig), met de testlogin erbij |
 | `pnpm testlogin` | het wachtwoord van de testgebruiker ophalen uit de beheer-repo (elke nacht nieuw) en in `.env.development.local` zetten; de preview doet dit bij elke start |
@@ -211,7 +211,11 @@ bijwerken, elke wijziging aan een app als pull request van de gebruiker zelf).
 bestand onder de markering komen uit de gedeelde template en worden bijgewerkt met
 `/stagetwo-tier2:updaten`, als pull request. De check `guard:template` laat een PR die eraan
 komt rood staan; in Claude Code houdt de hook van de Stage Two-plugin de wijziging al
-bij de toetsaanslag tegen. Klopt er iets niet, meld het dan bij Stage Two: dan krijgt
-elk project de verbetering, in plaats van dit project alleen.
+bij de toetsaanslag tegen. Klopt er iets niet, los het dan op in de eigen code van de app,
+met Claude in `/stagetwo-tier2:verder-werken`. Is een templatebestand aanpassen echt nodig, dan
+kan dat bewust, met de regel `Bevestigd: templatebestanden gewijzigd` in de PR-tekst; de
+volgende update slaat dat bestand dan over en zegt dat. Je hoeft op niemand te wachten. Wil je
+dat de verbetering in een volgende versie van de template komt, voor elk project, geef het dan
+door aan Stage Two.
 
 <!-- stack:end -->

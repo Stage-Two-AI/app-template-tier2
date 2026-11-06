@@ -123,7 +123,7 @@ draaien lezen hun secrets uit je eigen organisatie.
 Wat je bouwt en je gegevens zijn van jou. Plugin en template mag je blijven gebruiken en ze
 blijven werken, ook zonder Stage Two (zie `LICENSE-STAGE-TWO`). Zolang je bedrijf een
 abonnement bij Stage Two heeft, zet Stage Two nieuwe versies van template en plugin in die
-kopie in je eigen GitHub. Stage Two past elke versie eerst toe op de eigen apps van Stage Two.
+kopie in je eigen GitHub. De eigen apps van Stage Two draaien op dezelfde template en plugin.
 Stopt het abonnement, dan blijft die kopie op de laatste versie staan; er komt alleen niets
 nieuws bij.
 
@@ -135,8 +135,8 @@ nieuwe versie van de beheer-repo als dat nodig is, en vragen en meedenken, tot o
 uur per maand (meer tijd op afspraak). Het abonnement
 houdt de omgeving niet bij: beheer en werking blijven na de overdracht bij je bedrijf. Niet in
 het abonnement zitten systeembeheer, een garantie op beschikbaarheid en meer werk aan je
-apps; dat laatste doet Stage Two op verzoek, op nacalculatie tegen €120 per uur exclusief
-btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
+apps. Dat werk doen je bouwers zelf met hun assistent; wie er hulp bij wil, kan het op verzoek
+door Stage Two laten doen, op nacalculatie tegen €120 per uur exclusief btw. Dependabot, een dienst van GitHub, stelt in elke app updates van de npm-pakketten voor,
 ook zonder abonnement, als pull request die een bouwer goedkeurt; de versies van de
 GitHub-workflows komen met een nieuwe versie van de template; alleen een beveiligingsupdate kan
 Dependabot tussendoor voorstellen. Hoogt die alleen de versie van een GitHub Action op, dan laat

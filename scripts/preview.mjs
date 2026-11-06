@@ -44,7 +44,7 @@ if (!existsSync(join("node_modules", "vite", "bin", "vite.js"))) {
   if (pnpm(["install"]).status !== 0) {
     stop([
       ROOD("✗ `pnpm install` mislukte."),
-      "Draai /stagetwo-tier2:installatie, of vraag Stage Two.",
+      "Draai /stagetwo-tier2:installatie: die zet de programma's op deze computer goed en zegt wat er mist.",
     ]);
   }
 }
@@ -75,7 +75,7 @@ if (modus !== "geen") {
           : "Deze app heeft geen testdatabase ingesteld (stack.config.json).",
         "",
         "De preview praat nooit met productie: wat je hier aanklikt, gebeurt dan echt.",
-        "Verwijder .env.local (dan schrijft de preview hem opnieuw), of vraag Stage Two.",
+        "Verwijder .env.local; dan schrijft de preview hem opnieuw, met de testdatabase.",
       ]);
     }
     // Bij elke start de testlogin vernieuwen (in .env.development.local); env:test deed dat
@@ -97,8 +97,9 @@ if (modus !== "geen") {
       [
         "",
         "  ! Deze app heeft een database, maar de preview heeft er (nog) geen toegang toe.",
-        "    De app start zonder gegevens. Vraag Stage Two om de publieke sleutel van de",
-        "    testdatabase in stack.config.json (`testdatabase.anon_key`).",
+        "    De app start zonder gegevens. De publieke sleutel van de testdatabase hoort in",
+        "    stack.config.json (`testdatabase.anon_key`); de owner zet hem erin met App inrichten",
+        "    in de beheer-repo. Tot dan: `pnpm env:test` (vraagt één keer een login bij Supabase).",
         "",
       ].join("\n"),
     );

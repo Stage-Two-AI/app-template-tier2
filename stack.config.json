@@ -24,7 +24,7 @@
     "Van false naar true of \"gedeeld\" is een wijziging van een regel; alles wat erbij",
     "hoort staat al klaar in deze repo. Zie docs/WERKWIJZE.md voor wanneer je hem omzet.",
     "Geen of eigen kies je bij het beginnen van de app (/stagetwo-tier2:nieuwe-app); gedeeld is een",
-    "keuze van Stage Two.",
+    "bewuste keuze met een eigen beveiligingsopzet (zie docs/WERKWIJZE.md).",
     "",
     "testdatabase (optioneel, alleen bij een app met database): een tweede Supabase-project,",
     "los van productie, waar de Cloudflare-preview naar wijst en waar je lokaal tegenaan mag",

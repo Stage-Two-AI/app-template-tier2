@@ -25,6 +25,11 @@
     "project. Eigen tests van de app horen naast de code in src/; een eigen test in",
     "tests/unit/ onder een naam die de template niet kent, blijft gewoon staan.",
     "",
+    "alsHetOntbreekt: bestanden van het project waar code van de template op leunt.",
+    "Ontbreekt zo'n bestand in de app, dan zet updaten de versie van de template neer;",
+    "staat het er, dan blijft het van het project. tests/unit/template-afhankelijk.test.ts",
+    "bewaakt dat elke import van de template op zo'n bestand uitkomt (sinds versie 40).",
+    "",
     "manifestFormaat zegt welke vorm dit bestand heeft; een oudere plugin stopt bij een",
     "nieuwer formaat in plaats van half werk te doen.",
     "",
@@ -33,7 +38,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 39,
+  "stackVersion": 40,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -106,8 +111,11 @@
       "tests/rls/open-policies.test.ts",
       "tests/rls/lib/database.ts",
       "tests/rls/lib/afscherming.ts",
+      "scripts/lib/onderdelen.mjs",
       "tests/unit/onderdelen.test.ts",
       "e2e/onderdelen.spec.ts",
+      "e2e/stack-config.ts",
+      "tests/unit/template-afhankelijk.test.ts",
       "e2e/inloggen.ts"
     ],
     "sleutelsSamenvoegen": {
@@ -115,7 +123,12 @@
     },
     "tussenMarkeringen": {
       "AGENTS.md": "stack"
-    }
+    },
+    "alsHetOntbreekt": [
+      "e2e/test-user.ts",
+      "src/lib/database.types.ts",
+      "supabase/functions/_shared/apparaten.json"
+    ]
   },
   "vanHetProject": [
     "stack.config.json",
