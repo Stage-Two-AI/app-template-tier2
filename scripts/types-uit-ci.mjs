@@ -50,7 +50,9 @@ const types = typesUitLog(gh("run", "view", runId, "--log-failed"));
 if (!types) {
   console.error(`✗ In run ${runId} staan geen gegenereerde types.`);
   console.error("  Dat betekent meestal dat de types al gelijk lopen, of dat de check");
-  console.error("  Databasetypes niet heeft gedraaid (een concept-PR: zet hem op klaar).");
+  console.error(
+    "  Databasetypes niet heeft gedraaid (een concept-PR zonder wijziging in supabase/: zet hem op klaar).",
+  );
   process.exit(1);
 }
 const fout = controleerTypes(types);

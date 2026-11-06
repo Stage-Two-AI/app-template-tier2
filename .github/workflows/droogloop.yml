@@ -1,0 +1,259 @@
+name: Droogloop migraties
+
+# Oefent de migraties van een pull request die bestaande gegevens omzetten (UPDATE of
+# DELETE) op de testdatabase, een kopie van productie, en draait alles daarna terug. Per
+# migratie telt hij hoeveel rijen hij per tabel raakt en vergelijkt dat met de regels
+# `-- verwachting: <tabel> <min>-<max>` bovenin de migratie. De tellingen en vijf
+# voorbeelden voor en na komen als reactie in de PR, als verslag voor later.
+#
+# "Droogloop migraties" is een verplichte controle in de ruleset van main. Daarom krijgt
+# ELKE PR die status op zijn laatste commit, ook als er niets te oefenen is:
+#
+#   geen migratie die gegevens omzet          groen, "niets te oefenen"
+#   wel, en de droogloop valt binnen bereik   groen
+#   wel, buiten het bereik of een fout        rood, met de uitkomst
+#   wel, maar de sleutels ontbreken           rood, tenzij de PR-tekst de regel
+#                                             `Bevestigd: droogloop zonder testdatabase` heeft
+#                                             (dan groen); de owner zet de sleutels met App
+#                                             inrichten in de eigen beheer-repo
+#   wel, maar de PR komt uit een fork         rood: een fork krijgt nooit de testdatabase;
+#                                             zet de migratie op een branch in deze repo
+#
+# Zo wacht een PR nooit voor altijd op de status. Een PR van Dependabot of uit een fork
+# raakt bijna nooit migraties en wordt dus groen, net als de andere verplichte controles
+# (die draaien in een fork zonder sleutels en slaan het deel met sleutels over).
+#
+# Waarom niet in de Kwaliteitspoort zelf: die draait op de code van de PR, en code uit een
+# PR krijgt nooit een sleutel. Deze workflow draait na "Droogloop aanvragen", altijd in de
+# versie van main (zo werkt workflow_run), met de schrijfrechten van de repo zelf, ook als de
+# PR van Dependabot of uit een fork komt. De migraties uit de PR zijn hier alleen gegevens:
+# ze worden met git uitgelezen en als tekst naar de database gestuurd (scripts/droogloop.mjs),
+# er draait geen code uit de PR op deze runner.
+#
+# Nodig in omgeving preview: het secret SUPABASE_TEST_DB_PASSWORD en de variabele
+# SUPABASE_TEST_POOLER_HOST (of SUPABASE_POOLER_HOST). App inrichten in de beheer-repo zet ze.
+on:
+  workflow_run:
+    workflows: [Droogloop aanvragen]
+    types: [completed]
+
+concurrency:
+  group: droogloop-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Snel en zonder sleutels: is er iets te oefenen? Zo niet, dan meteen groen. Deze job
+  # noemt geen omgeving, zodat een PR zonder migratie geen deployment in preview krijgt.
+  bepalen:
+    name: Is er iets te oefenen?
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    outputs:
+      oefenen: ${{ steps.besluit.outputs.oefenen }}
+    steps:
+      # De code van main; de PR levert alleen zijn migratiebestanden, als tekst.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # Een commit uit een fork staat ook in deze repo, onder refs/pull/<n>/head; ophalen op
+      # SHA werkt dus in beide gevallen.
+      - name: Migraties van de PR bekijken
+        id: klaar
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          MAP: ${{ runner.temp }}/droogloop
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          node scripts/droogloop.mjs klaarzetten
+
+      - name: Status op de PR
+        id: besluit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          NODIG: ${{ steps.klaar.outputs.nodig }}
+          EIGEN_REPO: ${{ github.event.workflow_run.head_repository.full_name == github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          status() {
+            gh api -X POST "repos/$REPO/statuses/$SHA" -f state="$1" \
+              -f context="Droogloop migraties" -f description="${2:0:139}" \
+              -f target_url="$RUN_URL" > /dev/null
+          }
+          if [ "$NODIG" != "true" ]; then
+            echo "::notice::Niets te oefenen: geen migratie die bestaande gegevens omzet."
+            status success "Niets te oefenen: geen migratie die bestaande gegevens omzet (UPDATE of DELETE)."
+          elif [ "$EIGEN_REPO" != "true" ]; then
+            echo "::error::Deze PR komt uit een fork en zet gegevens om. Een fork krijgt nooit de testdatabase; zet de migratie op een branch in deze repo."
+            status failure "PR uit een fork: niet geoefend. Zet de migratie op een branch in deze repo."
+            exit 1
+          else
+            status pending "Bezig: de migraties worden op de testdatabase geoefend."
+            echo "oefenen=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  droogloop:
+    name: Droogloop op de testdatabase
+    needs: bepalen
+    if: needs.bepalen.outputs.oefenen == 'true'
+    runs-on: ubuntu-latest
+    environment: preview
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: PR-nummer bepalen
+        id: pr
+        env:
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          if [[ "$PR" =~ ^[0-9]+$ ]]; then
+            echo "nummer=$PR" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Geen PR-nummer bij deze run; de uitslag komt alleen als status, niet als reactie."
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Migraties van de PR klaarzetten
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          MAP: ${{ runner.temp }}/droogloop
+        run: |
+          git fetch --no-tags origin "$HEAD_SHA"
+          node scripts/droogloop.mjs klaarzetten
+
+      # Ontbreken de sleutels, dan blokkeert dat de bouwer niet: met de regel
+      # `Bevestigd: droogloop zonder testdatabase` in de PR-tekst is de status groen (de tekst
+      # wordt live opgehaald, dus "Re-run failed jobs" is genoeg). De owner zet de sleutels
+      # met App inrichten in de eigen beheer-repo; daarna oefent de droogloop weer.
+      - name: Is de testdatabase bereikbaar?
+        id: check
+        env:
+          TEST_DB_PASSWORD: ${{ secrets.SUPABASE_TEST_DB_PASSWORD }}
+          POOLER: ${{ vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.nummer }}
+        run: |
+          testref=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.testDatabase()?.project_ref ?? ''))")
+          if [ -z "$testref" ]; then
+            mist="Deze app heeft nog geen testdatabase (blok testdatabase in stack.config.json)."
+          elif [ -z "$TEST_DB_PASSWORD" ] || [ -z "$POOLER" ]; then
+            mist="Het wachtwoord of de pooler van de testdatabase staat nog niet in omgeving preview (SUPABASE_TEST_DB_PASSWORD, SUPABASE_TEST_POOLER_HOST)."
+          fi
+          if [ -z "${mist:-}" ]; then
+            echo "testref=$testref" >> "$GITHUB_OUTPUT"
+            echo "doen=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "doen=false" >> "$GITHUB_OUTPUT"
+          oplossen="De owner van de beheer-repo lost het op: Actions, App inrichten, Run workflow, met deze app (of /updaten in de plugin start het als je dat mag)."
+          body=""
+          if [ -n "$PR" ]; then body=$(gh api "repos/$REPO/pulls/$PR" --jq '.body // ""'); fi
+          if printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*Bevestigd:[[:space:]]*droogloop zonder testdatabase[[:space:]]*$'; then
+            echo "bevestigd=true" >> "$GITHUB_OUTPUT"
+            echo "kort=Niet geoefend: de sleutels voor de testdatabase ontbreken. Bevestigd in de PR-tekst." >> "$GITHUB_OUTPUT"
+            echo "reden=$mist Bevestigd in de PR-tekst, dus deze PR kan door zonder droogloop. $oplossen" >> "$GITHUB_OUTPUT"
+            echo "::warning::$mist Bevestigd in de PR-tekst."
+          else
+            echo "kort=Niet geoefend: sleutels ontbreken. Zet 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst, of laat de owner App inrichten." >> "$GITHUB_OUTPUT"
+            echo "reden=$mist Wil je toch door: zet de regel 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst en kies bij deze run 'Re-run failed jobs'. $oplossen" >> "$GITHUB_OUTPUT"
+            echo "::error::$mist Zet 'Bevestigd: droogloop zonder testdatabase' in de PR-tekst (Re-run failed jobs), of laat de owner App inrichten."
+          fi
+
+      # Het adres bouwt scripts/db-url.mjs, zoals in deploy-db.yml: eerst het masker voor het
+      # gecodeerde wachtwoord, dan pas het adres. Het staat alleen in deze stap.
+      - name: Droogloop
+        id: droog
+        if: steps.check.outputs.doen == 'true'
+        env:
+          PROJECT_REF: ${{ steps.check.outputs.testref }}
+          WACHTWOORD: ${{ secrets.SUPABASE_TEST_DB_PASSWORD }}
+          POOLER: ${{ vars.SUPABASE_TEST_POOLER_HOST || vars.SUPABASE_POOLER_HOST }}
+          MAP: ${{ runner.temp }}/droogloop
+        run: |
+          node scripts/db-url.mjs --mask
+          DROOGLOOP_DB_URL=$(node scripts/db-url.mjs)
+          export DROOGLOOP_DB_URL
+          node scripts/droogloop.mjs uitvoeren
+
+      # Altijd een eindstatus, ook als een stap hierboven faalde: anders blijft de PR op
+      # "bezig" staan.
+      - name: Uitslag in de PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ steps.pr.outputs.nummer }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          DOEN: ${{ steps.check.outputs.doen }}
+          REDEN: ${{ steps.check.outputs.reden }}
+          KORT: ${{ steps.check.outputs.kort }}
+          BEVESTIGD: ${{ steps.check.outputs.bevestigd }}
+          GESLAAGD: ${{ steps.droog.outputs.geslaagd }}
+          SAMENVATTING: ${{ steps.droog.outputs.samenvatting }}
+          MAP: ${{ runner.temp }}/droogloop
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          markering='<!-- droogloop -->'
+          if [ "$DOEN" = "true" ] && [ -f "$MAP/verslag.md" ]; then
+            tekst=$(cat "$MAP/verslag.md")
+          elif [ "$DOEN" = "false" ]; then
+            tekst="$markering
+          **Droogloop op de testdatabase**: niet gedraaid. $REDEN"
+          else
+            tekst="$markering
+          **Droogloop op de testdatabase**: kon niet draaien. Zie $RUN_URL"
+          fi
+          # Eén reactie per PR, die bij elke push wordt bijgewerkt.
+          if [ -n "$PR" ]; then
+            bestaand=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+              --jq ".[] | select(.body | startswith(\"$markering\")) | .id" | head -n 1)
+            if [ -n "$bestaand" ]; then
+              gh api -X PATCH "repos/$REPO/issues/comments/$bestaand" -f body="$tekst" > /dev/null
+            else
+              gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$tekst" > /dev/null
+            fi
+          fi
+          # De status op de commit van de PR.
+          if [ "$DOEN" = "false" ] && [ "$BEVESTIGD" = "true" ]; then staat=success; SAMENVATTING="$KORT"
+          elif [ "$DOEN" = "false" ]; then staat=failure; SAMENVATTING="$KORT"
+          elif [ "$GESLAAGD" = "true" ]; then staat=success
+          elif [ "$GESLAAGD" = "false" ]; then staat=failure
+          else staat=error; SAMENVATTING="De droogloop kon niet draaien; zie de run."; fi
+          gh api -X POST "repos/$REPO/statuses/$SHA" -f state="$staat" \
+            -f context="Droogloop migraties" -f description="${SAMENVATTING:0:139}" \
+            -f target_url="$RUN_URL" > /dev/null
+
+      - name: Rood als de droogloop niet groen is
+        if: (steps.check.outputs.doen == 'false' && steps.check.outputs.bevestigd != 'true') || steps.droog.outputs.geslaagd == 'false'
+        env:
+          REDEN: ${{ steps.check.outputs.reden }}
+          SAMENVATTING: ${{ steps.droog.outputs.samenvatting }}
+        run: |
+          echo "::error::${REDEN:-Droogloop buiten de verwachting: $SAMENVATTING}"
+          exit 1

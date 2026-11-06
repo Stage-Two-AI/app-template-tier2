@@ -1,0 +1,60 @@
+name: Droogloop aanvragen
+
+# Start de droogloop (droogloop.yml) voor elke pull request. Deze workflow doet zelf niets:
+# hij draait op de code van de PR en ziet dus geen enkele sleutel. Hij is er omdat de
+# droogloop, die de testdatabase wel mag aanraken, alleen vanaf main mag draaien, en dat gaat
+# met workflow_run achter een eerste workflow aan.
+#
+# Bewust zonder filter op paden: "Droogloop migraties" is een verplichte controle, dus elke PR
+# moet die status krijgen, ook zonder migratie ("niets te oefenen"). Deze job kost een paar
+# seconden; de droogloop zelf beslist snel of er iets te oefenen is.
+#
+# De overgang: zolang main deze droogloop nog niet heeft (de pull request die de template naar
+# versie 39 brengt, en een PR die daarvoor al openstond), draait droogloop.yml niet, want
+# workflow_run gebruikt altijd de versie van main. Dan zet deze job de status zelf: groen als
+# de PR geen migratie raakt, anders rood met de uitleg. Zo wacht ook die PR niet voor altijd.
+# Een fork of Dependabot krijgt hier een token zonder schrijfrecht; die stap slaat dan over.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  aanvragen:
+    name: Droogloop aanvragen
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Droogloop aanvragen
+        run: echo "::notice::De workflow Droogloop migraties kijkt zo of deze PR migraties heeft die gegevens omzetten, en oefent die op de testdatabase."
+
+      - name: Overgang, als main de droogloop nog niet heeft
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASIS: ${{ github.event.pull_request.base.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if gh api "repos/$REPO/contents/.github/workflows/droogloop.yml?ref=$BASIS" --silent 2>/dev/null; then
+            echo "main heeft de droogloop al; die zet de status."
+            exit 0
+          fi
+          aantal=$(gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '[.[] | select(.filename | startswith("supabase/migrations/"))] | length' | awk '{ s += $1 } END { print s + 0 }')
+          if [ "${aantal:-0}" = "0" ]; then
+            staat=success
+            tekst="Niets te oefenen: deze PR raakt geen migraties."
+          else
+            staat=failure
+            tekst="De droogloop staat nog niet op main. Merge eerst de update van de template; push daarna opnieuw."
+          fi
+          gh api -X POST "repos/$REPO/statuses/$SHA" -f state="$staat" \
+            -f context="Droogloop migraties" -f description="$tekst" > /dev/null \
+            || echo "::warning::De status Droogloop migraties kon niet worden gezet (geen schrijfrecht)."

@@ -4,10 +4,14 @@ import { test } from "node:test";
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import {
   aanmeldHookSql,
+  gegevensNaarTest,
+  groepenVanApp,
   hookFunctie,
   koppelPolicies,
   magAanmelden,
+  policyIdsVoorApp,
   policyVoorGroep,
+  publiekVanApp,
   sqlTekst,
   synchroniseerPolicies,
   TESTGEBRUIKER,
@@ -66,6 +70,68 @@ test("validatie: een ongeldig domein of adres noemt groep en veld", () => {
         apps: { x: ["a"] },
       }),
     /groep "a", veld rollen.*onbekend/,
+  );
+});
+
+test("validatie: de lange vorm van een app, met groepen, publieke paden en gegevens_naar_test", () => {
+  const t = {
+    groepen: KLANT.groepen,
+    apps: {
+      direct: {
+        groepen: ["klant"],
+        publiek: ["/bekijk/*", "/over"],
+        gegevens_naar_test: false,
+      },
+      kort: ["stagetwo"],
+    },
+  };
+  valideerToegang(t);
+  assert.deepEqual(groepenVanApp(t, "direct"), ["klant"]);
+  assert.deepEqual(groepenVanApp(t, "kort"), ["stagetwo"]);
+  assert.deepEqual(publiekVanApp(t, "direct"), ["/bekijk/*", "/over"]);
+  assert.deepEqual(publiekVanApp(t, "kort"), []);
+  assert.equal(gegevensNaarTest(t, "direct"), false);
+  assert.equal(gegevensNaarTest(t, "kort"), true, "standaard wel");
+  assert.equal(gegevensNaarTest({ ...t, apps: { x: { groepen: ["klant"] } } }, "x"), true);
+  assert.deepEqual(policyIdsVoorApp(t, "direct", { klant: "p1", stagetwo: "p2" }), ["p1"]);
+  assert.equal(magAanmelden("piet@klant.nl", t, "direct"), "ja");
+  assert.equal(magAanmelden("info@stagetwo.nl", t, "direct"), "nee");
+});
+
+test("validatie: publieke paden beginnen met /, hebben hoogstens een * aan het eind, en nooit de hele app", () => {
+  for (const fout of [
+    ["/"],
+    ["/*"],
+    ["bekijk/*"],
+    ["/a*b"],
+    ["/bekijk/**"],
+    ["/a b"],
+    "/bekijk/*",
+    [1],
+  ]) {
+    const t = {
+      groepen: KLANT.groepen,
+      apps: { direct: { groepen: ["klant"], publiek: fout } },
+    };
+    assert.throws(() => valideerToegang(t), /publiek/, JSON.stringify(fout));
+  }
+});
+
+test("validatie: een onbekend veld, een app zonder groepen in de lange vorm, en de groepsnaam publiek zijn fouten", () => {
+  const met =
+    (apps, groepen = KLANT.groepen) =>
+    () =>
+      valideerToegang({ groepen, apps });
+  assert.throws(met({ direct: { groepen: ["klant"], dicht: ["/x"] } }), /veld dicht: onbekend/);
+  assert.throws(met({ direct: { publiek: ["/x"] } }), /geen groepen gekozen/);
+  assert.throws(
+    met({ direct: { groepen: ["klant"], gegevens_naar_test: "nee" } }),
+    /true of false/,
+  );
+  assert.throws(met({ direct: "klant" }), /een lijst groepen, of een object/);
+  assert.throws(
+    met({ direct: ["publiek"] }, { publiek: { domeinen: ["klant.nl"] } }),
+    /groep "publiek": die naam is van de policy voor de publieke paden/,
   );
 });
 

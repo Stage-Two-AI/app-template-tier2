@@ -1,17 +1,22 @@
 name: Preview uitrollen
 
-# Het tweede deel van de preview per pull request. De job "Preview" in uitrollen.yml
-# bouwt de PR zonder sleutels en bewaart dist als artifact. Deze workflow draait daarna,
-# altijd in de versie van main (zo werkt workflow_run), en is de enige die de
-# preview-sleutel ziet. Daarom mag de omgeving preview tot main beperkt zijn, en kan
-# code uit een PR nooit bij een Cloudflare-sleutel.
+# Het tweede deel van de preview per pull request. De job "Code" van de Kwaliteitspoort
+# (ci.yml) bouwt de PR zonder sleutels en bewaart dist als artifact, maar alleen als al zijn
+# controles groen zijn. Deze workflow draait daarna, altijd in de versie van main (zo werkt
+# workflow_run), en is de enige die de preview-sleutel ziet. Daarom mag de omgeving preview
+# tot main beperkt zijn, en kan code uit een PR nooit bij een Cloudflare-sleutel.
+#
+# Hij wacht op de hele Kwaliteitspoort, maar kijkt naar het artifact, niet naar de uitkomst
+# van de hele run: is de browsertest rood terwijl Code groen was, dan komt de preview er
+# toch, zodat je kunt zien wat er misgaat. Bij een concept is dat na de job Code (een à twee
+# minuten), bij een PR die klaar is na de hele poort.
 #
 # Wat hier gebeurt, vertrouwt niets uit de PR: de code en de installatie komen van
 # main, het artifact wordt alleen uitgepakt naar dist/ en er draait niets uit, en het
 # PR-nummer komt uit de gebeurtenis van GitHub, niet uit het artifact.
 on:
   workflow_run:
-    workflows: [Uitrollen]
+    workflows: [Kwaliteitspoort]
     types: [completed]
 
 concurrency:
@@ -24,10 +29,12 @@ permissions:
 jobs:
   preview:
     name: Preview
-    # Alleen een geslaagde run voor een PR uit deze repo: een fork krijgt geen preview.
+    # Alleen een run voor een PR uit deze repo: een fork krijgt geen preview. Een afgebroken
+    # run (er kwam een nieuwere push) slaat over; de nieuwere run zet zijn eigen preview neer.
+    # Of er iets te uploaden is, beslist de stap "Is er iets gebouwd?".
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.conclusion != 'cancelled' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     environment: preview
@@ -56,11 +63,12 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
-          # De PR-job bewaart niets als de preview-instellingen ontbreken; hij meldt dat zelf al.
+          # De job Code bewaart niets als hij rood is of als de preview-instellingen ontbreken;
+          # in dat laatste geval meldt hij dat zelf al.
           aantal=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
             --jq '[.artifacts[] | select(.name == "preview-dist" and (.expired | not))] | length')
           if [ "$aantal" = "0" ]; then
-            echo "::notice::De run van de PR heeft geen gebouwde preview bewaard. Er komt geen preview."
+            echo "::notice::De job Code van deze PR heeft geen gebouwde preview bewaard (rood, of de preview is niet ingericht). Er komt geen preview."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 

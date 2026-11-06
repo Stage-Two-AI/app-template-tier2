@@ -117,6 +117,22 @@ Access alleen een lege pagina van Cloudflare ("There is nothing here yet"), ook 
 `preview_urls: true`; dat bleek bij finance op 15-10-2026. De Access op de Worker zelf
 dekt het workers.dev-adres al, dus er komt geen open deur bij.
 
+**Een pagina zonder inlog kan, maar alleen zo.** Soms moet iemand zonder account een
+pagina kunnen openen, bijvoorbeeld een link die je naar een klant stuurt
+(`/bekijk/<code>`). Zet het pad dan als `publiek` bij de app in `toegang.json` van de
+beheer-repo; de inrichting zet er een eigen Access-app op die iedereen doorlaat, met de
+gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Twee regels:
+
+- Een publieke pagina haalt gegevens alleen op via een databasefunctie voor `anon` die zelf
+  beperkt wat terugkomt: één rij bij een lange willekeurige code, en alleen de velden die
+  de bezoeker mag zien. Nooit een tabel die `anon` met een RLS-policy openzet, want dan
+  kan iedereen met de anon key de hele tabel opvragen. Test het net als RLS: zonder inlog,
+  met een verkeerde code, verwacht niets.
+- De JavaScript van de app is daarna voor iedereen te downloaden, ook de schermen achter de
+  deur. Dat is geen nieuw risico (er staan nooit geheimen in de frontend, zie hierboven),
+  maar namen van tabellen en functies zijn dan wel zichtbaar. De gegevens zelf blijven
+  beschermd door RLS.
+
 In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
 lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de
@@ -271,7 +287,10 @@ Wat erop draait:
   Inloggen gaat daar als testgebruiker, zie hieronder.
 - **Migraties, als eerste.** Bij een merge past Actions de migraties eerst toe op de
   testdatabase (de canary) en pas daarna op productie. Faalt het op de testdatabase, dan
-  blijft productie zoals hij was.
+  blijft productie zoals hij was. Staan er migraties van een andere, nog open PR al op de
+  testdatabase (workflow **Migratie op test** in de beheer-repo, voor een werkende preview),
+  dan zet de canary die regels in de migratiegeschiedenis even opzij en daarna terug; hun
+  tabellen blijven staan.
 
 In `stack.config.json` staat welk project het is; het databasewachtwoord ervan is het
 Actions-secret `SUPABASE_TEST_DB_PASSWORD`:
@@ -426,12 +445,21 @@ beheerserver (optioneel): een server waar Claude Code bij Supabase is ingelogd.
 Draait op elke pull request; alles groen voordat er gemerged kan worden. Wat elke
 check bewaakt staat in de tabel in `README.md`.
 
-**Concept eerst, de volle poort bij klaar.** Een pull request begint als concept (draft).
-Dan draait bij elke push alleen de snelle check `Code` (een paar minuten) en wordt de preview
-bijgewerkt. De zware check `Database en end-to-end` draait pas als de PR op klaar wordt gezet
-(`gh pr ready`). Mergen kan alleen met de volle poort groen: een concept kan niet mergen, en
-op klaar zetten start alles opnieuw. Zo wacht niemand per tussenstap op een browsertest, en
-kost bouwen veel minder Actions-minuten.
+**Concept eerst, de volle poort bij klaar.** Een pull request begint als concept (draft), ook
+een pull request met een migratie. Dan draait bij elke push de snelle check `Code` (een paar
+minuten); is `supabase/` gewijzigd, dan ook de databasetests, maar zonder browser. De
+browsertest draait pas als de PR op klaar wordt gezet (`gh pr ready`). Mergen kan alleen met
+de volle poort groen: een concept kan niet mergen, en op klaar zetten start alles opnieuw. Zo
+wacht niemand per tussenstap op een browsertest, en kost bouwen veel minder Actions-minuten.
+
+**De zware check wacht op de snelle.** `Database en end-to-end` start pas als `Code` groen is.
+Is `Code` rood, dan kost de zware check geen minuten.
+
+**De preview wacht op `Code`.** De job `Code` bouwt de app één keer, met de openbare
+testwaarden, en bewaart dat als de preview, alleen als al zijn controles groen zijn (ook de
+controle op geheimen in die bundel). `Preview uitrollen` zet hem daarna online. Bij een
+concept is dat een à twee minuten na de push; bij een PR die klaar is, na de hele poort. Is
+alleen de browsertest rood, dan komt de preview er wel, zodat je kunt zien wat er misgaat.
 
 **Het vaste preview-adres.** Naast de preview per pull request (`pr-<nummer>-...`) heeft
 elke app één vast adres, `actueel-...`, dat altijd de laatst gepushte PR toont. Dat kan de
@@ -455,6 +483,13 @@ De route door de app waarop niets misgaat: inloggen → lijst openen → item to
 het staat er. Niet de randgevallen. Breekt die route, dan is de app waardeloos, dus
 dat is de test die het meest telt. Hij raakt in één keer de hele keten: build,
 inloggen, database, RLS en de interface.
+
+Daarnaast opent de browsertest **elk onderdeel** van de app (`e2e/onderdelen.spec.ts`): per
+regel in `src/onderdelen.ts` het hoofdscherm, met de vraag of het zonder fout opent en zijn kop
+toont. Zo komt een onderdeel dat bij het openen stukgaat (een route die weg is, een rol die niet
+klopt, een query op een kolom die niet meer bestaat) niet groen door de poort. Een unittest
+houdt die lijst bij met de router. Heeft de app rollen, dan geeft `supabase/testrol.sql` ook
+de e2e-gebruiker zijn rol.
 
 Uitbreiden doe je **reactief**: elke keer dat er in productie iets stukgaat, komt er
 een test bij die precies dat geval afdekt. Zo groeit het vangnet mee met je echte

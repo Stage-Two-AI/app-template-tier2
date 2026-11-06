@@ -33,7 +33,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 38,
+  "stackVersion": 39,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -48,16 +48,24 @@
       ".github/workflows/deploy-db.yml",
       ".github/workflows/uitrollen.yml",
       ".github/workflows/preview-uitrollen.yml",
+      ".github/workflows/droogloop.yml",
+      ".github/workflows/droogloop-aanvragen.yml",
       ".github/pull_request_template.md",
       ".github/dependabot.yml",
       "scripts/lib/changed-files.mjs",
       "scripts/lib/stack-config.mjs",
       "scripts/lib/db-types.mjs",
       "scripts/lib/destructief.mjs",
+      "scripts/lib/rls-regels.mjs",
+      "scripts/lib/verwachting.mjs",
       "scripts/lib/cloudflare-config.mjs",
       "scripts/guard-tests.mjs",
       "scripts/guard-migrations.mjs",
       "scripts/guard-rls.mjs",
+      "scripts/guard-rls-tests.mjs",
+      "scripts/open-tabellen-opnemen.mjs",
+      "scripts/droogloop.mjs",
+      "scripts/herstel-kopie.mjs",
       "scripts/guard-secrets.mjs",
       "scripts/guard-escape-hatches.mjs",
       "scripts/guard-template.mjs",
@@ -92,7 +100,15 @@
       "tests/unit/guard-template.test.ts",
       "tests/unit/mail.test.ts",
       "tests/unit/testlogin.test.ts",
-      "tests/unit/uitrollen-workflow.test.ts"
+      "tests/unit/uitrollen-workflow.test.ts",
+      "tests/unit/rls-regels.test.ts",
+      "tests/unit/verwachting.test.ts",
+      "tests/rls/open-policies.test.ts",
+      "tests/rls/lib/database.ts",
+      "tests/rls/lib/afscherming.ts",
+      "tests/unit/onderdelen.test.ts",
+      "e2e/onderdelen.spec.ts",
+      "e2e/inloggen.ts"
     ],
     "sleutelsSamenvoegen": {
       "package.json": ["scripts", "devDependencies"]

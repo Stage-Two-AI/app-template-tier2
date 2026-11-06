@@ -183,6 +183,7 @@ test("droogloop: maakt niets aan en toont de volledige lijst geplande stappen", 
       "3.4 auth-config",
       "3.5 Access-app op de hostname",
       "4 Access op de Worker",
+      "S foutmeldingen (Sentry)",
       "3.6 GitHub-variabelen en -secrets",
     ],
   );
@@ -199,8 +200,9 @@ test("volledige run: de schrijfacties volgen de volgorde van het ontwerp", async
   const ref = w.staat.projecten[0].ref;
   assert.deepEqual(schrijf.slice(0, 8), [
     "POST sb/projects",
-    // het wachtwoord meteen bewaren, vóór iets anders kan mislukken
-    "gh secret set SUPABASE_PROJECT_REF",
+    // het wachtwoord meteen bewaren, vóór iets anders kan mislukken; de project-ref als
+    // variabele, alleen in production
+    "gh variable set SUPABASE_PROJECT_REF",
     "gh secret set SUPABASE_DB_PASSWORD",
     "POST cf/access/policies",
     "POST cf/access/apps saas",
@@ -294,15 +296,16 @@ test("GitHub: variabelen per omgeving, secrets via stdin, niets in de argumenten
   const w = nepWolk();
   await richtIn(ARG, opzet(w));
   const ref = w.staat.projecten[0].ref;
-  for (const env of ["production", "preview"]) {
-    assert.deepEqual(w.staat.ghVariabelen[env], {
-      VITE_SUPABASE_URL: `https://${ref}.supabase.co`,
-      VITE_SUPABASE_ANON_KEY: `anon-${ref}`,
-      VITE_INLOGDIENST: "cloudflare",
-      CLOUDFLARE_ACCOUNT_ID: "acc",
-      SUPABASE_POOLER_HOST: "aws-0-eu-central-1.pooler.supabase.com",
-    });
-  }
+  const gemeen = {
+    VITE_SUPABASE_URL: `https://${ref}.supabase.co`,
+    VITE_SUPABASE_ANON_KEY: `anon-${ref}`,
+    VITE_INLOGDIENST: "cloudflare",
+    CLOUDFLARE_ACCOUNT_ID: "acc",
+    SUPABASE_POOLER_HOST: "aws-0-eu-central-1.pooler.supabase.com",
+  };
+  // De project-ref is geen geheim: een variabele, alleen in production (deploy-db.yml).
+  assert.deepEqual(w.staat.ghVariabelen.production, { SUPABASE_PROJECT_REF: ref, ...gemeen });
+  assert.deepEqual(w.staat.ghVariabelen.preview, gemeen);
   const gh = w.aanroepen.filter((a) => a.soort === "gh");
   assert.ok(gh.every((a) => a.args.includes("--repo") && a.args.includes(ARG.repo)));
   assert.ok(
@@ -316,10 +319,7 @@ test("GitHub: variabelen per omgeving, secrets via stdin, niets in de argumenten
 test("GitHub: de databasesecrets staan in omgeving production, niet op de repo", async () => {
   const w = nepWolk();
   await richtIn(ARG, opzet(w));
-  assert.deepEqual(w.staat.ghSecrets.production.sort(), [
-    "SUPABASE_DB_PASSWORD",
-    "SUPABASE_PROJECT_REF",
-  ]);
+  assert.deepEqual(w.staat.ghSecrets.production.sort(), ["SUPABASE_DB_PASSWORD"]);
   assert.deepEqual(w.staat.ghSecrets.repo ?? [], [], "geen repo-secret: een PR-tak kan die lezen");
   const zetten = w.aanroepen.filter(
     (a) => a.soort === "gh" && a.args[1] === "set" && a.args[0] === "secret",
@@ -328,6 +328,77 @@ test("GitHub: de databasesecrets staan in omgeving production, niet op de repo",
   for (const a of zetten) {
     assert.equal(a.args[a.args.indexOf("--env") + 1], "production", a.args.join(" "));
   }
+});
+
+// ---------------------------------------------------------------- project-ref als variabele
+
+const DEPLOY_DB_NIEUW =
+  "env:\n  PROJECT_REF: (vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF)\n";
+const BESTAAND_PROJECT = {
+  ref: "refbestaand0000000001",
+  name: "cf-proef-cf-proef",
+  organization_slug: "stagetwo",
+  status: "ACTIVE_HEALTHY",
+};
+const DEPLOY_DB_OUD = "env:\n  PROJECT_REF: (secrets.SUPABASE_PROJECT_REF)\n";
+
+test("project-ref: een bestaand project krijgt de variabele, en het oude secret gaat weg als deploy-db.yml de variabele leest", async () => {
+  const w = nepWolk({
+    projecten: [BESTAAND_PROJECT],
+    ghSecrets: { production: ["SUPABASE_PROJECT_REF", "SUPABASE_DB_PASSWORD"] },
+    ghBestanden: { ".github/workflows/deploy-db.yml": DEPLOY_DB_NIEUW },
+  });
+  const r = await richtIn(ARG, opzet(w));
+  assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, "refbestaand0000000001");
+  assert.deepEqual(w.staat.ghSecrets.production, ["SUPABASE_DB_PASSWORD"]);
+  const weg = w.aanroepen.find(
+    (a) => a.soort === "gh" && a.args[0] === "secret" && a.args[1] === "delete",
+  );
+  assert.deepEqual(weg.args, [
+    "secret",
+    "delete",
+    "SUPABASE_PROJECT_REF",
+    "--env",
+    "production",
+    "--repo",
+    ARG.repo,
+  ]);
+  assert.match(
+    r.stappen.find((x) => x.stap === "3.6 oud secret SUPABASE_PROJECT_REF").actie,
+    /opgeruimd.*variabele SUPABASE_PROJECT_REF/,
+  );
+  // Een tweede run heeft niets meer op te ruimen.
+  w.aanroepen.length = 0;
+  const r2 = await richtIn(ARG, opzet(w));
+  assert.ok(!r2.stappen.some((x) => x.stap.includes("oud secret")));
+  assert.ok(!w.schrijfacties().some((x) => x.includes("delete")));
+});
+
+test("project-ref: leest deploy-db.yml de variabele nog niet (oude versie), dan blijft het oude secret staan, met een waarschuwing", async () => {
+  for (const ghBestanden of [{ ".github/workflows/deploy-db.yml": DEPLOY_DB_OUD }, {}]) {
+    const w = nepWolk({
+      projecten: [BESTAAND_PROJECT],
+      ghSecrets: { production: ["SUPABASE_PROJECT_REF", "SUPABASE_DB_PASSWORD"] },
+      ghBestanden,
+    });
+    const r = await richtIn(ARG, opzet(w));
+    assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, "refbestaand0000000001");
+    assert.ok(w.staat.ghSecrets.production.includes("SUPABASE_PROJECT_REF"), "secret blijft");
+    assert.ok(
+      r.waarschuwingen.some((x) => /SUPABASE_PROJECT_REF blijft voorlopig.*versie 39/.test(x)),
+      JSON.stringify(r.waarschuwingen),
+    );
+  }
+});
+
+test("project-ref: opruimen haalt de variabele weg, en ook een achtergebleven oud secret", async () => {
+  const w = nepWolk();
+  const d = opzet(w);
+  await richtIn(ARG, d);
+  w.staat.ghSecrets.production.push("SUPABASE_PROJECT_REF");
+  await ruimOp({ ...ARG, opruimen: true }, d);
+  assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, undefined);
+  assert.deepEqual(w.staat.ghSecrets.production, []);
 });
 
 test("GitHub: de openbare previewwaarden staan als PREVIEW_-repovariabelen", async () => {
@@ -481,7 +552,8 @@ test("tweede run met alles al aanwezig maakt niets dubbel aan", async () => {
   assert.equal(w.staat.providers.length, 1);
   assert.ok(
     r.stappen
-      .filter((s) => s.stap !== "4 Access op de Worker")
+      // Zonder Sentry-sleutel zegt stap S elke run dat Sentry nog niet gekoppeld is.
+      .filter((s) => !["4 Access op de Worker", "S foutmeldingen (Sentry)"].includes(s.stap))
       .every((s) => /hergebruikt|ongewijzigd/.test(s.actie)),
     JSON.stringify(r.stappen),
   );
@@ -539,7 +611,7 @@ test("het databasewachtwoord is bewaard, ook als een latere stap mislukt", async
   });
   await assert.rejects(() => richtIn(ARG, opzet(w)), /gaf 400/);
   assert.ok(w.staat.ghSecrets.production.includes("SUPABASE_DB_PASSWORD"));
-  assert.ok(w.staat.ghSecrets.production.includes("SUPABASE_PROJECT_REF"));
+  assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, w.staat.projecten[0].ref);
 });
 
 test("SaaS-app: een lege lijst inlogmethoden is een fout, ook vóór er iets wordt aangemaakt", async () => {
@@ -640,7 +712,9 @@ test("tijdelijke stand: een tweede run verandert niets", async () => {
   assert.deepEqual(w.schrijfacties(), []);
   assert.equal(w.staat.apps.length, 2, "inlogdienst en Worker-Access, verder niets");
   assert.ok(
-    r.stappen.every((s) => /hergebruikt|ongewijzigd|overgeslagen: tijdelijke stand/.test(s.actie)),
+    r.stappen
+      .filter((s) => s.stap !== "S foutmeldingen (Sentry)")
+      .every((s) => /hergebruikt|ongewijzigd|overgeslagen: tijdelijke stand/.test(s.actie)),
     JSON.stringify(r.stappen),
   );
 });
@@ -652,7 +726,11 @@ test("tijdelijke stand zonder uitrol: eerst placeholder, dan Access, pas daarna 
   const placeholder = schrijf.indexOf("PUT cf/workers/scripts/cf-proef");
   const subdomein = schrijf.indexOf("POST cf/workers/scripts/cf-proef/subdomain");
   const access = schrijf.indexOf("POST cf/access/apps self_hosted");
-  const eersteVariabele = schrijf.findIndex((s) => s.startsWith("gh variable set"));
+  // De project-ref staat er al direct na het project (bij het wachtwoord); die maakt de
+  // uitrol niet mogelijk. Het gaat om de variabelen daarna.
+  const eersteVariabele = schrijf.findIndex(
+    (s) => s.startsWith("gh variable set") && !s.includes("SUPABASE_PROJECT_REF"),
+  );
   assert.ok(placeholder >= 0, JSON.stringify(schrijf));
   assert.ok(placeholder < subdomein, "eerst het script, dan workers.dev aan");
   assert.ok(subdomein < access, "de Access pas als de Worker er staat");
@@ -686,7 +764,11 @@ test("standaardstand, Worker bestaat niet: ook hier eerst placeholder en Access 
   const r = await richtIn(ARG, opzet(w));
   const schrijf = w.schrijfacties();
   const placeholder = schrijf.indexOf("PUT cf/workers/scripts/cf-proef");
-  const eersteVariabele = schrijf.findIndex((s) => s.startsWith("gh variable set"));
+  // De project-ref staat er al direct na het project (bij het wachtwoord); die maakt de
+  // uitrol niet mogelijk. Het gaat om de variabelen daarna.
+  const eersteVariabele = schrijf.findIndex(
+    (s) => s.startsWith("gh variable set") && !s.includes("SUPABASE_PROJECT_REF"),
+  );
   assert.ok(placeholder >= 0 && placeholder < eersteVariabele, JSON.stringify(schrijf));
   assert.match(r.stappen.find((s) => s.stap === "4 Access op de Worker").actie, /placeholder/);
   const worker = w.staat.apps.find((a) => a.name === "cf-proef-cf-proef-worker");
@@ -1238,9 +1320,17 @@ test("testdatabase: eigen project en eigen SaaS-app, de previews wijzen erheen",
   );
   assert.deepEqual(w.staat.ghSecrets.production.sort(), [
     "SUPABASE_DB_PASSWORD",
-    "SUPABASE_PROJECT_REF",
     "SUPABASE_TEST_DB_PASSWORD",
   ]);
+  // De droogloop van migraties (droogloop.yml) draait in omgeving preview: daar het
+  // wachtwoord en de pooler van de testdatabase, en nooit het wachtwoord van productie.
+  assert.deepEqual(w.staat.ghSecrets.preview, ["SUPABASE_TEST_DB_PASSWORD"]);
+  assert.equal(
+    w.staat.ghVariabelen.preview.SUPABASE_TEST_POOLER_HOST,
+    "aws-1-eu-central-1.pooler.supabase.com",
+  );
+  assert.equal(w.staat.ghVariabelen.production.SUPABASE_PROJECT_REF, prod.ref);
+  assert.equal(w.staat.ghVariabelen.preview.SUPABASE_PROJECT_REF, undefined);
   // In stack.config.json (git) de publishable key: de anon-JWT valt over guard:secrets.
   assert.deepEqual(r.testdatabase, {
     project_ref: testProj.ref,
@@ -1292,6 +1382,40 @@ test("testdatabase: bestaand testproject zonder wachtwoord-secret krijgt een nie
   assert.ok(d.geheimen.includes(WACHTWOORD), "het nieuwe wachtwoord is gemaskeerd");
   assert.equal(r.waarschuwingen.filter((x) => /TEST_DB/.test(x)).length, 0);
   assert.match(r.stappen.find((s) => s.stap === "T testdatabase: wachtwoord").actie, /nieuw gezet/);
+});
+
+test("testdatabase: een app van vóór versie 39 zonder het secret in preview krijgt één keer een nieuw, in beide omgevingen", async () => {
+  const w = nepWolk();
+  const d = opzet(w);
+  await richtIn(TEST_ARG, d);
+  const testProj = w.staat.projecten.find((p) => p.name.endsWith("-test"));
+  // Zo stond het tot versie 39: het testwachtwoord alleen in production.
+  w.staat.ghSecrets.preview = [];
+  w.aanroepen.length = 0;
+  const r = await richtIn(TEST_ARG, d);
+  const resets = w.aanroepen.filter(
+    (a) => a.methode === "PATCH" && a.pad?.endsWith("/database/password"),
+  );
+  assert.equal(resets.length, 1, "alleen de testdatabase, één keer");
+  assert.ok(resets[0].pad.includes(testProj.ref));
+  assert.deepEqual(w.staat.ghSecrets.preview, ["SUPABASE_TEST_DB_PASSWORD"]);
+  assert.ok(w.staat.ghSecrets.production.includes("SUPABASE_TEST_DB_PASSWORD"));
+  const gezet = w.aanroepen
+    .filter((a) => a.methode === "gh secret set")
+    .map((a) => `${a.args[a.args.indexOf("--env") + 1]}/${a.args[2]}`)
+    .sort();
+  assert.deepEqual(gezet, [
+    "preview/SUPABASE_TEST_DB_PASSWORD",
+    "production/SUPABASE_TEST_DB_PASSWORD",
+  ]);
+  assert.match(
+    r.stappen.find((s) => s.stap === "T testdatabase: wachtwoord").actie,
+    /ontbrak in omgeving preview: nieuw gezet in Supabase en als secret in production en preview/,
+  );
+  // Daarna staat het goed: geen nieuw wachtwoord meer.
+  w.aanroepen.length = 0;
+  await richtIn(TEST_ARG, d);
+  assert.ok(!w.aanroepen.some((a) => a.pad?.endsWith("/database/password")));
 });
 
 test("testdatabase: staat het wachtwoord-secret er, dan blijft het wachtwoord ongemoeid", async () => {
@@ -1364,6 +1488,7 @@ test("testdatabase: opruimen haalt het testproject, de test-SaaS-app en het secr
   assert.deepEqual(w.staat.projecten, []);
   assert.ok(!w.staat.apps.some((a) => a.name.endsWith("-test-inlog")));
   assert.ok(!(w.staat.ghSecrets.production ?? []).includes("SUPABASE_TEST_DB_PASSWORD"));
+  assert.ok(!(w.staat.ghSecrets.preview ?? []).includes("SUPABASE_TEST_DB_PASSWORD"));
   assert.ok(r.verwijderd.some((x) => x.naam.startsWith("cf-proef-cf-proef-test")));
 });
 

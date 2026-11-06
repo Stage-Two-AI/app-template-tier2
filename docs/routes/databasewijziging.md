@@ -72,10 +72,51 @@ rijen mag hij dan zien (`policy`). Vergeet je de grant, dan krijgt de app
 `permission denied for table` terwijl je policies kloppen. Dat is niet onveilig,
 maar wel stuk, en de RLS-test laat het meteen zien.
 
+**Geen `using (true)`, tenzij de tabel bewust open staat.** Een policy met `using (true)` of
+`with check (true)` geeft iedereen met die rol alle rijen. Voor `anon` of zonder `to`-regel
+(dan geldt hij voor iedereen met de openbare sleutel) blokkeert de poort hem altijd. Voor
+`to authenticated` (of een eigen rol) alleen als de tabel met een reden in
+`stack.config.json` staat:
+
+```json
+"open_tabellen": { "feestdagen": "kalender voor iedereen binnen, geen persoonsgegevens" }
+```
+
+Vraag de gebruiker of iedereen die binnen is dit echt mag zien, en zet zijn antwoord als
+reden. De controle staat twee keer in de poort: `guard:rls` leest de migraties (al bij een
+concept), en `tests/rls/open-policies.test.ts` leest de policies uit de database zelf.
+
+**Een leesrol schrijft niet.** Leest een andere app deze database via een eigen rol
+(bijvoorbeeld `intern_lezer` op een datalake), dan staat die rol in `stack.config.json` bij
+`"leesrollen": ["intern_lezer"]`. Zo'n rol krijgt alleen `select`, bij voorkeur op views in
+`api`. Elke `grant insert`, `update` of `delete` aan die rol is rood: schrijven gaat via een
+functie in de app die de database beheert.
+
 ## Stap 3: Schrijf de RLS-test
 
-Voor elke nieuwe tabel, in `tests/rls/`. Het patroon staat in `tests/rls/items.test.ts`:
-log in als gebruiker A, probeer bij de gegevens van B te komen, verwacht leeg.
+Voor elke nieuwe tabel, in `tests/rls/`: log in als gebruiker A, probeer als gebruiker B
+bij die gegevens te komen, verwacht leeg. De hulp `controleerAfscherming` in
+`tests/rls/lib/afscherming.ts` doet dat in één aanroep (lezen, wijzigen, verwijderen, en een
+uitgelogde bezoeker); het voorbeeld staat in `tests/rls/items.test.ts`:
+
+```ts
+await controleerAfscherming({
+  tabel: "voorbeeld",
+  maakRijAlsA: async (a) => {
+    const { data, error } = await a.client
+      .from("voorbeeld").insert({ owner_id: a.id }).select("id").single();
+    if (error) throw error;
+    return data.id;
+  },
+});
+```
+
+Hoort B in een rol of organisatie te zitten om het te kunnen proberen, zet hem daar dan met
+`voorbereidB`, maar niet in die van A.
+
+`guard:rls-tests` kijkt of elke tabel in `public` zo'n aanroep heeft, of met een reden in
+`open_tabellen` staat (zie stap 2). In deze versie is dat nog een waarschuwing; vanaf de
+volgende uitgave van Stage Two is het rood.
 
 Die test draait in de Kwaliteitspoort (stap 4), in dezelfde eigen Supabase als je migraties.
 
@@ -88,13 +129,15 @@ Een lokale database is niet nodig (en dus ook geen Docker). De Kwaliteitspoort s
 elke run een eigen, lege Supabase, draait daar al je migraties vanaf niets en in volgorde,
 en daarna de RLS-tests en de controle op de types. Dat is de echte test.
 
-Een pull request met een migratie open je daarom **niet** als concept, zodat die zware
-check meteen meedraait:
+Ook een pull request met een migratie begint als concept. Omdat `supabase/` gewijzigd is,
+draait de zware check dan al bij elke push, alleen zonder browser: Supabase, de migraties,
+de controle op de types en de RLS-tests. De browsertest volgt als de PR op klaar gaat
+(`gh pr ready`):
 
 ```bash
 pnpm check
 git push -u origin <branch>
-gh pr create
+gh pr create --draft
 gh pr checks --watch
 ```
 
@@ -125,7 +168,54 @@ alleen als tussenstap, en draai daarna altijd `pnpm db:types:uit-ci`.
 Verzin nooit zelf een type voor een tabel. Als TypeScript klaagt dat een kolom niet
 bestaat, is het antwoord `pnpm db:types:uit-ci`, niet een `any`.
 
-## Stap 6: Gaat er iets weg? Stop even
+## Stap 6: Zet je migratie bestaande gegevens om? Zeg wat je verwacht
+
+Een migratie met een `update` of `delete` verandert gegevens die er al zijn. Zet dan bovenin
+per tabel die hij raakt een regel met het aantal rijen dat je verwacht, als bereik:
+
+```sql
+-- verwachting: public.klanten 120-140
+-- verwachting: public.orders 0-5
+update public.klanten set status = 'archief' where laatst_actief < '2025-01-01';
+delete from public.orders where status = 'concept' and klant_id is null;
+```
+
+Het formaat: `-- verwachting: <tabel> <min>-<max>` (of één getal als het precies zoveel moet
+zijn). Het telt de rijen die de migratie in die tabel wijzigt of verwijdert; nieuwe rijen
+tellen niet. Tel het eerst met een `select count(*)` met hetzelfde filter op de testdatabase
+(een kopie van productie), en neem een ruim maar eerlijk bereik. Hangt het aantal af van de
+dag waarop de migratie draait (`now()`, `current_date`), dan valt dat hier vaak al op.
+
+Wat de poort ermee doet:
+
+1. `guard:migrations` is rood als een `update` of `delete` geen regel heeft.
+2. De workflow **Droogloop migraties** draait de migraties van de PR op de testdatabase, telt
+   per tabel hoeveel rijen ze raken, en draait alles weer terug. Buiten het bereik, of een
+   tabel die er niet bij staat: de status `Droogloop migraties` op de PR is rood. Die status is
+   een verplichte controle en staat op elke PR; zonder migratie die gegevens omzet is hij
+   vanzelf groen ("niets te oefenen"). Ontbreken de sleutels voor de testdatabase, dan kan de
+   PR toch door met de regel `Bevestigd: droogloop zonder testdatabase` in de PR-tekst
+   ("Re-run failed jobs" is genoeg); de owner zet de sleutels met App inrichten. De tellingen
+   en vijf voorbeelden voor en na staan als reactie in de PR. De gebruiker hoeft die niet te
+   beoordelen; het is het verslag voor als er later iets uitgezocht moet worden.
+3. Na de merge zet **Database bijwerken** vlak vóór de migratie op productie een kopie van de
+   geraakte tabellen in het schema `herstel`, als `herstel.<tabel>_<jjjjmmdd>_<uumm>` (tijd in
+   UTC). Kopieën ouder dan veertien dagen gaan vanzelf weg.
+
+Zet in de PR-tekst wat de weg terug is. Ging er iets mis, dan haal je de oude waarden met één
+migratie terug uit de kopie, bijvoorbeeld:
+
+```sql
+-- terug naar de stand van vóór de migratie, voor de rijen die hij raakte
+update public.klanten k set status = h.status
+from herstel.klanten_20261105_1432 h
+where h.id = k.id and k.status is distinct from h.status;
+-- of verwijderde rijen terugzetten
+insert into public.orders select * from herstel.orders_20261105_1432 h
+where not exists (select 1 from public.orders o where o.id = h.id);
+```
+
+## Stap 7: Gaat er iets weg? Stop even
 
 Verwijdert je migratie een tabel, een kolom of gegevens, dan blokkeert
 `guard:migrations` de PR. Dat is de bedoeling. Loop dit na voordat je bevestigt:
@@ -143,11 +233,17 @@ Bevestigd: destructieve migratie
 
 ## Wat er gebeurt na de merge
 
+Zet een migratie gegevens om (stap 6), dan komt er vlak vóór stap 2 hieronder eerst een kopie
+van de geraakte tabellen in het schema `herstel`.
+
 1. Actions past de migratie eerst toe op de **testdatabase** (als die in
    `stack.config.json` staat). Faalt het daar, dan stopt het hier en blijft productie
    onaangeroerd. Lees dan de log van de workflow "Database bijwerken" en repareer met
    een nieuwe migratie.
-2. Daarna dezelfde migratie op **productie**.
+2. Daarna dezelfde migratie op **productie**. Op welk Supabase-project dat is, staat in de
+   instellingen van de repo: variabele `SUPABASE_PROJECT_REF` in omgeving `production`
+   (Settings > Environments). Een app die nog niet opnieuw is ingericht, heeft hem nog als
+   secret; dat werkt ook.
 3. GitHub Actions zet de nieuwe versie op Cloudflare neer.
 
 Migraties draaien **alleen bij een merge naar `main`**, nooit op een PR. Een PR mag

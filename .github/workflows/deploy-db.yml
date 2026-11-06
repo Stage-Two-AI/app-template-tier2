@@ -18,7 +18,8 @@ jobs:
   migrate:
     name: Migraties toepassen
     runs-on: ubuntu-latest
-    # Project-ref en wachtwoord staan in omgeving production, die alleen main toelaat.
+    # Wachtwoord (secret) en project-ref (variabele) staan in omgeving production, die alleen
+    # main toelaat.
     # Een access token van de Management API van Supabase is hier niet nodig: dat geeft
     # rechten op alle projecten van de organisatie en blijft in de beheer-repo.
     # Migreren gaat rechtstreeks met `--db-url`, zonder het project eerst te koppelen.
@@ -40,10 +41,13 @@ jobs:
           echo "modus=$modus" >> "$GITHUB_OUTPUT"
           echo "testref=$testref" >> "$GITHUB_OUTPUT"
 
-      - name: Zijn de secrets al gezet?
+      # De project-ref is geen geheim: hij staat als variabele in omgeving production, zodat
+      # in de instellingen te zien is op welk Supabase-project de migraties landen. Het oude
+      # secret blijft als vangnet werken tot App inrichten de variabele heeft gezet.
+      - name: Is alles ingericht?
         id: check
         env:
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
           WACHTWOORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           if [ "${{ steps.stack.outputs.modus }}" = "gedeeld" ]; then
@@ -53,8 +57,8 @@ jobs:
             echo "::notice::Deze app draait zonder database (database: false in stack.config.json). Migraties worden overgeslagen."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ -z "$WACHTWOORD" ] || [ -z "$PROJECT_REF" ]; then
-            echo "::notice::SUPABASE_DB_PASSWORD of SUPABASE_PROJECT_REF ontbreekt in omgeving production. Migraties worden overgeslagen."
-            echo "Dit is normaal in een project dat nog opgezet wordt; de inrichting zet beide secrets."
+            echo "::notice::Het secret SUPABASE_DB_PASSWORD of de variabele SUPABASE_PROJECT_REF ontbreekt in omgeving production. Migraties worden overgeslagen."
+            echo "Dit is normaal in een project dat nog opgezet wordt; App inrichten zet ze allebei."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -99,6 +103,16 @@ jobs:
       # production de variabele SUPABASE_POOLER_HOST (zie Supabase > Connect > Session
       # pooler, bijvoorbeeld aws-0-eu-central-1.pooler.supabase.com); dan gaat het via
       # de session pooler op IPv4, met gebruiker postgres.<ref>.
+      #
+      # Voorlopige migraties: de workflow Migratie op test van de beheer-repo zet de migraties
+      # van een open pull request alvast op de testdatabase, met een regel in de geschiedenis.
+      # Die versies staan niet in supabase/migrations/ van main, en daarop weigert
+      # `supabase db push` (ook met --include-all). Daarom gaan die regels even opzij, naar de
+      # tabel supabase_migrations.canary_opzij, en na de push terug, ook als de push mislukt.
+      # De tabellen zelf blijven ongemoeid, en de opgeslagen SQL blijft bewaard (daarmee ziet
+      # Migratie op test of een voorlopige migratie sindsdien is gewijzigd). Bleef er van een
+      # afgebroken run iets in canary_opzij staan, dan gaat dat eerst terug. psql staat op de
+      # runners van GitHub klaar (net als voor de kopie in herstel).
       - name: Canary - migraties toepassen op de testdatabase
         if: steps.check.outputs.skip != 'true' && steps.canary.outputs.doen == 'true'
         env:
@@ -111,14 +125,67 @@ jobs:
           # Eerst het masker voor het gecodeerde wachtwoord, dan pas het adres.
           node scripts/db-url.mjs --mask
           DB_URL=$(node scripts/db-url.mjs)
-          pnpm exec supabase db push --db-url "$DB_URL" --include-all
+          sql() { psql "$DB_URL" -X -q -A -t -v ON_ERROR_STOP=1 -c "$1"; }
+
+          terugzetten() {
+            sql "do \$\$ begin
+              if to_regclass('supabase_migrations.canary_opzij') is not null then
+                insert into supabase_migrations.schema_migrations
+                  select * from supabase_migrations.canary_opzij on conflict (version) do nothing;
+                drop table supabase_migrations.canary_opzij;
+              end if;
+            end \$\$;"
+          }
+
+          # Eerst wat een afgebroken run nog opzij had staan.
+          terugzetten
+
+          lokaal=$(ls supabase/migrations/*.sql 2>/dev/null | sed 's#.*/##; s#_.*##' | grep -E '^[0-9]+$' | sort -u || true)
+          op_test=""
+          if [ "$(sql "select to_regclass('supabase_migrations.schema_migrations') is not null")" = "t" ]; then
+            op_test=$(sql "select version from supabase_migrations.schema_migrations" | grep -E '^[0-9]+$' | sort -u || true)
+          fi
+          voorlopig=$(comm -13 <(printf '%s\n' "$lokaal") <(printf '%s\n' "$op_test") | grep . | tr '\n' ' ' || true)
+
+          if [ -n "${voorlopig// }" ]; then
+            echo "::notice::Voorlopige migraties van een andere pull request op de testdatabase, even opzij gezet: $voorlopig"
+            lijst=$(printf "'%s'," $voorlopig)
+            sql "create table if not exists supabase_migrations.canary_opzij (like supabase_migrations.schema_migrations including all);
+              insert into supabase_migrations.canary_opzij
+                select * from supabase_migrations.schema_migrations where version in (${lijst%,})
+                on conflict (version) do nothing;
+              delete from supabase_migrations.schema_migrations where version in (${lijst%,});"
+          fi
+          # Ook als de push mislukt gaan de regels terug; daarna telt de uitkomst van de push.
+          uitkomst=0
+          pnpm exec supabase db push --db-url "$DB_URL" --include-all || uitkomst=$?
+          terugzetten
+          exit "$uitkomst"
+
+      # Terug kunnen zonder point-in-time-recovery: vlak vóór een migratie die bestaande
+      # gegevens omzet (UPDATE of DELETE), een kopie van de tabellen die hij raakt in het
+      # schema `herstel`, met datum en tijd in de naam. Kopieën ouder dan veertien dagen
+      # gaan weg. Mislukt de kopie, dan stopt de job hier en draait de migratie niet.
+      # De weg terug staat in docs/routes/databasewijziging.md.
+      - name: Kopie van de geraakte tabellen (herstel)
+        if: steps.check.outputs.skip != 'true'
+        env:
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
+          WACHTWOORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          POOLER: ${{ vars.SUPABASE_POOLER_HOST }}
+        run: |
+          # Eerst het masker voor het gecodeerde wachtwoord, dan pas het adres.
+          node scripts/db-url.mjs --mask
+          HERSTEL_DB_URL=$(node scripts/db-url.mjs)
+          export HERSTEL_DB_URL
+          node scripts/herstel-kopie.mjs
 
       # De Supabase CLI zit als devDependency in package.json, dus hier draait exact
       # dezelfde versie als op de machine van de bouwer. Dat voorkomt verrassingen.
       - name: Migraties toepassen
         if: steps.check.outputs.skip != 'true'
         env:
-          PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || secrets.SUPABASE_PROJECT_REF }}
           WACHTWOORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
           POOLER: ${{ vars.SUPABASE_POOLER_HOST }}
         run: |

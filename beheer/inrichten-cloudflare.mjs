@@ -24,7 +24,8 @@
  *   4   Access op de Worker zelf (vóór 3.6, zodat hij er staat vóór de eerste uitrol)
  *   T   met --testdatabase: een tweede Supabase-project `<vv><app>-test` met een eigen
  *       SaaS-app `<vv><app>-test-inlog`, provider en auth-config; de previews wijzen
- *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production.
+ *       daarheen en het wachtwoord komt als SUPABASE_TEST_DB_PASSWORD in production (de
+ *       canary van deploy-db.yml) en preview (de droogloop van migraties, droogloop.yml).
  *       Daar staat inloggen met e-mail aan, maar alleen samen met de aanmeld-hook van
  *       de testdatabase: e-mail alleen voor testaccounts, Cloudflare voor de groepen
  *   3.6 GitHub-variabelen en -secrets per omgeving
@@ -63,12 +64,18 @@ import {
   inlogApp,
   issuerVoor,
   metGewenst,
+  metPolicies,
   PROEF_VOORVOEGSEL,
   policyIdsVanApp,
+  publiekApp,
+  publiekeUris,
+  publiekPolicy,
+  publiekPolicyNaam,
   valideerVoorvoegsel,
   wachtOpDiscovery,
   workerApp,
 } from "./lib/cloudflare.mjs";
+import { koppelSentry, sentryUitOmgeving } from "./lib/sentry.mjs";
 import {
   afmeldSql,
   alleGebruikers,
@@ -89,11 +96,14 @@ import {
   BAN_DUUR,
   GEEN_BAN,
   gewenstePolicies,
+  groepenVanApp,
   hookFunctie,
   kaleNaamConflicten,
   koppelPolicies,
+  PUBLIEK_GROEP,
   policyIdsVoorApp,
   policyNaam,
+  publiekVanApp,
   synchroniseerPolicies,
   testaccountsVan,
   trekIn,
@@ -108,7 +118,18 @@ export const OMGEVINGEN = ["production", "preview"];
  * die omgeving.
  */
 export const SECRET_OMGEVING = "production";
+/**
+ * Het wachtwoord van de testdatabase staat ook in omgeving preview: daar draait de droogloop
+ * van migraties (droogloop.yml, via workflow_run altijd in de versie van main). App inrichten
+ * beperkt preview net als production tot main, dus code uit een PR komt er niet bij. Het
+ * wachtwoord van productie komt nooit in preview.
+ */
+export const TEST_SECRET_OMGEVINGEN = [SECRET_OMGEVING, "preview"];
 const GH_VARIABELEN = [
+  // Alleen in omgeving production: daar migreert deploy-db.yml. Geen geheim (hij staat ook
+  // in VITE_SUPABASE_URL), dus een variabele: dan is in de instellingen te zien op welke
+  // database de migraties landen.
+  "SUPABASE_PROJECT_REF",
   "VITE_SUPABASE_URL",
   "VITE_SUPABASE_ANON_KEY",
   "VITE_INLOGDIENST",
@@ -128,7 +149,13 @@ const GH_PREVIEW_VARIABELEN = [
   "PREVIEW_VITE_INLOGDIENST",
   "PREVIEW_VITE_SENTRY_DSN",
 ];
-const GH_SECRETS = ["SUPABASE_PROJECT_REF", "SUPABASE_DB_PASSWORD", "SUPABASE_TEST_DB_PASSWORD"];
+const GH_SECRETS = ["SUPABASE_DB_PASSWORD", "SUPABASE_TEST_DB_PASSWORD"];
+/**
+ * Tot versie 39 stond de project-ref als secret in omgeving production. Opruimen haalt een
+ * achtergebleven oud secret ook weg; de inrichting ruimt het op zodra de app het niet meer
+ * leest (zie ruimOudeProjectRefOp).
+ */
+const OUDE_SECRETS = ["SUPABASE_PROJECT_REF"];
 const REPO = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
 
 // ---------------------------------------------------------------- argumenten
@@ -268,7 +295,7 @@ async function verken(arg, d, { schrijven }) {
   const hostname = tijdelijk ? `${arg.worker}.${subdomein}.workers.dev` : arg.hostname;
 
   const fouten = [...kaleNaamConflicten(t, policies, vv)];
-  for (const naam of [namen.deur, namen.inlog, namen.testInlog, namen.worker]) {
+  for (const naam of [namen.deur, namen.inlog, namen.testInlog, namen.worker, namen.publiek]) {
     const kaal = naam.slice(vv.length);
     if (apps.some((a) => a.name === kaal)) {
       fouten.push(`Access-app "${kaal}" bestaat al zonder voorvoegsel ${vv}`);
@@ -281,6 +308,23 @@ async function verken(arg, d, { schrijven }) {
   );
   if (opHost)
     fouten.push(`Access-app "${opHost.name}" (zonder voorvoegsel) bewaakt ${hostname} al`);
+  // Een publiek pad dat al in een Access-app van iemand anders staat (een omweg met de
+  // hand): eerst die weghalen, anders weet niemand welke app wint.
+  const paden = publiekVanApp(t, arg.app);
+  if (paden.length) {
+    const uris = new Set(publiekeUris(hostname, paden));
+    for (const a of apps) {
+      if (a.name?.startsWith(vv)) continue;
+      const dubbel = [a.domain, ...(a.destinations ?? []).map((x) => x.uri)].filter((u) =>
+        uris.has(u),
+      );
+      if (dubbel.length) {
+        fouten.push(
+          `Access-app "${a.name}" (zonder voorvoegsel) staat al op ${[...new Set(dubbel)].join(", ")}; haal die eerst weg, de inrichting zet de publieke paden zelf`,
+        );
+      }
+    }
+  }
   for (const naam of [namen.project, namen.test]) {
     const kaal = naam.slice(vv.length);
     if (projecten.some((p) => p.name === kaal)) {
@@ -312,7 +356,106 @@ async function verken(arg, d, { schrijven }) {
     testProject: projecten.find((p) => p.name === namen.test) ?? null,
     testInlog: apps.find((a) => a.name === namen.testInlog) ?? null,
     workerAccess: apps.find((a) => a.name === namen.worker) ?? null,
+    publiek: apps.find((a) => a.name === namen.publiek) ?? null,
   };
+}
+
+// ---------------------------------------------------------------- publieke paden
+
+function urisVanApp(a) {
+  return (a?.destinations ?? []).map((x) => x.uri);
+}
+
+/**
+ * Zorgt dat de bypass-policy van de publieke paden bestaat; geeft zijn id. Met `droog`
+ * schrijft hij niets en is het id een plaatshouder als de policy er nog niet is.
+ */
+async function zorgVoorPubliekPolicy(d, policies, vv, { droog, acties }) {
+  const naam = publiekPolicyNaam(vv);
+  const er = policies.find((p) => p.name === naam);
+  if (er) {
+    const gewenst = publiekPolicy(naam);
+    const anders =
+      er.decision !== gewenst.decision ||
+      JSON.stringify(er.include ?? []) !== JSON.stringify(gewenst.include);
+    if (anders && !droog) {
+      await d.cf.werkPolicyBij(er.id, gewenst);
+      acties.push(`policy ${naam} bijgewerkt (iedereen, zonder inlog)`);
+    }
+    return er.id;
+  }
+  if (droog) {
+    acties.push(`gepland: policy ${naam} (iedereen, zonder inlog)`);
+    return "<publiek>";
+  }
+  const nieuw = await d.cf.maakPolicy(publiekPolicy(naam));
+  policies.push(nieuw);
+  acties.push(`policy ${naam} aangemaakt (iedereen, zonder inlog)`);
+  return nieuw.id;
+}
+
+/**
+ * De publieke paden van één app gelijk aan toegang.json: de Access-app `<vv><app>-publiek`
+ * aanmaken, bijwerken of (bij een lege lijst) weghalen. `hostname` is het adres van de app:
+ * het eigen domein, of in de tijdelijke stand het workers.dev-adres. Geeft een lijst acties.
+ */
+async function zetPubliekePaden(d, { t, app, vv, hostname, apps, policies, droog }) {
+  const naam = appNamen(app, vv).publiek;
+  const paden = publiekVanApp(t, app);
+  const er = apps.find((a) => a.name === naam);
+  const acties = [];
+  if (!paden.length) {
+    if (er) {
+      if (!droog) await d.cf.verwijderApp(er.id);
+      acties.push(
+        `${droog ? "gepland: " : ""}${naam} ${droog ? "weghalen" : "weggehaald"} (geen publieke paden meer)`,
+      );
+    }
+    return acties;
+  }
+  const policyId = await zorgVoorPubliekPolicy(d, policies, vv, { droog, acties });
+  const body = publiekApp({ naam, hostname, paden, policyId });
+  const lijst = paden.join(" ");
+  if (!er) {
+    if (droog)
+      acties.push(
+        `gepland: ${naam} op ${hostname}, open zonder inlog: ${lijst} (en de gebouwde bestanden)`,
+      );
+    else {
+      const nieuw = await d.cf.maakApp(body);
+      apps.push(nieuw);
+      acties.push(`${naam} aangemaakt (${nieuw.id}), open zonder inlog: ${lijst}`);
+    }
+    return acties;
+  }
+  const zelfde =
+    JSON.stringify(urisVanApp(er)) === JSON.stringify(urisVanApp(body)) &&
+    JSON.stringify(policyIdsVanApp(er)) === JSON.stringify([policyId]);
+  if (zelfde) {
+    acties.push(`${naam} ongewijzigd (${er.id}): ${lijst}`);
+    return acties;
+  }
+  if (droog) acties.push(`gepland: ${naam} bijwerken: ${lijst}`);
+  else {
+    await d.cf.werkAppBij(er.id, {
+      ...metPolicies(er, [policyId]),
+      domain: body.domain,
+      destinations: body.destinations,
+    });
+    acties.push(`${naam} bijgewerkt (${er.id}): ${lijst}`);
+  }
+  return acties;
+}
+
+/** Heeft geen enkele app nog publieke paden, dan de bypass-policy weg. */
+async function ruimPubliekPolicyOp(d, t, policies, vv, { droog }) {
+  const naam = publiekPolicyNaam(vv);
+  const er = policies.find((p) => p.name === naam);
+  if (!er || Object.keys(t.apps).some((app) => publiekVanApp(t, app).length)) return [];
+  if (!droog) await d.cf.verwijderPolicy(er.id);
+  return [
+    `${droog ? "gepland: " : ""}policy ${naam} ${droog ? "weghalen" : "weggehaald"} (geen publieke paden meer)`,
+  ];
 }
 
 // ---------------------------------------------------------------- GitHub
@@ -353,28 +496,34 @@ async function zetVariabelen(d, env, repo, variabelen, gezet) {
 }
 
 /**
- * Zet variabelen per omgeving en op de repo (alleen wat anders is) en secrets in
- * omgeving production, via stdin.
+ * Zet variabelen per omgeving en op de repo (alleen wat anders is) en secrets, via stdin.
+ * `productieVariabelen` komen alleen in production. Een secret staat in omgeving production,
+ * of in de omgevingen uit zijn `omgevingen`.
  */
-async function zetGithub(d, repo, { variabelen = {}, repoVariabelen = {}, secrets = {} }) {
+async function zetGithub(
+  d,
+  repo,
+  { variabelen = {}, productieVariabelen = {}, repoVariabelen = {}, secrets = {} },
+) {
   const gezet = [];
-  if (Object.keys(variabelen).length) {
-    for (const env of OMGEVINGEN) await zetVariabelen(d, env, repo, variabelen, gezet);
+  for (const env of OMGEVINGEN) {
+    const hier = { ...variabelen, ...(env === SECRET_OMGEVING ? productieVariabelen : {}) };
+    if (Object.keys(hier).length) await zetVariabelen(d, env, repo, hier, gezet);
   }
   if (Object.keys(repoVariabelen).length) {
     await zetVariabelen(d, null, repo, repoVariabelen, gezet);
   }
-  const namen = Object.keys(secrets);
-  if (namen.length) {
-    const bestaand = await leesGhSecretNamen(d, SECRET_OMGEVING, repo);
-    for (const naam of namen) {
-      const { waarde, altijd } = secrets[naam];
-      if (!waarde || (!altijd && bestaand.includes(naam))) continue;
+  const bestaand = {};
+  for (const [naam, { waarde, altijd, omgevingen = [SECRET_OMGEVING] }] of Object.entries(
+    secrets,
+  )) {
+    if (!waarde) continue;
+    for (const env of omgevingen) {
+      bestaand[env] ??= await leesGhSecretNamen(d, env, repo);
+      if (!altijd && bestaand[env].includes(naam)) continue;
       // Secrets gaan via stdin, nooit als argument: argumenten zijn zichtbaar in de proceslijst.
-      await d.gh(["secret", "set", naam, "--env", SECRET_OMGEVING, "--repo", repo], {
-        invoer: waarde,
-      });
-      gezet.push(`${SECRET_OMGEVING}/secret ${naam}`);
+      await d.gh(["secret", "set", naam, "--env", env, "--repo", repo], { invoer: waarde });
+      gezet.push(`${env}/secret ${naam}`);
     }
   }
   return gezet;
@@ -405,6 +554,90 @@ export function standaardGh(env = process.env) {
       );
       kind.stdin.end(invoer ?? "");
     });
+}
+
+/**
+ * Eenmalig opruimen: tot versie 39 stond de project-ref als secret in omgeving production;
+ * nu is het een variabele. Het oude secret gaat pas weg als deploy-db.yml van de app de
+ * variabele leest (vanaf versie 39: `vars.SUPABASE_PROJECT_REF || secrets...`). Een app op
+ * een oudere versie leest alleen het secret; zonder zou hij geen migraties meer draaien.
+ * Geeft `{ stap?, waarschuwing? }` voor het resultaat.
+ */
+export async function ruimOudeProjectRefOp(d, repo) {
+  const secrets = await leesGhSecretNamen(d, SECRET_OMGEVING, repo);
+  if (!secrets.includes("SUPABASE_PROJECT_REF")) return {};
+  const workflow = await leesGhBestand(d, repo, ".github/workflows/deploy-db.yml");
+  if (!workflow?.includes("vars.SUPABASE_PROJECT_REF")) {
+    return {
+      waarschuwing:
+        "het oude secret SUPABASE_PROJECT_REF blijft voorlopig in omgeving production: deploy-db.yml van de app leest de nieuwe variabele nog niet. Werk de app bij naar versie 39 of later (/stagetwo-tier2:updaten) en draai App inrichten daarna nog een keer; dan ruimt die het op",
+    };
+  }
+  await d.gh([
+    "secret",
+    "delete",
+    "SUPABASE_PROJECT_REF",
+    "--env",
+    SECRET_OMGEVING,
+    "--repo",
+    repo,
+  ]);
+  return {
+    stap: "opgeruimd: de project-ref staat nu als variabele SUPABASE_PROJECT_REF in omgeving production",
+  };
+}
+
+/** Een bestand op de standaardtak van een repo, als tekst; null als het er niet is. */
+async function leesGhBestand(d, repo, pad) {
+  try {
+    const inhoud = await d.gh(["api", `repos/${repo}/contents/${pad}`, "-q", ".content"]);
+    return Buffer.from(String(inhoud).replace(/\s/g, ""), "base64").toString("utf8");
+  } catch (fout) {
+    if (/404|Not Found/.test(fout.message)) return null;
+    throw fout;
+  }
+}
+
+// ---------------------------------------------------------------- foutbewaking (Sentry)
+
+export const SENTRY_NIET_GEKOPPELD =
+  "Sentry nog niet gekoppeld, dus fouten uit productie komen niet in Sentry. Koppelen doet in de projectfase Stage Two en daarna de owner van de beheer-repo, met zijn eigen Sentry-account: sentry-koppelen.mjs uit de plugin (skills/installatie/scripts) zet SENTRY_AUTH_TOKEN en SENTRY_ORG in de omgeving beheer en start App inrichten opnieuw";
+
+/**
+ * Stap S. Met een Sentry-sleutel in de beheeromgeving (`d.sentry`): het project van deze
+ * app en zijn eigen DSN, met een proefmelding (zie lib/sentry.mjs). Zonder sleutel: de oude
+ * weg van de proef (één DSN uit de beheeromgeving, `d.sentryDsn`), of een duidelijke regel.
+ * Geeft `{ actie, dsn?, waarschuwing? }`; met `dsn` zet 3.6 hem in production, preview en
+ * als PREVIEW_VITE_SENTRY_DSN.
+ */
+async function stapSentry(arg, d, { droog }) {
+  const huidig = droog
+    ? undefined
+    : ((await leesGhVariabelen(d, SECRET_OMGEVING, arg.repo)).find(
+        (v) => v.name === "VITE_SENTRY_DSN",
+      )?.value ?? null);
+  if (d.sentry) {
+    const k = await koppelSentry(d.sentry, {
+      app: arg.app,
+      huidig,
+      droog,
+      slaap: d.slaap,
+      pogingen: d.sentryPogingen,
+      wachtMs: d.sentryWachtMs,
+    });
+    return { actie: k.actie, dsn: k.nieuw ? k.dsn : null, waarschuwing: k.waarschuwing };
+  }
+  if (d.sentryDsn) {
+    return {
+      actie: "DSN uit de beheeromgeving (VITE_SENTRY_DSN), dezelfde voor elke app",
+      dsn: d.sentryDsn,
+    };
+  }
+  if (huidig)
+    return {
+      actie: "staat aan (de DSN stond er al); zonder SENTRY_AUTH_TOKEN niet verder gecontroleerd",
+    };
+  return { actie: droog ? `gepland: niets. ${SENTRY_NIET_GEKOPPELD}` : SENTRY_NIET_GEKOPPELD };
 }
 
 // ---------------------------------------------------------------- stap 4
@@ -458,7 +691,7 @@ function geplandWorker(v, workerBestaat) {
   return PLACEHOLDER_GEPLAND;
 }
 
-function geplandeStappen(arg, v, workerBestaat) {
+function geplandeStappen(arg, v, workerBestaat, publiekGepland = [], sentryGepland = "") {
   const bestaat = (x, tekst) => (x ? `bestaat al (${x.id ?? x.ref})` : `gepland: ${tekst}`);
   const policiesErAl = v.gewenst.every((g) => v.policies.some((p) => p.name === g.body.name));
   return [
@@ -497,10 +730,14 @@ function geplandeStappen(arg, v, workerBestaat) {
       stap: "3.5 Access-app op de hostname",
       actie: v.tijdelijk ? GEEN_DEUR : bestaat(v.deur, `${v.namen.deur} op ${v.hostname}`),
     },
+    ...(publiekGepland.length
+      ? [{ stap: "3.5b publieke paden", actie: publiekGepland.join("; ") }]
+      : []),
     { stap: "4 Access op de Worker", actie: geplandWorker(v, workerBestaat) },
+    { stap: "S foutmeldingen (Sentry)", actie: sentryGepland },
     {
       stap: "3.6 GitHub-variabelen en -secrets",
-      actie: `gepland in ${arg.repo ?? "(geen repo)"}: variabelen in ${OMGEVINGEN.join(" en ")}, ${GH_PREVIEW_VARIABELEN.join(", ")} als repo-variabelen, secrets in omgeving ${SECRET_OMGEVING}`,
+      actie: `gepland in ${arg.repo ?? "(geen repo)"}: variabelen in ${OMGEVINGEN.join(" en ")} (SUPABASE_PROJECT_REF alleen in ${SECRET_OMGEVING}), ${GH_PREVIEW_VARIABELEN.join(", ")} als repo-variabelen, secrets in omgeving ${SECRET_OMGEVING}`,
     },
   ];
 }
@@ -569,7 +806,13 @@ async function stapTestdatabase(arg, d, v, { policyIds, gewenstAuth, maskeer, st
     stap("T testdatabase: project", `aangemaakt (${project.ref}, ${REGIO})`);
     // Net als bij productie: meteen bewaren, het wachtwoord is alleen nu bekend.
     await zetGithub(d, arg.repo, {
-      secrets: { SUPABASE_TEST_DB_PASSWORD: { waarde: wachtwoord, altijd: true } },
+      secrets: {
+        SUPABASE_TEST_DB_PASSWORD: {
+          waarde: wachtwoord,
+          altijd: true,
+          omgevingen: TEST_SECRET_OMGEVINGEN,
+        },
+      },
     });
   }
   await d.supabase.wachtTotGezond(project.ref);
@@ -599,22 +842,34 @@ async function stapTestdatabase(arg, d, v, { policyIds, gewenstAuth, maskeer, st
     gewenstAuth: { ...gewenstAuth, ...hookInstellingen(functie) },
   });
   stap("T testdatabase: provider en auth-config", `${k.provider}; auth-config ${k.auth}`);
-  if (
-    v.testProject &&
-    !(await leesGhSecretNamen(d, SECRET_OMGEVING, arg.repo)).includes("SUPABASE_TEST_DB_PASSWORD")
-  ) {
-    // Het oude wachtwoord is niet op te vragen. Voor de testdatabase mag een nieuw: er
-    // staan alleen testgegevens in, en zonder dit secret slaat deploy-db.yml de canary
-    // over en gaan migraties meteen naar productie. Productie krijgt dit nooit.
+  const zonderWachtwoord = [];
+  if (v.testProject) {
+    for (const env of TEST_SECRET_OMGEVINGEN) {
+      const namen = await leesGhSecretNamen(d, env, arg.repo);
+      if (!namen.includes("SUPABASE_TEST_DB_PASSWORD")) zonderWachtwoord.push(env);
+    }
+  }
+  if (zonderWachtwoord.length) {
+    // Het oude wachtwoord is niet op te vragen. Voor de testdatabase mag een nieuw: zonder
+    // dit secret slaat deploy-db.yml de canary over (en gaan migraties meteen naar
+    // productie), en kan de droogloop in preview niet draaien. Een app van vóór versie 39
+    // heeft het nog niet in preview; dan komt er één keer een nieuw, in beide omgevingen.
+    // Productie krijgt dit nooit.
     const wachtwoord = (d.wachtwoord ?? nieuwWachtwoord)();
     maskeer(wachtwoord);
     await d.supabase.zetDatabaseWachtwoord(project.ref, wachtwoord);
     await zetGithub(d, arg.repo, {
-      secrets: { SUPABASE_TEST_DB_PASSWORD: { waarde: wachtwoord, altijd: true } },
+      secrets: {
+        SUPABASE_TEST_DB_PASSWORD: {
+          waarde: wachtwoord,
+          altijd: true,
+          omgevingen: TEST_SECRET_OMGEVINGEN,
+        },
+      },
     });
     stap(
       "T testdatabase: wachtwoord",
-      "ontbrak in de app-repo: nieuw gezet in Supabase en als secret",
+      `ontbrak in omgeving ${zonderWachtwoord.join(" en ")}: nieuw gezet in Supabase en als secret in ${TEST_SECRET_OMGEVINGEN.join(" en ")}`,
     );
   }
   // Voor stack.config.json (in git) de publishable key: de anon-JWT valt over guard:secrets.
@@ -638,7 +893,22 @@ export async function richtIn(arg, d) {
     waarschuwingen: [],
   };
   if (arg.droogloop) {
-    resultaat.stappen = geplandeStappen(arg, v, await d.cf.workerBestaat(arg.worker));
+    const publiekGepland = await zetPubliekePaden(d, {
+      t: v.t,
+      app: arg.app,
+      vv: arg.voorvoegsel,
+      hostname: v.hostname,
+      apps: [...v.apps],
+      policies: [...v.policies],
+      droog: true,
+    });
+    resultaat.stappen = geplandeStappen(
+      arg,
+      v,
+      await d.cf.workerBestaat(arg.worker),
+      publiekGepland,
+      (await stapSentry(arg, d, { droog: true })).actie,
+    );
     return resultaat;
   }
   const stap = (naam, actie) => resultaat.stappen.push({ stap: naam, actie });
@@ -656,9 +926,8 @@ export async function richtIn(arg, d) {
     // Het wachtwoord is alleen nu bekend: meteen bewaren, vóór een latere stap kan
     // mislukken. Anders is het voorgoed weg en moet het in het dashboard opnieuw.
     await zetGithub(d, arg.repo, {
-      variabelen: {},
+      productieVariabelen: { SUPABASE_PROJECT_REF: project.ref },
       secrets: {
-        SUPABASE_PROJECT_REF: { waarde: project.ref, altijd: true },
         SUPABASE_DB_PASSWORD: { waarde: wachtwoord, altijd: true },
       },
     });
@@ -728,11 +997,28 @@ export async function richtIn(arg, d) {
     );
   } else stap("3.5 Access-app op de hostname", `hergebruikt (${deur.id})`);
 
+  // 3.5b de publieke paden: een eigen Access-app met de bypass-policy, op hetzelfde adres
+  const publiek = await zetPubliekePaden(d, {
+    t: v.t,
+    app: arg.app,
+    vv: arg.voorvoegsel,
+    hostname: v.hostname,
+    apps: [...v.apps],
+    policies: [...v.policies],
+    droog: false,
+  });
+  if (publiek.length) stap("3.5b publieke paden", publiek.join("; "));
+
   // 4 Access op de Worker, vóór 3.6: pas met de GitHub-variabelen kan er uitgerold
   // worden, en dan moet de deur er al staan. Zo nodig zet deze stap eerst een
   // placeholder neer, want workers.dev staat in beide standen aan.
   const w = await stapWorker(arg, d, v, policyIds);
   stap(w.stap, w.actie);
+
+  // S foutmeldingen: een eigen Sentry-project en DSN per app, vóór 3.6 zodat de DSN mee kan
+  const sentry = await stapSentry(arg, d, { droog: false });
+  stap("S foutmeldingen (Sentry)", sentry.actie);
+  if (sentry.waarschuwing) resultaat.waarschuwingen.push(sentry.waarschuwing);
 
   // 3.6 GitHub
   // Zonder pooler loopt de rest door; alleen deploy-db heeft hem nodig.
@@ -748,11 +1034,12 @@ export async function richtIn(arg, d) {
     );
   }
   // De testdatabase kan op een andere pooler staan dan productie (aws-0 tegenover aws-1);
-  // deploy-db.yml gebruikt deze voor de canary. Ontbreekt hij, dan valt die terug op productie.
+  // deploy-db.yml gebruikt deze voor de canary (production), droogloop.yml voor de droogloop
+  // van migraties (preview). Ontbreekt hij, dan vallen die terug op die van productie.
   const testPooler = test
     ? await supabase.poolerHost(test.ref).catch((fout) => {
         resultaat.waarschuwingen.push(
-          `de session pooler van de testdatabase was niet op te halen (${fout.message}); zet SUPABASE_TEST_POOLER_HOST in omgeving production met de hand, anders mislukt de canary in deploy-db.yml`,
+          `de session pooler van de testdatabase was niet op te halen (${fout.message}); zet SUPABASE_TEST_POOLER_HOST in de omgevingen production en preview met de hand, anders mislukken de canary in deploy-db.yml en de droogloop van migraties`,
         );
         return null;
       })
@@ -765,8 +1052,8 @@ export async function richtIn(arg, d) {
       CLOUDFLARE_ACCOUNT_ID: d.accountId,
       ...(pooler ? { SUPABASE_POOLER_HOST: pooler } : {}),
       ...(testPooler ? { SUPABASE_TEST_POOLER_HOST: testPooler } : {}),
-      // Sentry staat alleen aan als de beheeromgeving een DSN heeft; anders niets.
-      ...(d.sentryDsn ? { VITE_SENTRY_DSN: d.sentryDsn } : {}),
+      // Sentry: de DSN van stap S, alleen als die nieuw is; een bestaande blijft staan.
+      ...(sentry.dsn ? { VITE_SENTRY_DSN: sentry.dsn } : {}),
     },
     // De preview draait op de testdatabase als die er is, anders op hetzelfde project.
     // Een eigen database gebruikt schema public.
@@ -775,18 +1062,19 @@ export async function richtIn(arg, d) {
       PREVIEW_VITE_SUPABASE_ANON_KEY: test?.anon ?? sleutels.anon,
       PREVIEW_VITE_SUPABASE_SCHEMA: "public",
       PREVIEW_VITE_INLOGDIENST: "cloudflare",
-      ...(d.sentryDsn ? { PREVIEW_VITE_SENTRY_DSN: d.sentryDsn } : {}),
+      ...(sentry.dsn ? { PREVIEW_VITE_SENTRY_DSN: sentry.dsn } : {}),
     },
-    // Het wachtwoord staat er al (direct na het aanmaken van het project); hier alleen
-    // nog de project-ref voor een project dat al bestond.
-    secrets: {
-      SUPABASE_PROJECT_REF: { waarde: project.ref, altijd: false },
-    },
+    // De project-ref alleen in production, waar deploy-db.yml migreert; het wachtwoord
+    // staat er al (direct na het aanmaken van het project).
+    productieVariabelen: { SUPABASE_PROJECT_REF: project.ref },
   });
   stap(
     "3.6 GitHub-variabelen en -secrets",
     gezet.length ? `gezet: ${gezet.join(", ")}` : "ongewijzigd",
   );
+  const oud = await ruimOudeProjectRefOp(d, arg.repo);
+  if (oud.stap) stap("3.6 oud secret SUPABASE_PROJECT_REF", oud.stap);
+  if (oud.waarschuwing) resultaat.waarschuwingen.push(oud.waarschuwing);
   if (!wachtwoord) {
     resultaat.waarschuwingen.push(
       "het project bestond al; SUPABASE_DB_PASSWORD is niet opnieuw gezet (alleen bij aanmaken bekend)",
@@ -851,7 +1139,7 @@ export async function ruimOp(arg, d) {
   const eigenTest = (app) => !d.toegang?.apps?.[`${app}-test`] || !arg.app;
   const testNamen = appsUitBestand.filter(eigenTest).map((app) => appNamen(app, vv));
   const appNamenSet = new Set([
-    ...namen.flatMap((n) => [n.deur, n.inlog, n.worker]),
+    ...namen.flatMap((n) => [n.deur, n.inlog, n.worker, n.publiek]),
     ...testNamen.map((n) => n.testInlog),
   ]);
   const projectNamen = new Set([...namen.map((n) => n.project), ...testNamen.map((n) => n.test)]);
@@ -859,12 +1147,20 @@ export async function ruimOp(arg, d) {
   // alleen de groepen van die app mee (staat hij niet meer in toegang.json, dan elke groep),
   // en daarvan alleen wat geen andere app in toegang.json nog gebruikt.
   const groepen = Object.keys(d.toegang?.groepen ?? {});
-  const kandidaten = arg.app ? (d.toegang?.apps?.[arg.app] ?? groepen) : groepen;
+  const kandidaten =
+    arg.app && d.toegang?.apps?.[arg.app] ? groepenVanApp(d.toegang, arg.app) : groepen;
+  const andereApps = Object.keys(d.toegang?.apps ?? {}).filter(
+    (app) => !appsUitBestand.includes(app),
+  );
+  // De bypass-policy van de publieke paden telt als groep "publiek": hij gaat mee, tenzij een
+  // andere app in toegang.json nog publieke paden heeft.
   const gebruiktDoor = (groep) =>
-    Object.entries(d.toegang?.apps ?? {})
-      .filter(([app, gekozen]) => !appsUitBestand.includes(app) && gekozen.includes(groep))
-      .map(([app]) => app);
-  const policyNamen = new Set(kandidaten.map((g) => policyNaam(g, vv)));
+    andereApps.filter((app) =>
+      groep === PUBLIEK_GROEP
+        ? publiekVanApp(d.toegang, app).length > 0
+        : groepenVanApp(d.toegang, app).includes(groep),
+    );
+  const policyNamen = new Set([...kandidaten, PUBLIEK_GROEP].map((g) => policyNaam(g, vv)));
 
   const alleApps = await cf.apps();
   const allePolicies = await cf.policies();
@@ -878,7 +1174,7 @@ export async function ruimOp(arg, d) {
   const blijvendePolicies = [];
   const policies = allePolicies.filter((p) => {
     if (!policyNamen.has(p.name)) return false;
-    const groep = kandidaten.find((g) => policyNaam(g, vv) === p.name);
+    const groep = [...kandidaten, PUBLIEK_GROEP].find((g) => policyNaam(g, vv) === p.name);
     const andereApps = gebruiktDoor(groep);
     const door = andereApps.length ? andereApps : hangtAan(p).map((naam) => `Access-app ${naam}`);
     if (door.length) blijvendePolicies.push({ policy: p, door });
@@ -939,10 +1235,11 @@ export async function ruimOp(arg, d) {
       if (!droog) await d.gh(["variable", "delete", naam, "--repo", arg.repo]);
       namen.push(`repo/${naam}`);
     }
-    // De secrets in omgeving production, en een oud repo-secret van vóór die omgeving.
-    for (const env of [SECRET_OMGEVING, null]) {
+    // De secrets in production (en het testwachtwoord in preview), en een oud repo-secret
+    // van vóór die omgevingen.
+    for (const env of [...TEST_SECRET_OMGEVINGEN, null]) {
       const secrets = await leesGhSecretNamen(d, env, arg.repo);
-      for (const naam of GH_SECRETS.filter((n) => secrets.includes(n))) {
+      for (const naam of [...GH_SECRETS, ...OUDE_SECRETS].filter((n) => secrets.includes(n))) {
         if (!droog) await d.gh(["secret", "delete", naam, ...envArgs(env), "--repo", arg.repo]);
         namen.push(`${env ?? "repo"}/secret ${naam}`);
       }
@@ -1022,6 +1319,41 @@ async function trekInOp(d, t, app, ref, { test = false } = {}) {
 }
 
 /**
+ * De publieke paden van elke app die al is ingericht (er staat een deur of een Access op
+ * de Worker), op het adres van die deur: het eigen domein, of anders het workers.dev-adres.
+ * Daarna de bypass-policy weg als geen app hem nog gebruikt.
+ */
+async function publiekePadenVoorAlle(d, t, vv, { apps, policies, droog }) {
+  const acties = [];
+  const lijst = [...apps];
+  const pols = [...policies];
+  for (const app of Object.keys(t.apps)) {
+    const namen = appNamen(app, vv);
+    const deur =
+      lijst.find((a) => a.name === namen.deur) ?? lijst.find((a) => a.name === namen.worker);
+    if (!deur?.domain) {
+      if (publiekVanApp(t, app).length) {
+        acties.push(`publieke paden van ${app} wachten op App inrichten (er is nog geen deur)`);
+      }
+      continue;
+    }
+    acties.push(
+      ...(await zetPubliekePaden(d, {
+        t,
+        app,
+        vv,
+        hostname: deur.domain,
+        apps: lijst,
+        policies: pols,
+        droog,
+      })),
+    );
+  }
+  acties.push(...(await ruimPubliekPolicyOp(d, t, pols, vv, { droog })));
+  return acties;
+}
+
+/**
  * Maakt Cloudflare gelijk aan toegang.json en trekt daarna de toegang in van wie niet
  * meer past: ban en afmelden in het Supabase-project van elke app.
  */
@@ -1047,9 +1379,10 @@ export async function werkToegangBij(arg, d) {
         );
       }
     }
+    const publiek = await publiekePadenVoorAlle(d, t, vv, { apps, policies, droog: true });
     return {
       droogloop: true,
-      acties: ["gepland: policies gelijkzetten, apps koppelen, intrekken", ...hooks],
+      acties: ["gepland: policies gelijkzetten, apps koppelen, intrekken", ...publiek, ...hooks],
     };
   }
   const sync = await synchroniseerPolicies(cf, t, {
@@ -1058,6 +1391,7 @@ export async function werkToegangBij(arg, d) {
     voorvoegsel: vv,
   });
   const gekoppeld = await koppelPolicies(cf, t, apps, sync.ids, vv);
+  const publiek = await publiekePadenVoorAlle(d, t, vv, { apps, policies, droog: false });
 
   const ingetrokken = {};
   const toegelaten = {};
@@ -1105,7 +1439,13 @@ export async function werkToegangBij(arg, d) {
     waarschuwingen.push(`overbodige policies niet verwijderd: ${fout.message}`);
   }
   return {
-    acties: [...sync.acties, ...gekoppeld, ...hooks, ...weg.map((n) => `policy ${n} verwijderd`)],
+    acties: [
+      ...sync.acties,
+      ...gekoppeld,
+      ...publiek,
+      ...hooks,
+      ...weg.map((n) => `policy ${n} verwijderd`),
+    ],
     ingetrokken,
     toegelaten,
     onbekend,
@@ -1163,7 +1503,12 @@ if (
     arg.hostname ??= config?.hostname ?? null;
     arg.worker = config?.worker ?? null;
     arg.stand = config?.stand ?? null;
-    for (const naam of ["CLOUDFLARE_PROEF_TOKEN", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"])
+    for (const naam of [
+      "CLOUDFLARE_PROEF_TOKEN",
+      "SUPABASE_ACCESS_TOKEN",
+      "GH_TOKEN",
+      "SENTRY_AUTH_TOKEN",
+    ])
       maskeer(process.env[naam]);
     const ghNodig = !arg.droogloop && ["inrichten", "opruimen"].includes(modus);
     if (ghNodig) eis("GH_TOKEN");
@@ -1186,7 +1531,10 @@ if (
         .map((x) => x.trim())
         .filter(Boolean),
       groepenIdp: leesGroepenIdp(process.env.CLOUDFLARE_GROEPEN_IDP),
-      // Optioneel: met een DSN zet de inrichting Sentry aan (zie beheer/README.md).
+      // Optioneel: met SENTRY_AUTH_TOKEN en SENTRY_ORG krijgt elke app een eigen
+      // Sentry-project en DSN. Zonder sleutel nog de oude weg van de proef: één DSN
+      // (VITE_SENTRY_DSN) voor elke app. Zie beheer/README.md.
+      sentry: modus === "inrichten" ? sentryUitOmgeving(process.env) : null,
       sentryDsn: process.env.VITE_SENTRY_DSN?.trim() || undefined,
       maskeer,
     };

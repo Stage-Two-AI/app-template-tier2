@@ -3,9 +3,18 @@
  *
  *   {
  *     "groepen": { "<groep>": { "domeinen": [], "adressen": [], "idp_groepen": [], "uitsluiten": [] } },
- *     "apps":    { "<app>": ["<groep>", ...] },
+ *     "apps":    { "<app>": ["<groep>", ...] }
+ *                  of { "<app>": { "groepen": ["<groep>", ...], "publiek": ["/bekijk/*"],
+ *                                  "gegevens_naar_test": false } },
  *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
+ *
+ * De lange vorm van een app is optioneel; de korte (alleen de groepen) blijft werken.
+ * `publiek`: paden die zonder inlog open zijn, bijvoorbeeld een link die je naar een
+ * klant stuurt. Ze krijgen een eigen Access-app met een bypass-policy (zie publiekApp in
+ * cloudflare.mjs); de gebouwde bestanden en iconen gaan vanzelf mee. `gegevens_naar_test`
+ * (standaard true): met false kopieert Testdatabase verversen voor deze app geen gegevens en
+ * bestanden van productie meer, maar ververst hij de testlogin wel.
  *
  * `testaccounts` is optioneel en geldt alleen voor de testdatabase van die app
  * (`<vv><app>-test`): accounts met e-mail en wachtwoord, zodat iemand (of Claude) de
@@ -29,6 +38,33 @@ const GROEPNAAM = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const DOMEIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const ADRES = /^[a-z0-9._%+-]+@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const IDP_GROEP = /^[^'"\\\n]{1,200}$/;
+/**
+ * Een publiek pad: begint met /, alleen veilige tekens, hoogstens één * aan het eind. De
+ * hele app openzetten ("/" of "/*") kan niet: dan valt de deur weg.
+ */
+const PAD = /^\/[a-zA-Z0-9._~/-]*\*?$/;
+const geldigPad = (p) => typeof p === "string" && PAD.test(p) && p !== "/" && p !== "/*";
+const APP_VELDEN = ["groepen", "publiek", "gegevens_naar_test"];
+/** Die naam is van de policy van de publieke paden (publiekPolicyNaam). */
+export const PUBLIEK_GROEP = "publiek";
+
+/** De gekozen groepen van een app, in beide vormen van het bestand. */
+export function groepenVanApp(t, app) {
+  const w = t?.apps?.[app];
+  return Array.isArray(w) ? w : (w?.groepen ?? []);
+}
+
+/** De publieke paden van een app (leeg als er geen zijn). */
+export function publiekVanApp(t, app) {
+  const w = t?.apps?.[app];
+  return Array.isArray(w) ? [] : (w?.publiek ?? []);
+}
+
+/** Kopieert Testdatabase verversen gegevens en bestanden voor deze app? Standaard ja. */
+export function gegevensNaarTest(t, app) {
+  const w = t?.apps?.[app];
+  return Array.isArray(w) || w?.gegevens_naar_test !== false;
+}
 
 /** De vaste testgebruiker van Claude in elke testdatabase; altijd een testaccount. */
 export const TESTGEBRUIKER = "testgebruiker@stagetwo.nl";
@@ -57,6 +93,11 @@ export function valideerToegang(t) {
     fouten.push('"apps" ontbreekt of is geen object');
   if (fouten.length) throw new Error(`toegang.json: ${fouten.join("; ")}`);
 
+  if (Object.hasOwn(groepen, PUBLIEK_GROEP)) {
+    fouten.push(
+      `groep "${PUBLIEK_GROEP}": die naam is van de policy voor de publieke paden; kies een andere naam`,
+    );
+  }
   for (const [naam, groep] of Object.entries(groepen)) {
     if (!GROEPNAAM.test(naam))
       fouten.push(`groep "${naam}": naam alleen kleine letters, cijfers en streepjes`);
@@ -96,9 +137,32 @@ export function valideerToegang(t) {
     }
   }
 
-  for (const [app, gekozen] of Object.entries(apps)) {
+  for (const [app, waarde] of Object.entries(apps)) {
     if (!GROEPNAAM.test(app))
       fouten.push(`app "${app}": naam alleen kleine letters, cijfers en streepjes`);
+    if (!Array.isArray(waarde)) {
+      if (!waarde || typeof waarde !== "object") {
+        fouten.push(`app "${app}": een lijst groepen, of een object met groepen`);
+        continue;
+      }
+      for (const veld of Object.keys(waarde)) {
+        if (!APP_VELDEN.includes(veld) && !veld.startsWith("$"))
+          fouten.push(`app "${app}", veld ${veld}: onbekend veld (wel: ${APP_VELDEN.join(", ")})`);
+      }
+      const paden = waarde.publiek ?? [];
+      if (!Array.isArray(paden) || paden.some((p) => !geldigPad(p))) {
+        fouten.push(
+          `app "${app}": publiek is een lijst paden die met / beginnen, met hoogstens een * aan het eind (bijvoorbeeld "/bekijk/*"); de hele app ("/" of "/*") kan niet`,
+        );
+      }
+      if (
+        waarde.gegevens_naar_test !== undefined &&
+        typeof waarde.gegevens_naar_test !== "boolean"
+      ) {
+        fouten.push(`app "${app}": gegevens_naar_test is true of false`);
+      }
+    }
+    const gekozen = Array.isArray(waarde) ? waarde : waarde.groepen;
     if (!Array.isArray(gekozen) || gekozen.length === 0) {
       fouten.push(`app "${app}": geen groepen gekozen; een app zonder groep laat niemand toe`);
       continue;
@@ -251,7 +315,11 @@ export async function synchroniseerPolicies(
       }
     }
   }
-  const namen = new Set(gewenst.map((g) => g.body.name));
+  // De policy van de publieke paden is geen groep; die beheert de inrichting apart.
+  const namen = new Set([
+    ...gewenst.map((g) => g.body.name),
+    policyNaam(PUBLIEK_GROEP, voorvoegsel),
+  ]);
   const overbodig = huidig.filter((p) => isEigenPolicy(p.name, voorvoegsel) && !namen.has(p.name));
   return { ids, acties, overbodig };
 }
@@ -267,7 +335,7 @@ export async function verwijderOverbodig(cf, overbodig) {
 
 /** De policy-ids van een app, in de volgorde van het bestand. */
 export function policyIdsVoorApp(toegang, app, ids) {
-  return toegang.apps[app].map((g) => ids[g]);
+  return groepenVanApp(toegang, app).map((g) => ids[g]);
 }
 
 /**
@@ -314,7 +382,7 @@ export function magAanmelden(email, toegang, app) {
   if (!geldigAdres(adres)) return "nee";
   const domein = adres.split("@")[1];
   let onbekend = false;
-  for (const g of toegang.apps[app] ?? []) {
+  for (const g of groepenVanApp(toegang, app)) {
     const groep = toegang.groepen[g];
     if (klein(groep.uitsluiten).includes(adres)) continue;
     if (klein(groep.domeinen).includes(domein) || klein(groep.adressen).includes(adres))
@@ -414,7 +482,7 @@ const WEIGER =
 
 /** Per gekozen groep: toelaten bij een passend domein of adres, behalve de uitgeslotenen. */
 function groepRegels(t, app, inspringen = "  ") {
-  return t.apps[app].map((g) => {
+  return groepenVanApp(t, app).map((g) => {
     const groep = t.groepen[g];
     return [
       `-- groep ${g}`,

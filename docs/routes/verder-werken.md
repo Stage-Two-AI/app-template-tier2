@@ -10,6 +10,18 @@ Vraag door tot je één zin kunt opschrijven die begint met "na deze wijziging k
 gebruiker …". Lukt dat niet, dan is het verzoek nog niet scherp genoeg en is dit het
 moment om het te vragen, niet halverwege.
 
+**Lees bij de start stil het logboek mee.** In de architectuur-repo van het bedrijf staat
+`docs/logboek.md`: per gemergde pull request wat er met de hand is ingesteld, welke besluiten
+vielen en wat andere onderdelen raakte. Lees de laatste regels, als achtergrond bij je werk:
+
+```bash
+gh api repos/<org>/architectuur/contents/docs/logboek.md -H "Accept: application/vnd.github.raw" | tail -n 20
+```
+
+In Claude Code doet de skill verder-werken van de plugin dit al. Lees het niet voor en vat
+het niet samen voor de gebruiker, tenzij hij erom vraagt of er iets in staat dat zijn vraag
+direct raakt. Geen logboek of geen toegang: ga gewoon door.
+
 Is het verzoek groter dan één zin? Knip het op. **Eén pull request = één onderwerp.**
 Grote PR's zijn niet te beoordelen en er verdwijnt van alles ongemerkt in.
 
@@ -38,8 +50,9 @@ misgaan:
   `docs/routes/databasewijziging.md`.
 
 Raakt je wijziging de database (een tabel, kolom, index of policy)? Lees dan nu
-`docs/routes/databasewijziging.md` in zijn geheel en volg die stappen erbij; zo'n pull
-request open je niet als concept, zodat de databasetests meteen meedraaien. In Claude
+`docs/routes/databasewijziging.md` in zijn geheel en volg die stappen erbij. Ook zo'n pull
+request begint als concept: bij een wijziging in `supabase/` draaien de databasetests (zonder
+browser) dan al bij elke push. In Claude
 Code herinnert de plugin je eraan zodra je in `supabase/migrations/` schrijft.
 
 **Kijk eerst lokaal, ingelogd als testgebruiker, met echte gegevens.** In de Claude-app start
@@ -80,20 +93,24 @@ beoordelaar van je werk, dus wat de tests niet dekken, dekt niemand.
 - **Nieuwe functionaliteit?** Leg het nieuwe gedrag vast in een test.
 - **Bug opgelost?** Schrijf eerst een test die de bug reproduceert, en repareer dan
   tot hij groen is. Anders komt dezelfde bug over drie maanden terug.
-- **Nieuwe tabel of gewijzigde policy?** Een RLS-test in `tests/rls/`.
+- **Nieuwe tabel of gewijzigde policy?** Een RLS-test in `tests/rls/` (`controleerAfscherming`).
+- **Nieuw onderdeel (een eigen hoofdscherm met een eigen pad)?** Een regel in
+  `src/onderdelen.ts`. De browsertest `e2e/onderdelen.spec.ts` opent het dan vanzelf en kijkt
+  of het zonder fout opent en zijn kop toont; `tests/unit/onderdelen.test.ts` is rood als een
+  nieuw pad in de router niet in die lijst staat.
 
 De CI blokkeert een PR die productiecode wijzigt zonder één enkele test aan te raken.
 
 ## Stap 5: Snel controleren voor je pusht
 
 ```bash
-pnpm typecheck
+pnpm check
 ```
 
-Dat duurt seconden en vangt de fouten die de preview stukmaken. Meer hoeft niet voor een
-concept: de snelle check `Code` in GitHub draait bij elke push toch al lint, unittests en de
-guards, en de volledige poort draai je pas als de gebruiker het goed vindt (stap 7). Rood?
-Repareren, niet omzeilen.
+Dat is typecontrole, lint, unittests en de guards in één keer: precies wat de snelle check
+`Code` in GitHub bij elke push draait. Is `Code` rood, dan komt er geen nieuwe preview; zo
+zie je het hier al, binnen een minuut. De zware check met de browser draai je pas als de
+gebruiker het goed vindt (stap 7). Rood? Repareren, niet omzeilen.
 
 ## Stap 6: Open een concept-PR en laat de gebruiker meekijken
 
@@ -104,11 +121,13 @@ git push -u origin <branch>
 gh pr create --draft
 ```
 
-Altijd als concept (draft), behalve een pull request met een migratie: die open je
-meteen gewoon (zie `docs/routes/databasewijziging.md`). Zolang de PR een concept is, draait bij elke push alleen de
-snelle check `Code`, en de workflow `Preview uitrollen` zet de nieuwe versie online. De zware
-check `Database en end-to-end` wacht tot stap 7. Zo kost een tussenstap minuten in plaats van
-een volle poort, en ziet de gebruiker geen rode tussenstanden.
+Altijd als concept (draft), ook een pull request met een migratie. Zolang de PR een concept
+is, draait bij elke push de snelle check `Code`; is die groen, dan zet de workflow
+`Preview uitrollen` de nieuwe versie online. Is `supabase/` gewijzigd, dan draait ook
+`Database en end-to-end`, maar zonder browser (Supabase, typecontrole, RLS-tests); anders
+slaat die check over. De browsertest wacht tot stap 7. Zo kost een tussenstap minuten in
+plaats van een volle poort, en ziet de gebruiker geen rode tussenstanden. Is `Code` rood, dan
+komt er geen nieuwe preview: repareer eerst.
 
 Vul het PR-formulier volledig in. De regel `Cloudflare-preview:` is niet optioneel: die
 link is de enige geldige manier om werk te laten zien. Wacht tot `Preview uitrollen` de links
@@ -140,7 +159,14 @@ openen en hij bewijst niet dat de gebouwde versie werkt. Lokaal kijken voor jeze
 
 ## Stap 7: Op klaar zetten, wachten en repareren
 
-Zegt de gebruiker dat het goed is ("prima", "zo laten", "zet maar live"), dan:
+Zegt de gebruiker dat het goed is ("prima", "zo laten", "zet maar live"), dan gaat de pull
+request op klaar. Vul eerst zelf het kopje **Voor de architectuur** in de PR-tekst in, zonder
+de gebruiker iets te vragen: haal het uit het gesprek en de wijziging
+(`gh pr edit <nummer> --body-file <bestand>`). Drie regels: wat er met de hand is ingesteld
+(wat en waar, bijvoorbeeld een geheim dat de owner zette of een instelling in een dashboard),
+of hier een besluit viel (welk, in één zin), en of dit een ander onderdeel of een andere app
+raakt (welk). Niets van toepassing: `nee`. Na de merge komt het in het logboek van de
+architectuur-repo. Daarna:
 
 ```bash
 pnpm check         # typecontrole, lint, unittests en guards in één keer, eerst lokaal
@@ -210,16 +236,19 @@ in. Daarna volg je deze route vanaf stap 1, met eerst een test die de fout laat 
 | Check | Wat het betekent |
 |---|---|
 | `typecheck` | de code klopt niet met zichzelf of met het databaseschema. Haal de types op met `pnpm db:types:uit-ci` als je net een migratie hebt gemaakt |
+| Typecontrole edge functions (deno check) | een functie in `supabase/functions/` klopt niet met zichzelf. Die draait op Deno en valt buiten `pnpm typecheck`; de fout staat in het log van de job Code |
 | `lint` | opmaak of stijl. `pnpm lint:fix` lost het meeste vanzelf op |
 | `test` | gedrag is stuk, of de test klopt niet meer. Kijk eerst welke van de twee |
 | `guard:tests` | je wijzigde code zonder test. Voeg er een toe |
 | `guard:secrets` | er staat mogelijk een sleutel in de code of in de bundel. **Altijd zelf naar kijken**, dit is de gevaarlijkste |
-| `guard:rls` | er is een tabel zonder beveiliging |
-| `guard:migrations` | je migratie kan data vernietigen; lees de melding en bevestig bewust |
+| `guard:rls` | er is een tabel zonder beveiliging, een policy met `using (true)` buiten `open_tabellen`, of een leesrol die mag schrijven |
+| `guard:rls-tests` | een tabel heeft geen A/B-test in `tests/rls/` (`controleerAfscherming`) en staat niet in `open_tabellen`. In deze versie nog een waarschuwing, vanaf de volgende uitgave rood. Voor een tabel die er al stond, schrijft `/stagetwo-tier2:updaten` de test in de update-PR; een nieuwe tabel krijgt hem van jou |
+| `guard:migrations` | je migratie kan data vernietigen (lees de melding en bevestig bewust), of een `update`/`delete` mist de regel `-- verwachting:` |
+| Droogloop migraties | verplicht op elke PR; zonder migratie die gegevens omzet staat hij vanzelf op groen ("niets te oefenen"). Rood: je migratie raakt op de testdatabase meer, minder of andere rijen dan de regels `-- verwachting:` zeggen. Lees de reactie in de PR: klopt de migratie niet, repareer hem; klopt alleen het bereik niet, pas het aan. Zegt hij dat de sleutels voor de testdatabase ontbreken, dan is dat geen fout van jou en hoef je niet te wachten: zet de regel `Bevestigd: droogloop zonder testdatabase` in de PR-tekst en kies bij de run "Re-run failed jobs". De sleutels zet de owner van de beheer-repo met App inrichten (of `/stagetwo-tier2:updaten`, als jij dat mag starten) |
 | `guard:template` | je wijzigde een bestand van de gedeelde template. Draai het terug en meld het bij Stage Two; wil je de nieuwste versie van de template, dan is dat `/stagetwo-tier2:updaten` |
 | `guard:cloudflare` | `wrangler.jsonc` vraagt om opslag van Cloudflare (D1, R2, KV, Durable Objects), Worker-code of een sleutel die niet op de lijst staat. Gegevens horen in Supabase: haal de sleutel weg |
 | `db:types:check` | de gegenereerde types lopen achter. `pnpm db:types:uit-ci` haalt ze uit deze run; committen en pushen |
-| Database en end-to-end | migraties, RLS-tests of de browsertest in een eigen Supabase in GitHub. Bij een concept-PR staat deze check op overgeslagen: dat is de bedoeling, hij draait bij `gh pr ready` |
+| Database en end-to-end | migraties, RLS-tests of de browsertest in een eigen Supabase in GitHub. Start pas als `Code` groen is. Bij een concept-PR zonder wijziging in `supabase/` staat hij op overgeslagen, en bij een concept mét zo'n wijziging draait hij zonder browser: dat is de bedoeling, alles draait bij `gh pr ready` |
 
 **Een regel in de PR-tekst toegevoegd** (`Geen tests nodig: ...`, `Bevestigd: ...`) terwijl
 de pull request al open staat? Een aangepaste PR-tekst start de controles niet vanzelf opnieuw,

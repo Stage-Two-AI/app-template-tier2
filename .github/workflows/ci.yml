@@ -8,10 +8,12 @@ on:
     # bevestigingsregel uit de PR-tekst; die halen de tekst live op (stap "PR-tekst
     # ophalen"), dus komt zo'n regel er later bij, dan is "Re-run failed jobs" genoeg.
     #
-    # `ready_for_review`: een concept-PR (draft) krijgt alleen de snelle job "Code"; de
-    # zware job "Database en end-to-end" draait pas als de PR op klaar wordt gezet. Zo
-    # wacht niemand per tussenstap op Supabase en de browsertest, terwijl mergen zonder die
-    # test niet kan: een concept kan niet mergen, en "op klaar zetten" start de hele poort.
+    # `ready_for_review`: een concept-PR (draft) krijgt de snelle job "Code", en de zware job
+    # "Database en end-to-end" alleen als supabase/ is gewijzigd, en dan zonder browser
+    # (Supabase, typecontrole en RLS-tests). De browsertest draait pas als de PR op klaar
+    # wordt gezet. Zo kan ook een PR met een migratie als concept beginnen, terwijl mergen
+    # zonder de hele poort niet kan: een concept kan niet mergen, en "op klaar zetten" start
+    # de hele poort opnieuw.
     types: [opened, synchronize, reopened, ready_for_review]
   # Geen run meer na een merge op `main`: de ruleset eist dat de branch bij is met main,
   # dus de PR-run heeft precies deze code al getest. Een tweede run kostte bij Richplant
@@ -27,9 +29,18 @@ permissions:
 
 jobs:
   # Snelle controles: geen database nodig, klaar in ongeveer een minuut.
+  #
+  # Deze job bouwt ook de preview: met de openbare testwaarden (repo-variabelen PREVIEW_VITE_*,
+  # geen secrets) en de testbalk. Is alles groen, dan bewaart hij het resultaat als artifact
+  # `preview-dist`, en zet preview-uitrollen.yml (altijd de versie van main) het online. Zo
+  # wordt de app per push één keer gebouwd in plaats van in een losse preview-job nog eens,
+  # en komt er alleen een preview van code die door deze controles is gekomen.
   checks:
     name: Code
     runs-on: ubuntu-latest
+    outputs:
+      # alles | database | niets: wat de databasejob hieronder moet doen.
+      stand: ${{ steps.wat.outputs.stand }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,6 +72,24 @@ jobs:
             echo "${einde}"
           } >> "$GITHUB_ENV"
 
+      # Bij een concept alleen de database (zonder browser) als supabase/ is gewijzigd, en
+      # anders niets; buiten een concept altijd alles.
+      - name: Wat moet de databasejob doen?
+        id: wat
+        env:
+          CONCEPT: ${{ github.event.pull_request.draft }}
+          BASIS: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$CONCEPT" != "true" ]; then
+            echo "stand=alles" >> "$GITHUB_OUTPUT"
+          elif [ -n "$(git diff --name-only "$BASIS"...HEAD -- supabase/ | head -n 1)" ]; then
+            echo "::notice::Concept met een wijziging in supabase/: de databasejob draait Supabase en de RLS-tests, zonder browser."
+            echo "stand=database" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Concept zonder wijziging in supabase/: de databasejob slaat over. Hij draait bij gh pr ready."
+            echo "stand=niets" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Typecontrole
         run: pnpm typecheck
 
@@ -76,8 +105,55 @@ jobs:
         if: hashFiles('beheer/**/*.test.mjs') != ''
         run: pnpm beheer:test
 
-      - name: Bouwt het echt
+      # De edge functions draaien op Deno en vallen buiten de typecontrole van de app
+      # (tsconfig.json). Hier krijgen ze hun eigen typecontrole.
+      - name: Deno installeren (edge functions)
+        if: hashFiles('supabase/functions/**/*.ts') != ''
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecontrole edge functions (deno check)
+        if: hashFiles('supabase/functions/**/*.ts') != ''
+        run: find supabase/functions -name '*.ts' -not -path '*/node_modules/*' -print0 | xargs -0 deno check
+
+      # Komt er een preview voor deze PR? Alleen voor een PR uit deze repo (een fork krijgt
+      # geen preview), en bij een app met database alleen als de testwaarden er zijn.
+      - name: Is de preview ingericht?
+        id: preview
+        env:
+          PREVIEW_VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
+          EIGEN_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          modus=$(node -e "import('./scripts/lib/stack-config.mjs').then((m) => console.log(m.databaseModus()))")
+          if [ "$EIGEN_REPO" != "true" ]; then
+            echo "::notice::Deze PR komt uit een fork. Er komt geen preview."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$modus" != "geen" ] && [ -z "$PREVIEW_VITE_SUPABASE_URL" ]; then
+            echo "::notice::De repo-variabele PREVIEW_VITE_SUPABASE_URL ontbreekt. De preview is nog niet ingericht; er komt geen preview voor deze PR."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Eén keer bouwen, met de testwaarden van de preview: dat is de bouwcontrole én de
+      # preview. Het zijn openbare waarden (ze staan toch in de bundel), geen secrets.
+      - name: Bouwt het echt (testomgeving)
+        env:
+          VITE_SUPABASE_URL: ${{ vars.PREVIEW_VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.PREVIEW_VITE_SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_SCHEMA: ${{ vars.PREVIEW_VITE_SUPABASE_SCHEMA }}
+          VITE_INLOGDIENST: ${{ vars.PREVIEW_VITE_INLOGDIENST }}
+          VITE_SENTRY_DSN: ${{ vars.PREVIEW_VITE_SENTRY_DSN }}
+          VITE_OMGEVING: test
         run: pnpm build
+
+      # De preview-upload gebruikt de wrangler.jsonc van main. Deze droogoefening haalt
+      # die van de PR al hier door wrangler, zonder sleutel, zodat een kapotte config de
+      # PR rood maakt in plaats van pas de productie-uitrol.
+      - name: Wrangler-config controleren (droog)
+        if: steps.preview.outputs.skip != 'true'
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: pnpm exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/wrangler-dry"
 
       - name: Guard - geheimen in repo en bundel
         run: pnpm guard:secrets
@@ -87,6 +163,11 @@ jobs:
 
       - name: Guard - row level security op elke tabel
         run: pnpm guard:rls
+
+      # Per tabel een A/B-test in tests/rls/ (gebruiker B ziet de rij van A niet), of een regel
+      # in open_tabellen. In deze uitgave nog een waarschuwing, daarna rood.
+      - name: Guard - A/B-test per tabel
+        run: pnpm guard:rls-tests
 
       - name: Guard - tests bij gewijzigde code
         run: pnpm guard:tests
@@ -103,6 +184,17 @@ jobs:
       - name: Guard - geen opslag van Cloudflare
         run: pnpm guard:cloudflare
 
+      # Als laatste, dus alleen als alles hierboven groen is: guard:secrets heeft dan ook de
+      # bundel met de testwaarden gecontroleerd. preview-uitrollen.yml haalt dit op.
+      - name: Gebouwde preview bewaren
+        if: steps.preview.outputs.skip != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-dist
+          path: dist
+          retention-days: 3
+          if-no-files-found: error
+
   # Alles wat een echte database nodig heeft. Draait tegen een lokale Supabase,
   # dus zonder sleutels van een cloudomgeving en zonder iets aan te raken wat leeft.
   #
@@ -117,12 +209,16 @@ jobs:
   #   false      geen database: alleen de browsertest
   #
   # De job draait voor elke databasestand: hij staat als verplichte check in de ruleset.
-  # Alleen bij een concept-PR slaat hij over (zie `ready_for_review` bovenaan). Een job die
-  # met `if` wordt overgeslagen telt voor GitHub als geslaagd; dat is veilig, want een
-  # concept kan niet mergen, en op klaar zetten start een nieuwe run die alles doet.
+  # Hij start pas als de job Code groen is (`needs: checks`): is Code rood, dan kost de dure
+  # job geen minuten. Bij een concept-PR zonder wijziging in supabase/ slaat hij over, en
+  # bij een concept mét zo'n wijziging draait hij zonder browser (zie `stand` in de job
+  # Code). Een job die met `if` wordt overgeslagen telt voor GitHub als geslaagd; dat is
+  # veilig, want een concept kan niet mergen, en op klaar zetten start een nieuwe run die
+  # alles doet.
   database:
     name: Database en end-to-end
-    if: ${{ !github.event.pull_request.draft }}
+    needs: checks
+    if: needs.checks.outputs.stand != 'niets'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -182,32 +278,36 @@ jobs:
       # lockfile). Bij een treffer zijn alleen de systeempakketten nog nodig.
       - name: Playwright-versie bepalen
         id: playwright
-        if: steps.stack.outputs.modus != 'gedeeld'
+        if: steps.stack.outputs.modus != 'gedeeld' && needs.checks.outputs.stand == 'alles'
         # Uit het pakket zelf, niet via `pnpm exec`: pnpm 11 zet soms "Already up to date" op stdout.
         run: echo "versie=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Browser uit de cache
         id: browser-cache
-        if: steps.stack.outputs.modus != 'gedeeld'
+        if: steps.stack.outputs.modus != 'gedeeld' && needs.checks.outputs.stand == 'alles'
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.versie }}
 
       - name: Browser installeren
-        if: steps.stack.outputs.modus != 'gedeeld' && steps.browser-cache.outputs.cache-hit != 'true'
+        if: steps.stack.outputs.modus != 'gedeeld' && needs.checks.outputs.stand == 'alles' && steps.browser-cache.outputs.cache-hit != 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Systeempakketten voor de browser
-        if: steps.stack.outputs.modus != 'gedeeld' && steps.browser-cache.outputs.cache-hit == 'true'
+        if: steps.stack.outputs.modus != 'gedeeld' && needs.checks.outputs.stand == 'alles' && steps.browser-cache.outputs.cache-hit == 'true'
         run: pnpm exec playwright install-deps chromium
 
       # Een app met een gedeelde database heeft geen omgeving om tegen te testen die
       # in de CI mag draaien: haar gegevens staan in het project van een andere app.
       # De browsertest draait daar via de Cloudflare-preview van de PR.
       - name: End-to-end test
-        if: steps.stack.outputs.modus != 'gedeeld'
+        if: steps.stack.outputs.modus != 'gedeeld' && needs.checks.outputs.stand == 'alles'
         run: pnpm test:e2e
+
+      - name: End-to-end test bij klaar
+        if: needs.checks.outputs.stand != 'alles'
+        run: echo "::notice::Dit is een concept. De browsertest draait als de PR op klaar wordt gezet (gh pr ready)."
 
       - name: End-to-end test overgeslagen
         if: steps.stack.outputs.modus == 'gedeeld'
