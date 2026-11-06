@@ -191,7 +191,9 @@ Wat de poort ermee doet:
 1. `guard:migrations` is rood als een `update` of `delete` geen regel heeft.
 2. De workflow **Droogloop migraties** draait de migraties van de PR op de testdatabase, telt
    per tabel hoeveel rijen ze raken, en draait alles weer terug. Buiten het bereik, of een
-   tabel die er niet bij staat: de status `Droogloop migraties` op de PR is rood. De tellingen
+   tabel die er niet bij staat: de status `Droogloop migraties` op de PR is rood. Die status is
+   een verplichte controle en staat op elke PR; zonder migratie die gegevens omzet is hij
+   vanzelf groen ("niets te oefenen"). De tellingen
    en vijf voorbeelden voor en na staan als reactie in de PR. De gebruiker hoeft die niet te
    beoordelen; het is het verslag voor als er later iets uitgezocht moet worden.
 3. Na de merge zet **Database bijwerken** vlak vóór de migratie op productie een kopie van de
