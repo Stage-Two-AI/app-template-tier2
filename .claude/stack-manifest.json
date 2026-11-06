@@ -111,6 +111,7 @@
       "tests/rls/open-policies.test.ts",
       "tests/rls/lib/database.ts",
       "tests/rls/lib/afscherming.ts",
+      "scripts/lib/onderdelen.mjs",
       "tests/unit/onderdelen.test.ts",
       "e2e/onderdelen.spec.ts",
       "e2e/stack-config.ts",
