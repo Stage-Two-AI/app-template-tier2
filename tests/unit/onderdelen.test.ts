@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { GEEN_ONDERDEEL, ONDERDELEN } from "@/onderdelen";
+import { GEEN_ONDERDEEL, ONDERDELEN } from "../../src/onderdelen";
 
 /**
  * De lijst met onderdelen (src/onderdelen.ts) blijft bij met de router. De browsertest

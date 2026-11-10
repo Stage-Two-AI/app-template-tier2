@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect } from "vitest";
-import type { Database } from "@/lib/database.types";
+import type { Database } from "../../../src/lib/database.types";
 
 /**
  * De A/B-test per tabel: gebruiker A maakt een eigen rij, gebruiker B probeert hem te zien,
