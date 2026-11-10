@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +14,11 @@ import { describe, expect, it } from "vitest";
  * neer als het ontbreekt (`alsHetOntbreekt` in .claude/stack-manifest.json, of
  * DOOR_UPDATEN_GEVULD hieronder), of het is de app zelf (DE_APP_ZELF). Voor dat laatste is een
  * reden nodig die deze test ook nagaat.
+ *
+ * Een bestand uit `alsHetOntbreekt` is alleen in de template zelf van de template. In een app is
+ * het van het project, en mag het naar eigen bestanden van de app verwijzen (bij de test van
+ * versie 41 importeerde worker/env.ts van een app `./bestanden`, en was de update-PR rood). Die
+ * bestanden controleert deze test dus alleen in de template.
  *
  * Deze test is van de template en komt met elke versie mee.
  */
@@ -54,6 +60,25 @@ const zeker = new Set([
   ...DE_APP_ZELF,
 ]);
 
+/** De template zelf, of de kopie ervan bij een klant; herkend zoals guard-template dat doet. */
+function isDeTemplate(repo: string): boolean {
+  return /\/(?:app-template-tier[12]|stack-template(?:-cloudflare|-light)?)(?:\.git)?$/.test(repo);
+}
+
+const repo =
+  process.env.GITHUB_REPOSITORY ??
+  (() => {
+    try {
+      return execFileSync("git", ["remote", "get-url", "origin"], {
+        cwd: WORTEL,
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      return "";
+    }
+  })();
+const inDeTemplate = isDeTemplate(repo);
+
 const IMPORT =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'](\.{1,2}\/[^"']+|@\/[^"']+)["']/g;
 const NODE_SCRIPT = /\bnode\s+(scripts\/[\w./-]+\.mjs)\b/g;
@@ -85,7 +110,7 @@ function verwijzingen(pad: string): Array<[string | null, string]> {
 }
 
 describe("code van de template leunt alleen op bestanden die er na updaten zeker zijn", () => {
-  const bronnen = [...vanDeTemplate, ...alsHetOntbreekt]
+  const bronnen = [...vanDeTemplate, ...(inDeTemplate ? alsHetOntbreekt : [])]
     .filter((p) => existsSync(join(WORTEL, p)))
     .sort();
 
@@ -101,6 +126,13 @@ describe("code van de template leunt alleen op bestanden die er na updaten zeker
       fout,
       "zet het doel in vervangen (als het van de template is) of in alsHetOntbreekt (als het van het project blijft)",
     ).toEqual([]);
+  });
+
+  it("controleert de bestanden uit alsHetOntbreekt alleen in de template zelf", () => {
+    expect(isDeTemplate("Stage-Two-AI/app-template-tier1")).toBe(true);
+    expect(isDeTemplate("https://github.com/Klant/app-template-tier2.git")).toBe(true);
+    expect(isDeTemplate("Stage-Two-AI/fotografie")).toBe(false);
+    expect(isDeTemplate("")).toBe(false);
   });
 
   it("alsHetOntbreekt: elk bestand staat in de template en blijft van het project", () => {
