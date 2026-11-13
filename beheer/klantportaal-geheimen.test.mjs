@@ -4,13 +4,24 @@
  * stuk ervan.
  */
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { richtIn, uitvoerRegel, werkToegangBij } from "./inrichten-cloudflare.mjs";
+import {
+  eindstatus,
+  richtIn,
+  samenvatting,
+  schrijfSamenvatting,
+  uitvoerRegel,
+  werkToegangBij,
+} from "./inrichten-cloudflare.mjs";
 import {
   ARG,
   auth,
   DEUR,
   GROEPEN,
+  MET_VINKJE,
   opzet,
   PORTAAL,
   PORTAAL_APP,
@@ -265,4 +276,107 @@ test("Turnstile: het geheim wordt getoetst vóór de captcha aangaat; een verkee
   const gewoon = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(gewoon, DEUR));
   assert.equal(gewoon.aanroepen.filter((a) => String(a.url).includes("siteverify")).length, 0);
+});
+
+test("Turnstile: de openbare testsleutels (een cijfer, een x en nullen) worden geweigerd, als geheim en als sitekey: daarmee slaagt elke captcha", async () => {
+  // De testgeheimen kent Turnstile wel; de toets bij siteverify zou ze dus goedkeuren.
+  for (const geheim of [
+    "1x0000000000000000000000000000000AA",
+    "2x0000000000000000000000000000000AA",
+    "3x0000000000000000000000000000000AA",
+  ]) {
+    const w = nepWolk({ workerBestaat: true });
+    await richtIn(ARG, opzet(w, DEUR));
+    w.aanroepen.length = 0;
+    await assert.rejects(
+      () => richtIn(ARG, opzet(w, PORTAAL, { captchaGeheim: geheim })),
+      /gestopt zonder wijzigingen.*TURNSTILE_GEHEIM is een openbaar testgeheim van Turnstile/,
+    );
+    assert.deepEqual(w.schrijfacties(), []);
+    assert.ok(
+      !w.aanroepen.some((a) => a.pad?.includes("siteverify")),
+      "het testgeheim gaat niet eens naar Turnstile",
+    );
+  }
+  for (const sitekey of [
+    "1x00000000000000000000AA",
+    "2x00000000000000000000AB",
+    "1x00000000000000000000BB",
+    "3x00000000000000000000FF",
+  ]) {
+    assert.throws(
+      () =>
+        valideerToegang({
+          groepen: GROEPEN,
+          apps: { direct: { ...PORTAAL_APP, turnstile_sitekey: sitekey } },
+        }),
+      /turnstile_sitekey is een openbare testsleutel van Turnstile/,
+    );
+  }
+  // Een echte sleutel (begint bij Cloudflare met 0x4) blijft gewoon werken.
+  valideerToegang(PORTAAL);
+});
+
+test("de samenvatting van de run: gewone taal, de volgende stap erbij, en geen geheim of klantadres; alleen in GitHub Actions, als bestand naast de uitvoer", async () => {
+  const w = nepWolk({
+    workerBestaat: true,
+    gebruikers: [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        email: "inkoop@bloemist.nl",
+        app_metadata: { provider: "email", providers: ["email"] },
+      },
+    ],
+  });
+  await richtIn(ARG, opzet(w, DEUR));
+  const d = opzet(w, PORTAAL);
+  const r = await richtIn(ARG, d);
+  const tekst = samenvatting("inrichten", eindstatus("inrichten", r));
+  assert.match(tekst, /^## App inrichten: direct\n\nGelukt\./);
+  assert.match(tekst, /\*\*Wat er is gedaan\*\*/);
+  assert.match(
+    tekst,
+    /\*\*Wat nu\*\*\n\n1\. Rol de app uit.*\n2\. Test achter de deur.*\n3\. Werkt dat, draai App inrichten/,
+  );
+  // Een run die stopt: de reden, in dezelfde woorden als de uitvoer.
+  const fout = await richtIn(MET_VINKJE, opzet(w, PORTAAL, { smtpWachtwoord: undefined })).catch(
+    (f) => f,
+  );
+  const rood = samenvatting("inrichten", {
+    status: "mislukt",
+    modus: "inrichten",
+    reden: fout.message,
+  });
+  assert.match(
+    rood,
+    /\*\*Mislukt\.\*\* gestopt zonder wijzigingen: klantportaal direct: het secret SMTP_WACHTWOORD ontbreekt/,
+  );
+  // Toegang bijwerken: aantallen, nooit adressen.
+  const t = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const toegang = samenvatting("toegang", eindstatus("toegang", t));
+  assert.match(toegang, /direct: 1 klantaccounts overgeslagen/);
+  assert.match(toegang, /Wat nu[\s\S]*Klantportaal direct: de deur staat er nog/);
+  assert.doesNotMatch(toegang, /bloemist/);
+  // Het bestand: alleen als GitHub het aanwijst, en met de geheimen eruit.
+  const map = mkdtempSync(join(tmpdir(), "samenvatting-"));
+  try {
+    const bestand = join(map, "samenvatting.md");
+    assert.equal(schrijfSamenvatting(tekst, d.geheimen, {}), false);
+    assert.equal(existsSync(bestand), false);
+    const metGeheim = `${tekst}\nsmtp ${SMTP} captcha ${TURNSTILE}\n`;
+    assert.equal(
+      schrijfSamenvatting(metGeheim, [SMTP, TURNSTILE], { GITHUB_STEP_SUMMARY: bestand }),
+      true,
+    );
+    const geschreven = readFileSync(bestand, "utf8");
+    assert.match(geschreven, /## App inrichten: direct/);
+    assert.doesNotMatch(geschreven, new RegExp(`${SMTP}|${TURNSTILE}`));
+    // Lukt het schrijven niet, dan verandert dat niets aan de run.
+    assert.equal(
+      schrijfSamenvatting(tekst, [], { GITHUB_STEP_SUMMARY: join(map, "bestaat", "niet.md") }),
+      false,
+    );
+  } finally {
+    rmSync(map, { recursive: true, force: true });
+  }
 });

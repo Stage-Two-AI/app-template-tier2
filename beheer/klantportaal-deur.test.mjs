@@ -32,6 +32,7 @@ import {
   SITEKEY,
   stap,
 } from "./klantportaal-opzet.mjs";
+import { PORTAAL_MERK } from "./lib/cloudflare.mjs";
 import { valideerToegang } from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
@@ -57,20 +58,28 @@ test("deur: een mens haalt de deur weg, niet de code: zonder vinkje blijft hij s
     const r = await richtIn(ARG, opzet(w, PORTAAL));
     assert.ok(app(w, NAMEN.deur), `run ${run + 1}: de deur staat er nog`);
     assert.doesNotMatch(JSON.stringify(r.stappen), /weggehaald/);
-    assert.match(r.waarschuwingen.join(" "), /rol de app uit.*met het vinkje/);
+    assert.match(r.watNu.join(" "), /Rol de app uit.*Test achter de deur.*met het vinkje/);
   }
   // Toegang bijwerken en de tweede doorgang raken de deur evenmin.
   await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
   await tweedeDoorgang(ARG, opzet(w, PORTAAL));
   assert.ok(app(w, NAMEN.deur));
-  // Met het vinkje: een storing vóór het einde laat de deur staan (hij is de laatste aanroep).
-  await assert.rejects(() => richtIn(MET_VINKJE, opzet(w, PORTAAL, { gh: stuk(secrets) })), /503/);
+  // Met het vinkje: een storing bij het nalopen laat de deur staan (hij is de enige wijziging
+  // en de laatste aanroep).
+  const variabelen = (args) => args[0] === "variable" && args[1] === "list";
+  await assert.rejects(
+    () => richtIn(MET_VINKJE, opzet(w, PORTAAL, { gh: stuk(variabelen) })),
+    /503/,
+  );
   assert.ok(app(w, NAMEN.deur), "ook nu staat de deur er nog");
-  // Pas een run met vinkje die helemaal lukt, haalt hem weg.
+  // Pas een run met vinkje die helemaal lukt, haalt hem weg, en doet verder niets.
+  w.aanroepen.length = 0;
   const r = await richtIn(MET_VINKJE, opzet(w, PORTAAL));
   assert.equal(app(w, NAMEN.deur), undefined);
   assert.equal(w.aanroepen.at(-1).methode, "DELETE");
+  assert.deepEqual(w.schrijfacties().length, 1, "de deur weghalen is de enige wijziging");
   assert.match(JSON.stringify(r.stappen), /weggehaald/);
+  assert.match(r.watNu.join(" "), /Controle van buitenaf/);
 });
 
 test("deur: het vinkje wordt geweigerd, vóór de eerste wijziging en met uitleg, als het er vóór de run niet klaar voor stond", async () => {
@@ -81,7 +90,7 @@ test("deur: het vinkje wordt geweigerd, vóór de eerste wijziging en met uitleg
   w.aanroepen.length = 0;
   await assert.rejects(
     () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
-    /gestopt zonder wijzigingen.*de deur gaat niet weg.*VITE_INLOGDIENST stond in omgeving production nog niet op cloudflare,mailcode.*inloggen per mail staat in Supabase nog uit.*Draai App inrichten eerst zonder het vinkje/,
+    /gestopt zonder wijzigingen.*de deur gaat niet weg, want er staat nog iets anders te wijzigen.*VITE_INLOGDIENST staat in omgeving production nog niet op cloudflare,mailcode.*de inloginstellingen in Supabase staan nog niet zoals de inrichting ze zet \(.*external_email_enabled.*het merk van een klantportaal nog niet.*Draai eerst App inrichten zonder vinkje en test opnieuw/,
   );
   assert.deepEqual(w.schrijfacties(), []);
   assert.equal(
@@ -94,13 +103,13 @@ test("deur: het vinkje wordt geweigerd, vóór de eerste wijziging en met uitleg
   w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY = SITEKEY;
   await assert.rejects(
     () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
-    /de deur gaat niet weg.*inloggen per mail staat in Supabase nog uit.*de mail gaat nog niet via Resend.*de aanmeld-hook staat nog niet aan.*de token-hook staat nog niet aan/,
+    /de deur gaat niet weg.*external_email_enabled.*hook_before_user_created_enabled.*hook_custom_access_token_enabled.*smtp_host/,
   );
   assert.ok(app(w, NAMEN.deur));
   // En omgekeerd: alles klaargezet, maar de variabele is teruggezet.
   await richtIn(ARG, opzet(w, PORTAAL));
   w.staat.ghVariabelen.production.VITE_INLOGDIENST = "cloudflare";
-  await assert.rejects(() => richtIn(MET_VINKJE, opzet(w, PORTAAL)), /VITE_INLOGDIENST stond/);
+  await assert.rejects(() => richtIn(MET_VINKJE, opzet(w, PORTAAL)), /VITE_INLOGDIENST staat/);
   assert.ok(app(w, NAMEN.deur));
   // Het vinkje bij een gewone app, of samen met een andere modus: geweigerd.
   await assert.rejects(
@@ -123,12 +132,13 @@ test("deur: klantportaal uit toegang.json gehaald: Toegang bijwerken bant geen k
   assert.deepEqual(bans(w), [], "geen klant is geband");
   assert.equal(app(w, NAMEN.deur), undefined, "er staat (nog) geen deur");
   const tekst = r.fouten.join(" ");
-  assert.match(tekst, /inloggen per mail staat in productie nog aan/);
+  assert.match(tekst, /direct: wacht op App inrichten/);
   assert.match(tekst, /Draai App inrichten voor direct/);
   assert.match(
     tekst,
-    /zet de deur terug, zet inloggen per mail uit en meldt de klanten af \(zonder ban\)/,
+    /zet de deur terug als die weg was, zet inloggen per mail uit en meldt de klanten af/,
   );
+  assert.match(tekst, /de 1 klantaccounts zijn met rust gelaten en geen klant is geband/);
   assert.equal(eindstatus("toegang", r).status, "mislukt");
 });
 
@@ -174,61 +184,77 @@ test("deur: een droogloop van deur naar klantportaal wijzigt niets, ook niet met
 
 // ---------------------------------------------------------------- workers.dev en de previews
 
-test("workers.dev: wijst de Access op de Worker naar een andere Worker (hernoemd in wrangler.jsonc), dan herstelt stap 4 dat en zegt nooit 'ongewijzigd'", async () => {
+test("workers.dev: bewaakt de Access op de Worker van een klantportaal een gewenst adres niet (de Worker is hernoemd in wrangler.jsonc), dan zet stap 4 het erbij en haalt hij niets weg", async () => {
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
   const nieuw = { ...ARG, worker: "wi-direct-nieuw" };
 
   // De droogloop zegt het al.
   const droog = await richtIn({ ...nieuw, droogloop: true }, opzet(w, PORTAAL));
-  assert.match(stap(droog, "4 Access op de Worker"), /omzetten naar wi-direct-nieuw\./);
+  assert.match(stap(droog, "4 Access op de Worker"), /gepland: wi-direct-nieuw\..* erbij zetten/);
 
   const r = await richtIn(nieuw, opzet(w, PORTAAL));
-  const stap4 = stap(r, "4 Access op de Worker");
-  assert.ok(!/ongewijzigd/.test(stap4), stap4);
-  assert.match(stap4, /adres bijgewerkt/);
-  const worker = app(w, NAMEN.worker);
-  assert.equal(worker.domain, "wi-direct-nieuw.stagetwo-acc.workers.dev");
+  assert.match(stap(r, "4 Access op de Worker"), /adres en merk klantportaal bijgewerkt/);
   assert.deepEqual(
-    worker.destinations.map((x) => x.uri),
-    ["wi-direct-nieuw.stagetwo-acc.workers.dev", "*-wi-direct-nieuw.stagetwo-acc.workers.dev"],
+    app(w, NAMEN.worker).destinations.map((x) => x.uri),
+    [
+      "wi-direct.stagetwo-acc.workers.dev",
+      "*-wi-direct.stagetwo-acc.workers.dev",
+      "wi-direct-nieuw.stagetwo-acc.workers.dev",
+      "*-wi-direct-nieuw.stagetwo-acc.workers.dev",
+    ],
+    "de nieuwe adressen staan erbij, de oude zijn er nog",
   );
   assert.ok(
-    r.waarschuwingen.some((x) =>
-      /bewaakte wi-direct\.stagetwo-acc\.workers\.dev.*verwijder/.test(x),
-    ),
-    "het resultaat wijst op de oude Worker, die nu zonder deur staat",
+    r.waarschuwingen.some((x) => /wi-direct-nieuw.* niet; dat adres is erbij gezet/.test(x)),
   );
   // En pas daarna, in een run met het vinkje, gaat de deur van het domein weg.
   assert.ok(app(w, NAMEN.deur));
-  const r2 = await richtIn({ ...nieuw, deurWeghalen: true }, opzet(w, PORTAAL));
+  await richtIn({ ...nieuw, deurWeghalen: true }, opzet(w, PORTAAL));
   assert.equal(app(w, NAMEN.deur), undefined);
-  assert.match(stap(r2, "4 Access op de Worker"), /ongewijzigd/);
   assert.ok(gedekt(w).includes("*-wi-direct-nieuw.stagetwo-acc.workers.dev"));
 });
 
-test("workers.dev: ook bij een gewone app en in de tweede doorgang wordt een verbogen Access op de Worker hersteld", async () => {
-  for (const verbuig of [
-    (a) => ({ ...a, domain: "iets-anders.stagetwo-acc.workers.dev" }),
-    (a) => ({ ...a, destinations: [a.destinations[0]] }), // de previews eraf gehaald
-    (a) => ({ ...a, destinations: [] }),
-  ]) {
-    for (const draai of [richtIn, tweedeDoorgang]) {
+test("workers.dev: een adres dat iemand met de hand onder de Access op de Worker zette blijft bewaakt, bij een gewone app (geen PUT, zoals versie 42) en bij een klantportaal (toevoegen, nooit vervangen)", async () => {
+  const extra = "demo-wi-direct.wincoapps.com";
+  const zetErbij = (w) => {
+    const worker = app(w, NAMEN.worker);
+    worker.destinations = [...worker.destinations, { type: "public", uri: extra }];
+  };
+  const puts = (w) => w.schrijfacties().filter((x) => x.startsWith("PUT cf/access/apps"));
+  for (const draai of [richtIn, tweedeDoorgang]) {
+    // Een gewone app: wat er ook met de adressen is gedaan, er volgt geen PUT.
+    for (const verbuig of [
+      zetErbij,
+      (w) => (app(w, NAMEN.worker).domain = "iets-anders.stagetwo-acc.workers.dev"),
+      (w) => (app(w, NAMEN.worker).destinations = []),
+    ]) {
       const w = nepWolk({ workerBestaat: true });
       await richtIn(ARG, opzet(w, DEUR));
-      const i = w.staat.apps.findIndex((a) => a.name === NAMEN.worker);
-      w.staat.apps[i] = verbuig(w.staat.apps[i]);
+      verbuig(w);
+      const voor = JSON.stringify(app(w, NAMEN.worker));
+      w.aanroepen.length = 0;
       await draai(ARG, opzet(w, DEUR));
-      assert.equal(app(w, NAMEN.worker).domain, "wi-direct.stagetwo-acc.workers.dev");
-      assert.deepEqual(
-        app(w, NAMEN.worker).destinations.map((x) => x.uri),
-        ["wi-direct.stagetwo-acc.workers.dev", "*-wi-direct.stagetwo-acc.workers.dev"],
-      );
+      assert.deepEqual(puts(w), []);
+      assert.equal(JSON.stringify(app(w, NAMEN.worker)), voor);
     }
+    // Een klantportaal waar de previews van de Access zijn afgehaald: die komen erbij, en het
+    // adres dat er met de hand bij stond blijft.
+    const w = nepWolk({ workerBestaat: true });
+    await richtIn(ARG, opzet(w, DEUR));
+    await richtIn(ARG, opzet(w, PORTAAL));
+    const worker = app(w, NAMEN.worker);
+    worker.destinations = [worker.destinations[0], { type: "public", uri: extra }];
+    await draai(ARG, opzet(w, PORTAAL));
+    assert.deepEqual(
+      app(w, NAMEN.worker).destinations.map((x) => x.uri),
+      ["wi-direct.stagetwo-acc.workers.dev", extra, "*-wi-direct.stagetwo-acc.workers.dev"],
+    );
   }
   // Alleen een andere volgorde of hoofdletters is geen afwijking: dan wordt er niets geschreven.
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
+  await richtIn(ARG, opzet(w, PORTAAL));
   const i = w.staat.apps.findIndex((a) => a.name === NAMEN.worker);
   w.staat.apps[i] = {
     ...w.staat.apps[i],
@@ -240,9 +266,36 @@ test("workers.dev: ook bij een gewone app en in de tweede doorgang wordt een ver
     self_hosted_domains: w.staat.apps[i].destinations.map((d) => d.uri),
   };
   w.aanroepen.length = 0;
-  const r = await richtIn(ARG, opzet(w, DEUR));
+  const r = await richtIn(ARG, opzet(w, PORTAAL));
   assert.match(stap(r, "4 Access op de Worker"), /ongewijzigd/);
-  assert.ok(!w.schrijfacties().some((s) => s.startsWith("PUT cf/access/apps")));
+  assert.deepEqual(puts(w), []);
+});
+
+test("workers.dev: het vinkje haalt de deur niet weg als de Access op de Worker ontbreekt of een adres mist; de run zonder vinkje herstelt dat eerst", async () => {
+  for (const verbuig of [
+    (w) =>
+      w.staat.apps.splice(
+        w.staat.apps.findIndex((a) => a.name === NAMEN.worker),
+        1,
+      ),
+    (w) => (app(w, NAMEN.worker).destinations = [app(w, NAMEN.worker).destinations[0]]),
+  ]) {
+    const w = nepWolk({ workerBestaat: true });
+    await richtIn(ARG, opzet(w, DEUR));
+    await richtIn(ARG, opzet(w, PORTAAL));
+    verbuig(w);
+    w.aanroepen.length = 0;
+    await assert.rejects(
+      () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
+      /de deur gaat niet weg.*de Access op de Worker \(wi-direct-worker\) (ontbreekt|bewaakt \*-wi-direct\.stagetwo-acc\.workers\.dev nog niet)/,
+    );
+    assert.deepEqual(w.schrijfacties(), []);
+    assert.ok(app(w, NAMEN.deur));
+    await richtIn(ARG, opzet(w, PORTAAL));
+    await richtIn(MET_VINKJE, opzet(w, PORTAAL));
+    assert.equal(app(w, NAMEN.deur), undefined);
+    assert.ok(gedekt(w).includes("*-wi-direct.stagetwo-acc.workers.dev"));
+  }
 });
 
 test("workers.dev: Toegang bijwerken of een volgende run haalt bij een klantportaal de Access op de Worker nooit weg en maakt hem nooit leeg", async () => {
@@ -301,36 +354,57 @@ test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonde
   );
 });
 
-test("workers.dev: geeft Cloudflare de Access op de Worker terug met bestemmingen zonder adres (de nieuwe Worker-bestemmingen), dan volgt er geen herstel-PUT maar een duidelijke melding", async () => {
+test("workers.dev: geeft Cloudflare de Access op de Worker terug met bestemmingen zonder adres (de nieuwe Worker-bestemmingen), dan raakt geen run de adressen aan, zegt een klantportaal dat hardop, en stopt het vinkje vóór wijzigingen met uitleg", async () => {
+  const zonderAdres = [
+    { type: "worker", worker_id: "id-van-een-andere-worker" },
+    { type: "preview_worker", worker_id: "id-van-een-andere-worker" },
+  ];
+  // Een gewone app: zoals versie 42, geen PUT en geen woord erover.
+  const gewoon = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(gewoon, DEUR));
+  for (const draai of [richtIn, tweedeDoorgang]) {
+    app(gewoon, NAMEN.worker).destinations = structuredClone(zonderAdres);
+    gewoon.aanroepen.length = 0;
+    const r = await draai(ARG, opzet(gewoon, DEUR));
+    assert.ok(!gewoon.schrijfacties().some((x) => x.startsWith("PUT cf/access/apps/")));
+    assert.doesNotMatch((r.waarschuwingen ?? []).join(" "), /zonder adres/);
+  }
+  // Een klantportaal: de adressen blijven zoals ze zijn, met een duidelijke melding.
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
-  const zonderAdres = [
-    { type: "worker", worker_id: "id-van-wi-direct" },
-    { type: "preview_worker", worker_id: "id-van-wi-direct" },
-  ];
-  for (const draai of [richtIn, tweedeDoorgang]) {
-    for (let run = 0; run < 2; run += 1) {
-      app(w, NAMEN.worker).destinations = structuredClone(zonderAdres);
-      w.aanroepen.length = 0;
-      const r = await draai(ARG, opzet(w, DEUR));
-      assert.ok(!w.schrijfacties().some((s) => s.startsWith("PUT cf/access/apps/")), "geen PUT");
-      assert.deepEqual(app(w, NAMEN.worker).destinations, zonderAdres, "de app is niet aangeraakt");
-      const tekst = r.waarschuwingen.join(" ");
-      assert.match(tekst, /bestemmingen zonder adres.*niet aangeraakt.*Controle van buitenaf/);
-      assert.doesNotMatch(tekst, /staat die nu zonder deur/, "geen valse waarschuwing");
-    }
-  }
-  const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, DEUR));
+  app(w, NAMEN.worker).destinations = structuredClone(zonderAdres);
+  const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL));
   assert.match(stap(droog, "4 Access op de Worker"), /het adres is niet te controleren/);
+  for (let run = 0; run < 2; run += 1) {
+    const r = await richtIn(ARG, opzet(w, PORTAAL));
+    assert.deepEqual(
+      app(w, NAMEN.worker).destinations,
+      zonderAdres,
+      "de adressen zijn niet aangeraakt",
+    );
+    assert.match(
+      r.waarschuwingen.join(" "),
+      /bestemmingen zonder adres.*niet aangeraakt.*Een run met het vinkje Deur weghalen stopt hierop/,
+    );
+  }
+  // Het vinkje: stoppen vóór de eerste wijziging, met wat de owner in Cloudflare doet.
+  w.aanroepen.length = 0;
+  await assert.rejects(
+    () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
+    /gestopt zonder wijzigingen.*de deur gaat niet weg.*bestemmingen zonder adres.*Zet in Cloudflare \(Zero Trust, Access, Applications, wi-direct-worker\) de adressen wi-direct\.stagetwo-acc\.workers\.dev en \*-wi-direct\.stagetwo-acc\.workers\.dev als gewone bestemming/,
+  );
+  assert.deepEqual(w.schrijfacties(), []);
+  assert.ok(app(w, NAMEN.deur), "de deur staat er nog");
   // Verandert een groep, dan volgen de policies nog wel, met de bestemmingen zoals ze waren.
   const andereGroep = {
     groepen: { ...GROEPEN, extra: { adressen: ["hulp@bureau.nl"] } },
     apps: { direct: ["extra"] },
   };
-  await richtIn(ARG, opzet(w, andereGroep));
-  assert.deepEqual(app(w, NAMEN.worker).destinations, zonderAdres);
-  const extra = w.staat.policies.find((p) => p.name === "wi-extra");
-  assert.deepEqual(app(w, NAMEN.worker).policies, [{ id: extra.id, precedence: 1 }]);
+  app(gewoon, NAMEN.worker).destinations = structuredClone(zonderAdres);
+  await richtIn(ARG, opzet(gewoon, andereGroep));
+  assert.deepEqual(app(gewoon, NAMEN.worker).destinations, zonderAdres);
+  const extra = gewoon.staat.policies.find((p) => p.name === "wi-extra");
+  assert.deepEqual(app(gewoon, NAMEN.worker).policies, [{ id: extra.id, precedence: 1 }]);
 });
 
 test("een app van vóór versie 43: de inrichting leest eerst of de app de inlog van een klantportaal begrijpt, en stopt anders vóór de eerste wijziging", async () => {
@@ -410,4 +484,100 @@ test("opruimen van een klantportaal laat geen app achter op een open domein: de 
   await ruimOp(ARG, opzet(w, PORTAAL));
   assert.equal(w.staat.workerBestaat, false, "er draait niets meer achter het domein");
   assert.deepEqual(w.staat.projecten, []);
+});
+
+// ---------------------------------------------------------------- de derde aanval
+
+test("deur: de run met het vinkje wijzigt niets behalve de deur. Staat er iets anders te wijzigen (een andere afzender in toegang.json), dan stopt hij vóór wijzigingen; nieuwe geheimen in de omgeving schrijft hij niet", async () => {
+  const w = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(w, DEUR));
+  await richtIn(ARG, opzet(w, PORTAAL)); // stap 3; stap 4: de owner test achter de deur
+  const getest = structuredClone(auth(w));
+  // Tussen stap 4 en stap 5 zet een pull request de afzender op een ander domein.
+  const anders = {
+    groepen: GROEPEN,
+    apps: { direct: { ...PORTAAL_APP, afzender: "Voorbeeld <noreply@niet-geverifieerd.example>" } },
+  };
+  w.aanroepen.length = 0;
+  await assert.rejects(
+    () => richtIn(MET_VINKJE, opzet(w, anders)),
+    /gestopt zonder wijzigingen.*er staat nog iets anders te wijzigen.*smtp_admin_email.*Draai eerst App inrichten zonder vinkje en test opnieuw/,
+  );
+  assert.deepEqual(w.schrijfacties(), []);
+  assert.ok(app(w, NAMEN.deur));
+  assert.deepEqual(auth(w), getest);
+  // De secrets SMTP_WACHTWOORD en TURNSTILE_GEHEIM zijn intussen vervangen. De run met het
+  // vinkje schrijft ze niet: wat live gaat is wat achter de deur is getest.
+  const geheimen = [];
+  const r = await richtIn(
+    MET_VINKJE,
+    opzet(w, PORTAAL, {
+      smtpWachtwoord: "re_KapotteSleutel000",
+      captchaGeheim: "0x4GeheimVanEenAndereWidget",
+      maskeer: (x) => geheimen.push(x),
+    }),
+  );
+  assert.equal(app(w, NAMEN.deur), undefined);
+  assert.deepEqual(auth(w), getest, "geen enkele instelling is gewijzigd");
+  assert.deepEqual(w.schrijfacties(), [
+    `DELETE cf/access/apps/${r.stappen[0].actie.match(/\((app-\d+)\)/)[1]}`,
+  ]);
+  assert.doesNotMatch(JSON.stringify(r), /re_Kapotte|AndereWidget/);
+});
+
+test("deur: een app die net zo heet als iets wat de inrichting voor een klantportaal maakt (winkel en winkel-worker) wordt geweigerd, zodat het vinkje nooit de Access op de Worker van een andere app weghaalt; twee gewone apps blijven zoals op versie 42", () => {
+  for (const staart of ["worker", "inlog", "publiek", "test", "test-inlog"]) {
+    for (const [a, b] of [
+      [["kantoor"], { ...PORTAAL_APP }],
+      [{ ...PORTAAL_APP }, ["kantoor"]],
+    ]) {
+      assert.throws(
+        () => valideerToegang({ groepen: GROEPEN, apps: { winkel: a, [`winkel-${staart}`]: b } }),
+        new RegExp(
+          `app "winkel-${staart}" en app "winkel": de naam "winkel-${staart}" gebruikt de inrichting zelf`,
+        ),
+      );
+    }
+    // Twee gewone apps: geen nieuwe weigering.
+    valideerToegang({
+      groepen: GROEPEN,
+      apps: { winkel: ["kantoor"], [`winkel-${staart}`]: ["kantoor"] },
+    });
+  }
+  valideerToegang({ groepen: GROEPEN, apps: { winkel: ["kantoor"], portaal: { ...PORTAAL_APP } } });
+});
+
+test("deur: bij het sluiten van een portaal komt de deur EERST terug, vóór de auth-config, het kenmerk en het afmelden; mislukt er daarna iets, dan staat het domein nooit zonder deur", async () => {
+  const w = nepWolk({ workerBestaat: true, gebruikers: [klant(1, "inkoop@bloemist.nl")] });
+  await richtIn(ARG, opzet(w, DEUR));
+  await naarPortaal(w);
+  assert.equal(app(w, NAMEN.deur), undefined);
+  // Terug achter de deur; het markeren van de klanten mislukt.
+  let kapot = true;
+  const fetchFn = (url, opties) =>
+    kapot && /database\/query$/.test(url) && /update auth\.users/.test(opties?.body ?? "")
+      ? Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: "Fout",
+          text: async () => JSON.stringify({ message: "Failed to run sql query" }),
+        })
+      : w.fetchFn(url, opties);
+  w.aanroepen.length = 0;
+  await assert.rejects(() => richtIn(ARG, opzet({ ...w, fetchFn }, DEUR)), /500/);
+  assert.ok(app(w, NAMEN.deur), "de deur staat er, ook al is de run rood");
+  const acties = w.schrijfacties();
+  const deur = acties.indexOf("POST cf/access/apps self_hosted");
+  const config = acties.findIndex(
+    (x) => x.startsWith("PATCH sb/projects/") && x.endsWith("/config/auth"),
+  );
+  assert.ok(deur !== -1 && deur < config, `de deur (${deur}) komt vóór de auth-config (${config})`);
+  // De volgende run maakt het af; het merk gaat pas dan weg.
+  assert.equal(app(w, NAMEN.worker).custom_deny_message, PORTAAL_MERK);
+  kapot = false;
+  const r = await richtIn(ARG, opzet(w, DEUR));
+  assert.equal(auth(w).external_email_enabled, false);
+  assert.equal(app(w, NAMEN.worker).custom_deny_message, "");
+  assert.match(stap(r, "4 Access op de Worker"), /merk klantportaal weggehaald/);
+  assert.match(r.watNu.join(" "), /is dicht.*Start Toegang bijwerken opnieuw/);
 });

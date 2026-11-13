@@ -13,10 +13,13 @@ import { test } from "node:test";
 import { CAPTCHA_UIT, richtIn, uitvoerRegel } from "./inrichten-cloudflare.mjs";
 import {
   ARG,
+  app,
   auth,
   DEUR,
   GROEPEN,
   HOOKS,
+  MET_VINKJE,
+  NAMEN,
   naarPortaal,
   opzet,
   PORTAAL,
@@ -100,7 +103,7 @@ test("overname met een wachtwoord: een sessie met een wachtwoord bestaat niet; d
   assert.equal(auth(w).hook_custom_access_token_enabled, true);
 });
 
-test("eigen hooks van de app: de inrichting vervangt ze nooit stil; ze stopt vóór de eerste wijziging, ook zichtbaar in de droogloop, tot de bouwer kiest", async () => {
+test("eigen hooks van de app: een klantportaal gebruikt de hooks van de inrichting. Heeft de app een eigen aanmeld-, token- of send-email-hook, dan stopt de inrichting vóór de eerste wijziging, ook zichtbaar in de droogloop; er is geen schakelaar om hem te laten staan", async () => {
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
   const eigen = {
@@ -114,47 +117,39 @@ test("eigen hooks van de app: de inrichting vervangt ze nooit stil; ze stopt vó
   const tekst = droog.waarschuwingen.join(" ");
   assert.match(tekst, /de echte run stopt hierop.*eigen aanmeld-hook.*app_alleen_uitgenodigd/);
   assert.match(tekst, /de echte run stopt hierop.*eigen token-hook.*app_rollen_in_token/);
-  assert.match(tekst, /"eigen_hooks": true.*of de eigen hook weghalen/);
-  w.aanroepen.length = 0;
-  await assert.rejects(
-    () => richtIn(ARG, opzet(w, PORTAAL)),
-    /gestopt zonder wijzigingen.*eigen aanmeld-hook.*eigen token-hook.*vervangt hem niet stil/,
+  assert.match(
+    tekst,
+    /Een klantportaal gebruikt de hooks van de inrichting; haal de eigen hook weg of overleg met Stage Two/,
   );
-  assert.deepEqual(w.schrijfacties(), []);
+  // Ook stap 3 en het vinkje stoppen, zonder iets te wijzigen: de deur blijft.
+  for (const arg of [ARG, MET_VINKJE]) {
+    w.aanroepen.length = 0;
+    await assert.rejects(
+      () => richtIn(arg, opzet(w, PORTAAL)),
+      /gestopt zonder wijzigingen.*eigen aanmeld-hook.*eigen token-hook/,
+    );
+    assert.deepEqual(w.schrijfacties(), []);
+  }
   for (const [k, waarde] of Object.entries(eigen)) assert.equal(auth(w)[k], waarde, k);
   assert.equal(auth(w).external_email_enabled, false, "productie draait gewoon door");
+  assert.ok(app(w, NAMEN.deur));
 
-  // De bouwer neemt de weigeringen over en zegt dat uitdrukkelijk: dan blijven de hooks van de
-  // app staan, en elke run zegt dat de inrichting daarop vertrouwt.
+  // De schakelaar "eigen_hooks" bestaat niet meer: toegang.json weigert het veld.
   const metEigen = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, eigen_hooks: true } } };
-  const r = await richtIn(ARG, opzet(w, metEigen));
-  for (const [k, waarde] of Object.entries(eigen)) assert.equal(auth(w)[k], waarde, k);
-  assert.equal(auth(w).external_email_enabled, true);
-  assert.equal(
-    r.waarschuwingen.filter((x) =>
-      /blijft staan.*"eigen_hooks": true.*De inrichting controleert niet wat die hook doet/.test(x),
-    ).length,
-    2,
-  );
-  // Zonder een eigen hook in het project zet de inrichting gewoon haar eigen hooks, ook met
-  // het veld erbij.
-  const leeg = nepWolk({ workerBestaat: true });
-  await richtIn(ARG, opzet(leeg, metEigen));
-  assert.equal(
-    auth(leeg).hook_custom_access_token_uri,
-    `pg-functions://postgres/public/${HOOKS.token}`,
-  );
-  // Een eigen mail-hook gaat buiten de sjablonen om: altijd stoppen.
+  assert.throws(() => valideerToegang(metEigen), /veld eigen_hooks: onbekend veld/);
+  await assert.rejects(() => richtIn(ARG, opzet(w, metEigen)), /eigen_hooks: onbekend veld/);
+  // Een eigen hook die de mail verstuurt gaat buiten de sjablonen om: ook stoppen, en van het
+  // adres staat alleen het schema en de host in de melding.
   const mailhook = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(mailhook, DEUR));
   Object.assign(auth(mailhook), {
     hook_send_email_enabled: true,
     hook_send_email_uri: "https://hooks.voorbeeld.test/mail?sleutel=sk_EchtGeheimInDeUrl",
   });
-  const fout = await richtIn(ARG, opzet(mailhook, metEigen)).catch((f) => f);
+  const fout = await richtIn(ARG, opzet(mailhook, PORTAAL)).catch((f) => f);
   assert.match(
     fout.message,
-    /eigen hook \(send email\): https:\/\/hooks\.voorbeeld\.test \(de rest van het adres is niet getoond\)/,
+    /eigen hook die de mail verstuurt \(send email\): https:\/\/hooks\.voorbeeld\.test \(de rest van het adres is niet getoond\)/,
   );
   assert.doesNotMatch(fout.message, /sk_EchtGeheim/);
 });
@@ -187,8 +182,6 @@ test("eigen hooks van de app: van een hook over HTTP toont een melding alleen he
   uit.push(uitvoerRegel(await richtIn({ ...ARG, droogloop: true }, d), d.geheimen));
   const fout = await richtIn(ARG, d).catch((f) => f);
   uit.push(uitvoerRegel({ status: "mislukt", reden: fout.message }, d.geheimen));
-  const eigen = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, eigen_hooks: true } } };
-  uit.push(uitvoerRegel(await richtIn(ARG, opzet(w, eigen)), d.geheimen));
   for (const regel of uit) {
     assert.match(regel, /https:\/\/hooks\.voorbeeld\.test \(de rest/);
     assert.doesNotMatch(regel, /sk_EchtGeheimInDeUrl|claims\?/);
@@ -487,4 +480,56 @@ test("de aanmeld-hook laat geen adres op het domein van een medewerker door: hoo
   assert.ok(vorm !== -1 && groepen !== -1 && vorm < groepen);
   // Alles wat niet per mail of via Cloudflare komt (ook anoniem) wordt geweigerd.
   assert.match(sql, /if aanbieder <> 'email' or adres !~/);
+});
+
+test("afzender: hetzelfde patroon als Supabase voor smtp_admin_email hanteert; wat toegang.json doorlaat, weigert Supabase niet om zijn vorm", () => {
+  // Het patroon uit UpdateAuthConfigBody van de Management API (13-11-2026).
+  const supabase =
+    /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+  const adressen = [
+    "noreply@klant.nl",
+    "no.reply+portaal@mail.klant.nl",
+    "o'neil@klant.nl",
+    "a@b.nl",
+    // Wat het oude patroon doorliet en Supabase weigert:
+    "naam.@klant.nl",
+    ".naam@klant.nl",
+    "na%am@klant.nl",
+    "naam..x@klant.nl",
+    "naam@-klant.nl",
+    "naam@klant",
+    "naam@klant.n1",
+  ];
+  for (const adres of adressen) {
+    const toegang = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, afzender: adres } } };
+    let door = true;
+    try {
+      valideerToegang(toegang);
+    } catch {
+      door = false;
+    }
+    assert.equal(door, supabase.test(adres), adres);
+  }
+  assert.equal(adressen.filter((a) => supabase.test(a)).length, 4);
+});
+
+test("een klantportaal zet anoniem aanmelden en de zeven meldingsmails van Supabase Auth uitdrukkelijk uit", () => {
+  const i = klantportaalInstellingen({
+    afzender: { adres: "noreply@klant.nl", naam: "Voorbeeld" },
+    smtpWachtwoord: "x",
+    captchaGeheim: "y",
+    hooks: HOOKS,
+  });
+  assert.equal(i.external_anonymous_users_enabled, false);
+  const meldingen = Object.keys(i).filter((k) => /^mailer_notifications_.*_enabled$/.test(k));
+  assert.deepEqual(meldingen.sort(), [
+    "mailer_notifications_email_changed_enabled",
+    "mailer_notifications_identity_linked_enabled",
+    "mailer_notifications_identity_unlinked_enabled",
+    "mailer_notifications_mfa_factor_enrolled_enabled",
+    "mailer_notifications_mfa_factor_unenrolled_enabled",
+    "mailer_notifications_password_changed_enabled",
+    "mailer_notifications_phone_changed_enabled",
+  ]);
+  for (const k of meldingen) assert.equal(i[k], false, k);
 });

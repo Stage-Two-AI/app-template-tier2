@@ -22,6 +22,7 @@ import {
   INLOGLINK,
   inlogmail,
   klantportaalInstellingen,
+  MELDINGSMAILS_UIT,
   REM,
   SESSIE,
   supabaseBeheer,
@@ -140,7 +141,11 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
     w.aanroepen.length = 0;
     r1 = await richtIn(ARG, opzet(w, PORTAAL));
     assert.equal(app(w, NAMEN.deur)?.id, deurId, `run ${keer + 1}: de deur staat er nog`);
-    assert.deepEqual(cfSchrijf(w), []);
+    // Alleen de eerste keer: het merk van een klantportaal op de Access op de Worker.
+    assert.deepEqual(
+      cfSchrijf(w),
+      keer === 0 ? [`PUT cf/access/apps/${app(w, NAMEN.worker).id} self_hosted`] : [],
+    );
   }
   assert.equal(auth(w).external_email_enabled, true);
   assert.equal(auth(w).security_captcha_enabled, true, "de captcha staat meteen aan");
@@ -151,11 +156,10 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
   );
   assert.equal(r1.cloudflare.deur, deurId);
   assert.ok(
-    r1.waarschuwingen.some((x) =>
-      /deur wi-direct staat er nog.*rol de app uit.*privéadres.*met het vinkje/.test(x),
-    ),
+    r1.waarschuwingen.some((x) => /deur wi-direct staat er nog.*Alles staat klaar/.test(x)),
     JSON.stringify(r1.waarschuwingen),
   );
+  assert.match(r1.watNu.join(" "), /Rol de app uit.*privéadres.*met het vinkje/);
 
   // Met het vinkje: alles stond al klaar; nu gaat de deur weg.
   w.aanroepen.length = 0;
@@ -174,7 +178,7 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
   assert.equal(app(w, NAMEN.inlog).type, "saas");
   eisWorkerDicht(w);
 
-  // De deur is de allerlaatste aanroep van de hele run, na Supabase, Sentry en GitHub.
+  // De deur is de laatste aanroep van de run, en de enige wijziging.
   const laatste = w.aanroepen.at(-1);
   assert.equal(laatste.methode, "DELETE");
   assert.match(laatste.pad, new RegExp(`/access/apps/${deurId}$`));
@@ -182,7 +186,8 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
 
   assert.match(stap(r, "3.5 Access-app op de hostname"), /weggehaald.*klantportaal.*open/);
   assert.equal(r.cloudflare.deur, null);
-  assert.ok(r.waarschuwingen.some((x) => /klantportaal.*RLS.*enige grens/.test(x)));
+  assert.ok(r.waarschuwingen.some((x) => /RLS.*enige grens/.test(x)));
+  assert.deepEqual(w.schrijfacties(), [`DELETE cf/access/apps/${deurId}`]);
 
   // Een volgende run, met of zonder vinkje, verandert niets op Cloudflare en maakt geen deur.
   for (const arg of [ARG, MET_VINKJE]) {
@@ -238,15 +243,21 @@ test("deur terug: van klantportaal terug naar een gewone app zet de inrichting d
   assert.deepEqual(deur.allowed_idps, ["idp-otp"]);
   assert.match(stap(r, "3.5 Access-app op de hostname"), /^aangemaakt/);
   assert.equal(r.cloudflare.deur, deur.id);
-  // Inloggen per mail gaat uit, in dezelfde aanroep waarin autoconfirm weer aan gaat, en
-  // vóór de deur terugkomt.
+  // De deur komt eerst terug; pas daarna gaat inloggen per mail uit, in dezelfde aanroep
+  // waarin autoconfirm weer aan gaat.
   assert.equal(auth(w).external_email_enabled, false);
   assert.equal(auth(w).mailer_autoconfirm, true);
   const acties = w.schrijfacties();
   assert.ok(
-    acties.findIndex((s) => /^PATCH sb\/.*config\/auth/.test(s)) <
-      acties.indexOf("POST cf/access/apps self_hosted"),
+    acties.indexOf("POST cf/access/apps self_hosted") <
+      acties.findIndex((s) => /^PATCH sb\/.*config\/auth/.test(s)),
   );
+  // Een gesloten portaal blijft in een veilige stand: adres wijzigen is niet te bevestigen
+  // (een mail zonder code, wat er ook stond), en loskoppelen en anoniem aanmelden staan uit.
+  assert.equal(auth(w).mailer_secure_email_change_enabled, true);
+  assert.equal(auth(w).security_manual_linking_enabled, false);
+  assert.equal(auth(w).external_anonymous_users_enabled, false);
+  assert.doesNotMatch(auth(w).mailer_templates_email_change_content, /\{\{/);
   assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "cloudflare");
   eisWorkerDicht(w);
   // En het resultaat zegt hardop dat het portaal dichtgaat en wat er met de klanten gebeurt.
@@ -291,7 +302,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   assert.match(stap(r, "3.5 Access-app op de hostname"), /blijft staan: de echte run stopt/);
   assert.ok(
     r.waarschuwingen.some((x) =>
-      /de echte run stopt hierop.*de deur gaat niet weg.*VITE_INLOGDIENST.*inloggen per mail staat in Supabase nog uit/.test(
+      /de echte run stopt hierop.*de deur gaat niet weg.*VITE_INLOGDIENST.*external_email_enabled/.test(
         x,
       ),
     ),
@@ -305,7 +316,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   assert.match(
     stap(r, "3.5 Access-app op de hostname"),
     new RegExp(
-      `gepland: wi-direct \\(${deurId}\\) weghalen, als allerlaatste stap.*open voor iedereen.*workers\\.dev en de previews blijven dicht`,
+      `gepland: wi-direct \\(${deurId}\\) weghalen; verder wijzigt deze run niets.*open voor iedereen.*workers\\.dev en de previews blijven dicht`,
     ),
   );
 
@@ -321,9 +332,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   assert.match(stap(r, "3.4 auth-config"), /e-mail-inlog uit$/);
   assert.ok(
     r.waarschuwingen.some((x) =>
-      /er staat nu geen deur.*KLANTPORTAAL VAN direct GAAT DICHT.*Klanten kunnen daarna niet meer inloggen/.test(
-        x,
-      ),
+      /KLANTPORTAAL VAN direct GAAT DICHT.*Klanten kunnen daarna niet meer inloggen/.test(x),
     ),
     "de droogloop zegt dat het portaal dichtgaat",
   );
@@ -466,6 +475,8 @@ const BEKENDE_VELDEN = [
   "mailer_autoconfirm",
   "mailer_allow_unverified_email_sign_ins",
   "security_manual_linking_enabled",
+  "external_anonymous_users_enabled",
+  ...Object.keys(MELDINGSMAILS_UIT),
   "smtp_host",
   "smtp_port",
   "smtp_user",
@@ -752,7 +763,7 @@ test("captcha: op een portaal dat live is verandert een run zonder vinkje niets 
   w.aanroepen.length = 0;
   await assert.rejects(
     () => richtIn(MET_VINKJE, opzet(w, nieuw, { captchaGeheim: nieuwGeheim })),
-    /VITE_TURNSTILE_SITEKEY stond in omgeving production nog niet op de sleutel/,
+    /het portaal is live.*VITE_TURNSTILE_SITEKEY in omgeving production is niet de sleutel uit toegang\.json.*Draai App inrichten eerst zonder vinkje/,
   );
   assert.deepEqual(w.schrijfacties(), []);
   for (let keer = 0; keer < 2; keer += 1) {
@@ -1210,7 +1221,7 @@ test("terug naar een gewone app bant geen enkele klant: vóór App inrichten sla
   assert.deepEqual(r.klanten, { direct: 4 });
   assert.match(
     r.fouten.join(" "),
-    /direct: volgens toegang\.json is direct een gewone app, maar inloggen per mail staat in productie nog aan.*de 4 klanten zijn met rust gelaten.*Draai App inrichten/,
+    /direct: wacht op App inrichten.*de 4 klantaccounts zijn met rust gelaten.*Draai App inrichten/,
   );
   assert.equal(eindstatus("toegang", r).status, "mislukt", "de run eindigt rood");
   // App inrichten sluit het portaal: deur terug, mail uit, klanten afgemeld en gemarkeerd.

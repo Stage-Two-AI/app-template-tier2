@@ -8,7 +8,7 @@
  *                                  "gegevens_naar_test": false } }
  *                  of { "<app>": { "groepen": ["<groep>", ...], "klantportaal": true,
  *                                  "afzender": "Naam <adres>",
- *                                  "turnstile_sitekey": "0x4AAA...", "eigen_hooks": true } },
+ *                                  "turnstile_sitekey": "0x4AAA..." } },
  *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
  *
@@ -64,7 +64,6 @@ const APP_VELDEN = [
   "afzender",
   "captcha",
   "turnstile_sitekey",
-  "eigen_hooks",
 ];
 /** De openbare sleutel van een Turnstile-widget (begint bij Cloudflare met 0x4). */
 const SITEKEY = /^[A-Za-z0-9_-]{10,100}$/;
@@ -81,17 +80,37 @@ export const SITEKEY_MAX = 30;
  */
 const AFZENDER_NAAM = /^[\p{L}\p{N}][\p{L}\p{N} .&'()-]{0,59}$/u;
 
+/**
+ * Het adres van de afzender: hetzelfde patroon als Supabase voor `smtp_admin_email` hanteert
+ * (UpdateAuthConfigBody in de Management API, 13-11-2026). Wat hier doorheen komt, weigert
+ * Supabase niet om zijn vorm.
+ */
+const AFZENDER_ADRES =
+  /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
+
+/**
+ * De openbare testsleutels van Turnstile (documentatie van Cloudflare, "Testing"): een cijfer
+ * 1, 2 of 3, een x en dan nullen. De testgeheimen keuren elk bewijs goed (of juist af) en de
+ * test-sitekeys tonen een widget die altijd slaagt. Iedereen kent ze; in productie is dat geen
+ * captcha. Geldt voor de geheime en voor de openbare sleutel.
+ */
+export function isTurnstileTestsleutel(waarde) {
+  return /^[123]x0{8,}/i.test(String(waarde ?? ""));
+}
+
 /** Leest "Naam <adres>" of "adres"; null als het niet klopt. */
 export function leesAfzender(waarde) {
   if (typeof waarde !== "string") return null;
   const m = waarde.trim().match(/^(?:([^<>]*)<([^<>\s]+)>|([^<>\s]+))$/);
   if (!m) return null;
   const adres = (m[2] ?? m[3]).toLowerCase();
-  if (!ADRES.test(adres)) return null;
+  if (!AFZENDER_ADRES.test(adres)) return null;
   const naam = m[2] === undefined ? null : m[1].trim();
   if (naam !== null && !AFZENDER_NAAM.test(naam)) return null;
   return { adres, naam };
 }
+/** Wat appNamen achter de naam van een app zet (zie cloudflare.mjs). */
+const NAAM_STAARTEN = ["worker", "inlog", "publiek", "test", "test-inlog"];
 /** Die naam is van de policy van de publieke paden (publiekPolicyNaam). */
 export const PUBLIEK_GROEP = "publiek";
 
@@ -136,15 +155,6 @@ export function captchaVanApp(t, app) {
 /** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
 export function sitekeyVanApp(t, app) {
   return captchaVanApp(t, app) ? (t.apps[app].turnstile_sitekey ?? null) : null;
-}
-
-/**
- * Heeft de bouwer uitdrukkelijk gezegd dat de app eigen hooks heeft die de weigeringen van het
- * klantportaal overnemen (`"eigen_hooks": true`)? Dan laat de inrichting een andere aanmeld- of
- * token-hook staan in plaats van te stoppen.
- */
-export function eigenHooksVanApp(t, app) {
-  return isKlantportaal(t, app) && t.apps[app].eigen_hooks === true;
 }
 
 /** Kopieert Testdatabase verversen gegevens en bestanden voor deze app? Standaard ja. */
@@ -268,8 +278,10 @@ export function valideerToegang(t) {
           `app "${app}": turnstile_sitekey heeft de lengte van de GEHEIME sleutel van Turnstile (meer dan ${SITEKEY_MAX} tekens). Hier hoort de openbare (Site Key). Staat de geheime nu in git, maak dan in Cloudflare een nieuwe (Turnstile, de widget, Rotate secret) en zet die alleen als secret TURNSTILE_GEHEIM`,
         );
       }
-      if (waarde.eigen_hooks !== undefined && typeof waarde.eigen_hooks !== "boolean") {
-        fouten.push(`app "${app}": eigen_hooks is true of false`);
+      if (isTurnstileTestsleutel(waarde.turnstile_sitekey)) {
+        fouten.push(
+          `app "${app}": turnstile_sitekey is een openbare testsleutel van Turnstile (een cijfer, een x en nullen). Die widget slaagt altijd en houdt niemand tegen. Maak een echte widget (Cloudflare, Turnstile, Add widget) en zet daarvan de Site Key`,
+        );
       }
       if (waarde.klantportaal === true) {
         // De captcha staat standaard aan; uitzetten kan alleen uitdrukkelijk.
@@ -294,7 +306,7 @@ export function valideerToegang(t) {
           );
         }
       } else {
-        for (const veld of ["afzender", "captcha", "turnstile_sitekey", "eigen_hooks"]) {
+        for (const veld of ["afzender", "captcha", "turnstile_sitekey"]) {
           if (waarde[veld] !== undefined) {
             fouten.push(
               `app "${app}": ${veld} hoort bij een klantportaal; zet "klantportaal": true erbij of haal ${veld} weg`,
@@ -310,6 +322,21 @@ export function valideerToegang(t) {
     }
     for (const g of gekozen) {
       if (!Object.hasOwn(groepen, g)) fouten.push(`app "${app}", groep "${g}": onbekende groep`);
+    }
+  }
+
+  // Een klantportaal en een app waarvan de naam botst met een naam die de inrichting voor de
+  // ander maakt: de deur van klantportaal "x-worker" heet net als de Access op de Worker van
+  // "x". Haalt het vinkje die deur weg, dan staan workers.dev en de previews van x open. Alleen
+  // als een van de twee een klantportaal is; twee gewone apps blijven zoals op versie 42.
+  for (const app of Object.keys(apps)) {
+    for (const staart of NAAM_STAARTEN) {
+      const ander = `${app}-${staart}`;
+      if (!Object.hasOwn(apps, ander)) continue;
+      if (!isKlantportaal(t, app) && !isKlantportaal(t, ander)) continue;
+      fouten.push(
+        `app "${ander}" en app "${app}": de naam "${ander}" gebruikt de inrichting zelf voor ${app} (een Access-app of het project van de testdatabase). Naast een klantportaal kan dat niet; geef "${ander}" een andere naam`,
+      );
     }
   }
 
@@ -1001,8 +1028,7 @@ export function groepenZonderAdressen(t, app) {
  * ander geldig. Met deze hook is een wachtwoord nooit genoeg voor een sessie.
  *
  * Een project heeft maar één zo'n hook. Heeft de app er zelf een (extra claims), dan stopt de
- * inrichting vóór de eerste wijziging: de bouwer neemt deze weigering over in de eigen hook en
- * zet `"eigen_hooks": true` in toegang.json, of haalt de eigen hook weg. Nooit stil vervangen.
+ * inrichting vóór de eerste wijziging. Nooit stil vervangen.
  */
 export function portaalTokenHookSql(functie) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))

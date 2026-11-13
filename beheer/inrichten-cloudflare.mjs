@@ -58,15 +58,17 @@
  *   klantportaal: SMTP_WACHTWOORD (de sleutel van Resend) en TURNSTILE_GEHEIM (de geheime
  *   sleutel van de Turnstile-widget; alleen niet nodig met `"captcha": false`).
  *
- * Eindigt Toegang bijwerken met `fouten` in het resultaat (bij een app is niet of maar deels
- * ingetrokken), dan is de status "mislukt" en de run rood, ook al is de rest gedaan.
+ * Eindigt Toegang bijwerken met `fouten` in het resultaat (alleen bij een klantportaal: er is
+ * niet of maar deels ingetrokken, of het portaal wacht op App inrichten), dan is de status
+ * "mislukt" en de run rood, ook al is de rest gedaan.
  *
  * Uitvoer: één regel `INRICHTING {json}`; geheimen staan er nooit in leesbaar in, en in
- * GitHub Actions worden ze ook met ::add-mask:: uit het logboek gehouden.
+ * GitHub Actions worden ze ook met ::add-mask:: uit het logboek gehouden. In GitHub Actions
+ * komt daarnaast een leesbare samenvatting bij de run (GITHUB_STEP_SUMMARY).
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { cloudflareConfig } from "../scripts/lib/cloudflare-config.mjs";
 import {
   adresStand,
@@ -74,10 +76,12 @@ import {
   appNamen,
   cloudflareClient,
   deurApp,
+  heeftPortaalMerk,
   inlogApp,
   issuerVoor,
   metGewenst,
   metPolicies,
+  PORTAAL_MERK,
   PROEF_VOORVOEGSEL,
   policyIdsVanApp,
   publiekApp,
@@ -97,11 +101,12 @@ import {
   CAPTCHA_LATER,
   CODE_LENGTE,
   callbackAdres,
+  GEHEIME_VELDEN,
+  GESLOTEN_PORTAAL,
   hookInstellingen,
   klantportaalInstellingen,
   REGIO,
   SESSIE,
-  SMTP_HOST,
   standaardAdmin,
   supabaseBeheer,
   supabaseUrl,
@@ -119,22 +124,19 @@ import {
   CLOUDFLARE_IDENTITEITEN_SQL,
   captchaVanApp,
   cloudflareIdentiteiten,
-  eigenHooksVanApp,
   GEEN_BAN,
   gewenstePolicies,
   groepenVanApp,
   groepenZonderAdressen,
   hookFunctie,
   isKlantportaal,
-  isOudKlant,
+  isTurnstileTestsleutel,
   KLANT_OP_MEDEWERKERADRES,
   KLANTEN_AFMELDEN_SQL,
   KLANTEN_MARKEREN_SQL,
   kaleNaamConflicten,
   klantenOpMedewerkeradres,
   koppelPolicies,
-  lijktKlant,
-  magAanmelden,
   PUBLIEK_GROEP,
   policyIdsVoorApp,
   policyNaam,
@@ -308,7 +310,8 @@ async function kiesIdps(d) {
  */
 async function verken(arg, d, { schrijven }) {
   const t = valideerToegang(d.toegang);
-  if (!t.apps[arg.app]) {
+  // Object.hasOwn: "constructor" of "toString" is geen app, ook al kent elk object ze.
+  if (!Object.hasOwn(t.apps, arg.app)) {
     throw new Error(
       `app "${arg.app}" staat niet in beheer/toegang.json; voeg hem toe met minstens één groep`,
     );
@@ -396,10 +399,22 @@ async function verken(arg, d, { schrijven }) {
   }
   const project = projecten.find((p) => p.name === namen.project) ?? null;
   const deur = apps.find((a) => a.name === namen.deur) ?? null;
+  const workerAccess = apps.find((a) => a.name === namen.worker) ?? null;
+  const testProject = projecten.find((p) => p.name === namen.test) ?? null;
   // Alleen een klantportaal leest hier meer (de auth-config, de variabelen en env.ts van de
   // app, en Turnstile); een gewone app krijgt geen enkele extra aanroep.
   const portaal = klantportaal
-    ? await verkenPortaal(arg, d, { t, tijdelijk, project, deur, schrijven })
+    ? await verkenPortaal(arg, d, {
+        t,
+        tijdelijk,
+        project,
+        deur,
+        schrijven,
+        hostname,
+        subdomein,
+        testProject,
+        workerAccess,
+      })
     : null;
   const gemis = portaal?.gemis ?? [];
   if (schrijven) fouten.push(...gemis);
@@ -422,9 +437,9 @@ async function verken(arg, d, { schrijven }) {
     project,
     deur,
     inlog: apps.find((a) => a.name === namen.inlog) ?? null,
-    testProject: projecten.find((p) => p.name === namen.test) ?? null,
+    testProject,
     testInlog: apps.find((a) => a.name === namen.testInlog) ?? null,
-    workerAccess: apps.find((a) => a.name === namen.worker) ?? null,
+    workerAccess,
     publiek: apps.find((a) => a.name === namen.publiek) ?? null,
   };
 }
@@ -449,7 +464,8 @@ export const APP_KENMERK = { bestand: "src/lib/env.ts", tekst: "leesInlogdienste
  * van omgeving production en `src/lib/env.ts` van de app-repo, en vraagt Turnstile of het
  * geheim klopt.
  */
-async function verkenPortaal(arg, d, { t, tijdelijk, project, deur, schrijven }) {
+async function verkenPortaal(arg, d, o) {
+  const { t, tijdelijk, project, deur, schrijven } = o;
   const kp = `klantportaal ${arg.app}`;
   const gemis = [];
   const functies = portaalHookFuncties(arg.voorvoegsel);
@@ -475,6 +491,12 @@ async function verkenPortaal(arg, d, { t, tijdelijk, project, deur, schrijven })
     // de app, of Supabase krijgt een geheim dat niet werkt.
     gemis.push(
       `${kp}: turnstile_sitekey in toegang.json en het secret TURNSTILE_GEHEIM zijn dezelfde waarde. Een widget heeft er twee: de openbare (Site Key) hoort in toegang.json, de geheime (Secret Key) alleen in het secret. Stond de geheime in toegang.json, dan staat hij nu in git: maak in Cloudflare een nieuwe (Turnstile, de widget, Rotate secret)`,
+    );
+  } else if (captcha && isTurnstileTestsleutel(d.captchaGeheim)) {
+    // Turnstile kent de testgeheimen wel (de toets hieronder zou slagen), maar ze keuren elk
+    // bewijs goed: dan staat de captcha aan en houdt hij niemand tegen.
+    gemis.push(
+      `${kp}: het secret TURNSTILE_GEHEIM is een openbaar testgeheim van Turnstile (een cijfer, een x en nullen). Daarmee keurt Turnstile elk bewijs goed en houdt de captcha niemand tegen. Zet de Secret Key van de echte widget (Cloudflare, Turnstile, de widget, Settings)`,
     );
   } else if (captcha) {
     if (!d.fetchFn) throw new Error("geen fetchFn om het geheim van Turnstile te toetsen");
@@ -502,65 +524,103 @@ async function verkenPortaal(arg, d, { t, tijdelijk, project, deur, schrijven })
     );
   }
 
-  // De auth-config zoals hij nu is: eigen hooks van de app, en of het portaal al live is.
+  // De auth-config zoals hij nu is. Een project heeft van elke soort maar één hook; heeft de
+  // app er zelf een, dan stopt de inrichting. Geen schakelaar om hem te laten staan: de
+  // weigeringen van het klantportaal zitten in de hooks van de inrichting.
   const auth = project ? await d.supabase.authConfig(project.ref) : null;
   const andere = andereHooks(auth, functies);
-  const eigenMag = eigenHooksVanApp(t, arg.app);
-  const eigenHooks = {};
   for (const [soort, naam] of [
     ["aanmelden", "aanmeld-hook (before user created)"],
     ["token", "token-hook (custom access token)"],
+    ["mail", "hook die de mail verstuurt (send email)"],
   ]) {
     if (!andere[soort]) continue;
-    if (eigenMag) eigenHooks[soort] = andere[soort];
-    else {
-      gemis.push(
-        `${kp}: het project heeft al een eigen ${naam}: ${andere[soort]}. Een project heeft er maar één, en de inrichting vervangt hem niet stil. De bouwer van de app kiest: de weigering van het klantportaal overnemen in de eigen hook en dat aangeven met "eigen_hooks": true bij de app in toegang.json, of de eigen hook weghalen. Wat de hook moet weigeren staat onder "Eigen hooks van de app" in beheer/README.md`,
-      );
-    }
-  }
-  if (andere.mail) {
     gemis.push(
-      `${kp}: het project verstuurt zijn mail via een eigen hook (send email): ${andere.mail}. Dan gaan de mails buiten de sjablonen van het klantportaal om, en die sjablonen zijn juist wat een link of code naar een zelfgekozen adres tegenhoudt. Zet die hook uit in Supabase (Authentication, Hooks) en draai App inrichten opnieuw`,
+      `${kp}: de app heeft een eigen ${naam}: ${andere[soort]}. Een klantportaal gebruikt de hooks van de inrichting; haal de eigen hook weg of overleg met Stage Two`,
     );
   }
 
   // Live: geen deur op het domein en inloggen per mail staat al aan. Dan kunnen klanten erbij.
   const live = !deur && auth?.external_email_enabled === true;
-  if (arg.deurWeghalen) {
-    const nog = [];
-    if (variabelen === null) nog.push("de variabelen van de app-repo zijn niet te lezen");
-    else {
-      if (variabelen.VITE_INLOGDIENST !== KLANTPORTAAL_INLOGDIENST)
-        nog.push(
-          `VITE_INLOGDIENST stond in omgeving production nog niet op ${KLANTPORTAAL_INLOGDIENST}`,
-        );
-      if (sitekey && variabelen.VITE_TURNSTILE_SITEKEY !== sitekey)
-        nog.push(
-          "VITE_TURNSTILE_SITEKEY stond in omgeving production nog niet op de sleutel uit toegang.json",
-        );
-    }
-    nog.push(...nietKlaar(auth, eigenHooks));
+  // De run met het vinkje wijzigt niets behalve de deur. Staat er nog iets anders te wijzigen,
+  // dan is wat achter de deur is getest niet wat live zou gaan: stoppen, vóór de eerste
+  // wijziging.
+  if (arg.deurWeghalen && deur) {
+    const nog = nogTeWijzigen(arg, d, { ...o, auth, variabelen, functies, captcha, sitekey });
     if (nog.length) {
       gemis.push(
-        `${kp}: de deur gaat niet weg, want dit stond vóór deze run nog niet klaar: ${nog.join("; ")}. Draai App inrichten eerst zonder het vinkje "Deur weghalen" (die zet alles klaar en laat de deur staan), rol daarna de app uit en test achter de deur, en zet dan pas het vinkje`,
+        `${kp}: de deur gaat niet weg, want er staat nog iets anders te wijzigen: ${nog.join("; ")}. Een run met het vinkje wijzigt alleen de deur. Draai eerst App inrichten zonder vinkje en test opnieuw (stap 3 en 4 in beheer/README.md); zet daarna pas het vinkje`,
+      );
+    }
+  } else if (arg.deurWeghalen && live) {
+    // Een portaal dat al live is: het vinkje zet daar het geheim van de captcha opnieuw (zie
+    // captchaStand). Dat mag pas als de app de bijbehorende openbare sleutel al heeft.
+    const nog = variabelenNog(variabelen, sitekey);
+    if (nog.length) {
+      gemis.push(
+        `${kp}: het portaal is live, en het vinkje zet dan het geheim van de captcha opnieuw. Dat gebeurt niet, want ${nog.join("; ")}. Draai App inrichten eerst zonder vinkje (die zet de openbare sleutel klaar), rol de app uit, en zet dan het vinkje`,
       );
     }
   }
-  return { gemis, auth, variabelen, appBegrijpt, eigenHooks, live, functies, captcha, sitekey };
+  return { gemis, auth, variabelen, appBegrijpt, live, functies, captcha, sitekey };
 }
 
-/** Wat er in de auth-config van productie nog ontbreekt om de deur weg te mogen halen. */
-function nietKlaar(auth, eigenHooks = {}) {
+/** De twee adressen die de Access op de Worker hoort te bewaken: workers.dev en de previews. */
+function workerAdressen(arg, subdomein) {
+  const basis = `${arg.worker}.${subdomein}.workers.dev`;
+  return { domain: basis, destinations: [{ uri: basis }, { uri: `*-${basis}` }] };
+}
+
+/** Wat er in omgeving production van de app-repo nog niet staat zoals een klantportaal het wil. */
+function variabelenNog(variabelen, sitekey) {
+  if (variabelen === null) return ["de variabelen van de app-repo zijn niet te lezen"];
   const nog = [];
-  if (auth?.external_email_enabled !== true)
-    nog.push("inloggen per mail staat in Supabase nog uit");
-  if (auth?.mailer_autoconfirm !== false) nog.push("adressen worden nog niet eerst bevestigd");
-  if (auth?.smtp_host !== SMTP_HOST) nog.push("de mail gaat nog niet via Resend (SMTP)");
-  if (!eigenHooks.aanmelden && auth?.hook_before_user_created_enabled !== true)
-    nog.push("de aanmeld-hook staat nog niet aan");
-  if (!eigenHooks.token && auth?.hook_custom_access_token_enabled !== true)
-    nog.push("de token-hook staat nog niet aan");
+  if (variabelen.VITE_INLOGDIENST !== KLANTPORTAAL_INLOGDIENST)
+    nog.push(
+      `VITE_INLOGDIENST staat in omgeving production nog niet op ${KLANTPORTAAL_INLOGDIENST}`,
+    );
+  if ((variabelen.VITE_TURNSTILE_SITEKEY ?? null) !== sitekey)
+    nog.push("VITE_TURNSTILE_SITEKEY in omgeving production is niet de sleutel uit toegang.json");
+  return nog;
+}
+
+/**
+ * Wat een gewone run (zonder vinkje) nu nog zou wijzigen aan dit klantportaal; leeg = niets,
+ * en alleen dan mag de deur weg. Geheimen worden niet vergeleken (de run met het vinkje
+ * schrijft ze ook niet), en de sessieduur niet: die weigert Supabase onder het Pro-plan, en dan
+ * zou de deur nooit weg kunnen.
+ */
+function nogTeWijzigen(arg, d, o) {
+  const nog = [];
+  nog.push(...variabelenNog(o.variabelen, o.sitekey));
+  if (!o.auth) nog.push("het Supabase-project bestaat nog niet");
+  else if (d.smtpWachtwoord && (!o.captcha || d.captchaGeheim)) {
+    const gewenst = portaalAuth(arg, d, { ...o, captcha: o.captcha });
+    const anders = Object.keys(verschil(o.auth, gewenst)).filter(
+      (veld) => !GEHEIME_VELDEN.includes(veld),
+    );
+    if (anders.length)
+      nog.push(
+        `de inloginstellingen in Supabase staan nog niet zoals de inrichting ze zet (${anders.join(", ")})`,
+      );
+  }
+  const naam = appNamen(arg.app, arg.voorvoegsel).worker;
+  if (!o.workerAccess)
+    nog.push(
+      `de Access op de Worker (${naam}) ontbreekt: workers.dev en de previews zijn niet bewaakt`,
+    );
+  else {
+    const gewenst = workerAdressen(arg, o.subdomein);
+    const stand = adresStand(o.workerAccess, gewenst);
+    if (stand.onbekend)
+      nog.push(
+        `de Access op de Worker (${naam}) heeft bestemmingen zonder adres, dus de inrichting kan niet zien of ${gewenst.domain} en de previews dicht zijn. Zet in Cloudflare (Zero Trust, Access, Applications, ${naam}) de adressen ${gewenst.destinations.map((x) => x.uri).join(" en ")} als gewone bestemming (public hostname) en haal de bestemming zonder adres weg`,
+      );
+    else if (stand.ontbreekt.length)
+      nog.push(`de Access op de Worker (${naam}) bewaakt ${stand.ontbreekt.join(" en ")} nog niet`);
+    if (!heeftPortaalMerk(o.workerAccess))
+      nog.push(`de Access op de Worker (${naam}) heeft het merk van een klantportaal nog niet`);
+  }
   return nog;
 }
 
@@ -578,15 +638,24 @@ function captchaStand(arg, v) {
 }
 
 /**
- * De terugkeeradressen van productie. Een gewone app: het domein en de previews, zoals altijd
- * (zonder testdatabase loggen de previews in bij productie). Een klantportaal met een
- * testdatabase: alleen het domein. De previews draaien code uit pull requests en horen bij de
- * testdatabase; staan ze op de lijst van productie, dan kan zo'n preview een medewerker bij
- * productie laten inloggen en het token ontvangen.
+ * De auth-instellingen van productie bij een klantportaal: de gewone (authInstellingen) met die
+ * van het klantportaal eroverheen. Met een testdatabase staat op de lijst van terugkeeradressen
+ * alleen het domein: de previews draaien code uit pull requests en horen bij de testdatabase;
+ * staan ze op de lijst van productie, dan kan zo'n preview een medewerker bij productie laten
+ * inloggen en het token ontvangen.
  */
-function productieBasis(arg, v, basis) {
-  if (!v.klantportaal || !(arg.testdatabase || v.testProject)) return basis;
-  return { ...basis, uri_allow_list: `https://${v.hostname}/**` };
+function portaalAuth(arg, d, { t, hostname, subdomein, testProject, functies, captcha }) {
+  return {
+    ...authInstellingen({ hostname, worker: arg.worker, subdomein }),
+    ...(arg.testdatabase || testProject ? { uri_allow_list: `https://${hostname}/**` } : {}),
+    ...klantportaalInstellingen({
+      afzender: afzenderVanApp(t, arg.app),
+      smtpWachtwoord: d.smtpWachtwoord,
+      captcha,
+      captchaGeheim: d.captchaGeheim,
+      hooks: functies,
+    }),
+  };
 }
 
 export const PREVIEWS_OP_PRODUCTIE =
@@ -598,17 +667,14 @@ export const PREVIEWS_OP_PRODUCTIE =
  */
 function productieAuth(arg, d, v, basis) {
   if (!v.klantportaal) return basis;
-  return {
-    ...productieBasis(arg, v, basis),
-    ...klantportaalInstellingen({
-      afzender: afzenderVanApp(v.t, arg.app),
-      smtpWachtwoord: d.smtpWachtwoord,
-      captcha: captchaStand(arg, v),
-      captchaGeheim: d.captchaGeheim,
-      hooks: v.portaal.functies,
-      eigenHooks: v.portaal.eigenHooks,
-    }),
-  };
+  return portaalAuth(arg, d, {
+    t: v.t,
+    hostname: v.hostname,
+    subdomein: v.subdomein,
+    testProject: v.testProject,
+    functies: v.portaal.functies,
+    captcha: captchaStand(arg, v),
+  });
 }
 
 /**
@@ -633,11 +699,6 @@ function portaalWaarschuwingen(arg, v) {
   if (zonder.length) {
     uit.push(
       `klantportaal ${arg.app}: groep ${zonder.join(", ")} werkt alleen op idp_groepen. De aanmeld-hook kent van die medewerkers geen adres en kan dus niet tegenhouden dat iemand zo'n adres per mail aanmeldt vóór de medewerker zelf via Cloudflare inlogt (die krijgt dan een account zonder adres). Zet het domein of de adressen van die medewerkers ook in een groep van deze app`,
-    );
-  }
-  for (const [soort, adres] of Object.entries(v.portaal.eigenHooks)) {
-    uit.push(
-      `klantportaal ${arg.app}: de eigen ${soort === "token" ? "token-hook" : "aanmeld-hook"} van de app blijft staan (${adres}; "eigen_hooks": true in toegang.json). De inrichting controleert niet wat die hook doet: de bouwer staat ervoor in dat hij weigert wat de hook van het klantportaal weigert (zie "Eigen hooks van de app" in beheer/README.md)`,
     );
   }
   if (!(arg.testdatabase || v.testProject))
@@ -975,6 +1036,11 @@ async function stapSentry(arg, d, { droog }) {
  * tijdelijke stand is hij de enige deur). Bestaat de Worker nog niet, dan komt er eerst
  * een placeholder, zodat die deur er staat vóór de eerste uitrol (die de placeholder
  * overschrijft).
+ *
+ * Een gewone app: precies als op versie 42 (alleen policies en inlogmethoden). Bij een
+ * klantportaal komt daar bij: het merk (PORTAAL_MERK), en een gewenst adres dat ontbreekt
+ * wordt toegevoegd. Nooit vervangen: een adres dat iemand er met de hand bij zette, blijft
+ * bewaakt. Heeft een gewone app het merk nog (het portaal is net gesloten), dan gaat het weg.
  */
 async function stapWorker(arg, d, v, policyIds) {
   const stap = "4 Access op de Worker";
@@ -983,15 +1049,17 @@ async function stapWorker(arg, d, v, policyIds) {
     await d.cf.maakPlaceholder(arg.worker);
     placeholder = true;
   }
-  const gewenst = workerApp({
-    naam: v.namen.worker,
-    worker: arg.worker,
-    subdomein: v.subdomein,
-    policyIds,
-    idps: v.idps,
-  });
   if (!v.workerAccess) {
-    const nieuw = await d.cf.maakApp(gewenst);
+    const nieuw = await d.cf.maakApp(
+      workerApp({
+        naam: v.namen.worker,
+        worker: arg.worker,
+        subdomein: v.subdomein,
+        policyIds,
+        idps: v.idps,
+        merk: v.klantportaal,
+      }),
+    );
     return {
       stap,
       actie: placeholder ? "placeholder neergezet, Access aangemaakt" : "aangemaakt",
@@ -1000,41 +1068,54 @@ async function stapWorker(arg, d, v, policyIds) {
   }
   const voor = placeholder ? "placeholder neergezet, Access " : "";
   const anders = afwijkingen(v.workerAccess, policyIds, v.idps);
-  // Wijst de Access naar een ander adres dan deze Worker (de Worker is hernoemd, of de app is
-  // met de hand verbogen), dan is de echte Worker onbewaakt: herstellen, nooit "ongewijzigd".
-  const stand = adresStand(v.workerAccess, gewenst);
-  const adresAnders = stand === "anders";
-  if (adresAnders) anders.push("adres");
-  // Bestemmingen zonder adres: niet te vergelijken, dus niet herstellen, wel hardop zeggen.
-  const onbekend = stand === "onbekend" ? { waarschuwing: workerAdresOnbekend(v, gewenst) } : {};
+  const extra = {};
+  let waarschuwing = null;
+  if (v.klantportaal) {
+    const gewenst = workerAdressen(arg, v.subdomein);
+    const stand = adresStand(v.workerAccess, gewenst);
+    if (stand.onbekend) waarschuwing = workerAdresOnbekend(v, gewenst);
+    else if (stand.ontbreekt.length) {
+      anders.push("adres");
+      extra.destinations = [
+        ...(v.workerAccess.destinations ?? []),
+        ...stand.ontbreekt.map((uri) => ({ type: "public", uri })),
+      ];
+      if (!v.workerAccess.domain) extra.domain = gewenst.domain;
+      waarschuwing = `de Access op de Worker bewaakte ${stand.ontbreekt.join(" en ")} niet; dat adres is erbij gezet. Wat hij al bewaakte, bewaakt hij nog`;
+    }
+    if (!heeftPortaalMerk(v.workerAccess)) {
+      anders.push("merk klantportaal");
+      extra.custom_deny_message = PORTAAL_MERK;
+    }
+  } else if (heeftPortaalMerk(v.workerAccess)) {
+    // Het portaal is in deze run gesloten (de deur staat er, inloggen per mail is uit, de
+    // klanten hebben het kenmerk): nu pas mag het merk weg.
+    anders.push("merk klantportaal weggehaald");
+    extra.custom_deny_message = "";
+  }
   if (!anders.length) {
     return {
       stap,
-      actie: `${voor}${stand === "onbekend" ? "niet gewijzigd; het adres is niet te controleren" : "ongewijzigd"}`,
+      actie: `${voor}ongewijzigd`,
       id: v.workerAccess.id,
-      ...onbekend,
+      ...(waarschuwing ? { waarschuwing } : {}),
     };
   }
   await d.cf.werkAppBij(v.workerAccess.id, {
     ...metGewenst(v.workerAccess, policyIds, v.idps),
-    ...(adresAnders ? { domain: gewenst.domain, destinations: gewenst.destinations } : {}),
+    ...extra,
   });
   return {
     stap,
     actie: `${voor}${anders.join(" en ")} bijgewerkt`,
     id: v.workerAccess.id,
-    ...onbekend,
-    ...(adresAnders
-      ? {
-          waarschuwing: `de Access op de Worker bewaakte ${v.workerAccess.domain || "een ander adres"} en niet ${gewenst.domain}; hij is omgezet naar ${gewenst.domain} en de previews daarvan. Bestaat er nog een Worker achter het oude adres, dan staat die nu zonder deur: verwijder hem in Cloudflare (Workers & Pages)`,
-        }
-      : {}),
+    ...(waarschuwing ? { waarschuwing } : {}),
   };
 }
 
 /** De melding als de Access op de Worker bestemmingen zonder adres heeft (zie adresStand). */
 function workerAdresOnbekend(v, gewenst) {
-  return `de Access op de Worker (${v.namen.worker}) heeft bestemmingen zonder adres (zo geeft Cloudflare de nieuwe Worker-bestemmingen terug). De inrichting kan dan niet zien of hij ${gewenst.domain} en de previews bewaakt, en heeft het adres daarom niet aangeraakt. Controleer het met de knop Controle van buitenaf: workers.dev en de preview horen daar dicht te zijn`;
+  return `de Access op de Worker (${v.namen.worker}) heeft bestemmingen zonder adres (zo geeft Cloudflare de nieuwe Worker-bestemmingen terug). De inrichting kan dan niet zien of hij ${gewenst.domain} en de previews bewaakt, en heeft het adres daarom niet aangeraakt. Een run met het vinkje Deur weghalen stopt hierop`;
 }
 
 // ---------------------------------------------------------------- de inrichting
@@ -1044,20 +1125,16 @@ const PLACEHOLDER_GEPLAND = "gepland: placeholder en Access op de Worker";
 
 /** Wat stap 4 in een droogloop zou doen. */
 function geplandWorker(arg, v, workerBestaat) {
-  if (workerBestaat) {
-    if (!v.workerAccess) return `gepland: ${v.namen.worker}`;
-    const basis = `${arg.worker}.${v.subdomein}.workers.dev`;
-    const stand = adresStand(v.workerAccess, {
-      domain: basis,
-      destinations: [{ uri: basis }, { uri: `*-${basis}` }],
-    });
-    if (stand === "onbekend")
-      return `bestaat al (${v.workerAccess.id}); het adres is niet te controleren (bestemmingen zonder adres) en blijft zoals het is`;
-    return stand === "zelfde"
-      ? `bestaat al (${v.workerAccess.id})`
-      : `gepland: ${v.namen.worker} (${v.workerAccess.id}) omzetten naar ${basis}; hij bewaakt nu ${v.workerAccess.domain || "een ander adres"}`;
-  }
-  return PLACEHOLDER_GEPLAND;
+  if (!workerBestaat) return PLACEHOLDER_GEPLAND;
+  if (!v.workerAccess) return `gepland: ${v.namen.worker}`;
+  const basis = `bestaat al (${v.workerAccess.id})`;
+  if (!v.klantportaal) return basis;
+  const stand = adresStand(v.workerAccess, workerAdressen(arg, v.subdomein));
+  if (stand.onbekend)
+    return `${basis}; het adres is niet te controleren (bestemmingen zonder adres) en blijft zoals het is`;
+  return stand.ontbreekt.length
+    ? `${basis}; gepland: ${stand.ontbreekt.join(" en ")} erbij zetten`
+    : basis;
 }
 
 /** Wat 3.4 bij een klantportaal zou zetten, zonder een geheim te noemen. */
@@ -1080,11 +1157,11 @@ export const VINKJE = 'het vinkje "Deur weghalen (klantportaal live zetten)"';
 function geplandeDeurWeg(arg, v) {
   if (!v.deur) return `geen deur. ${KLANTPORTAAL_OPEN} (${v.hostname})`;
   if (!arg.deurWeghalen) {
-    return `${v.namen.deur} (${v.deur.id}) blijft staan. Een run zonder ${VINKJE} verandert nooit iets aan de deur en is veilig te herhalen. Met het vinkje gaat de deur weg, als allerlaatste stap`;
+    return `${v.namen.deur} (${v.deur.id}) blijft staan. Een run zonder ${VINKJE} verandert nooit iets aan de deur en is veilig te herhalen. Een run met het vinkje haalt alleen de deur weg en wijzigt verder niets`;
   }
   return v.gemis.length
     ? `${v.namen.deur} (${v.deur.id}) blijft staan: de echte run stopt vóór de eerste wijziging (zie de waarschuwingen)`
-    : `gepland: ${v.namen.deur} (${v.deur.id}) weghalen, als allerlaatste stap. ${KLANTPORTAAL_OPEN} (${v.hostname})`;
+    : `gepland: ${v.namen.deur} (${v.deur.id}) weghalen; verder wijzigt deze run niets. ${KLANTPORTAAL_OPEN} (${v.hostname})`;
 }
 
 /** De regel voor een gewone app die klantportaal was: het portaal gaat dicht. */
@@ -1173,7 +1250,7 @@ async function stapInlogApp(d, { bestaand, naam, ref, policyIds, idps, maskeer }
  * 3.3 en 3.4 voor één Supabase-project: de custom provider met de issuer van zijn
  * SaaS-app, daarna de auth-config.
  */
-async function koppelInlog(d, v, { ref, serviceRole, saas, naam, gewenstAuth }) {
+async function koppelInlog(d, v, { ref, serviceRole, saas, naam, gewenstAuth, voorWijziging }) {
   // NAGAAN (U7): client_id staat in `saas_app.client_id` van het antwoord.
   const clientId = saas.inlog?.saas_app?.client_id;
   if (!clientId) throw new Error(`de SaaS-app ${naam} heeft geen client_id in saas_app`);
@@ -1188,7 +1265,10 @@ async function koppelInlog(d, v, { ref, serviceRole, saas, naam, gewenstAuth }) 
     clientSecret: saas.clientSecret,
   });
   const vorig = await d.supabase.authConfig(ref);
-  const anders = verschil(vorig, gewenstAuth);
+  // Alleen bij productie van een gewone app: was dit een klantportaal, dan komt hier eerst de
+  // deur terug en komen er instellingen bij (zie sluitPortaal). Anders verandert er niets.
+  const erbij = (await voorWijziging?.(vorig)) ?? {};
+  const anders = verschil(vorig, { ...gewenstAuth, ...erbij });
   if (Object.keys(anders).length) await d.supabase.werkAuthBij(ref, anders);
   const auth = Object.keys(anders).length
     ? `bijgewerkt: ${Object.keys(anders).join(", ")}`
@@ -1328,19 +1408,39 @@ export async function richtIn(arg, d) {
           ...(await klantenOpMedewerkeradresMeldingen(d, v.t, arg.app, v.project.ref)),
         );
       }
-    } else if (v.project && !v.tijdelijk && !v.deur) {
-      // Een gewone app met een eigen domein, een bestaand project en geen deur: zo ziet een
-      // klantportaal eruit dat net uit toegang.json is gehaald. De droogloop zegt wat de echte
-      // run dan doet, zonder er een leesvraag voor te stellen: een gewone app krijgt nooit een
-      // aanroep meer dan op versie 42, ook niet als iemand zijn deur heeft weggehaald.
-      resultaat.waarschuwingen.push(
-        `er staat nu geen deur op https://${v.hostname}; de echte run zet hem terug. Was ${arg.app} een klantportaal, dan geldt: ${portaalDicht(arg, v)}`,
-      );
+    } else if (heeftPortaalMerk(v.workerAccess)) {
+      // Een gewone app met het merk van een klantportaal: het portaal gaat in de echte run
+      // dicht. Het merk staat in de lijst Access-apps die de verkenning toch al leest; een app
+      // die nooit klantportaal was heeft het niet en krijgt hier geen woord meer dan op 42.
+      resultaat.waarschuwingen.push(portaalDicht(arg, v));
     }
     return resultaat;
   }
   const stap = (naam, actie) => resultaat.stappen.push({ stap: naam, actie });
   const { cf, supabase } = d;
+
+  // De run met het vinkje, bij een klantportaal waar de deur nog staat: alleen de deur gaat
+  // weg. De verkenning heeft nagelopen dat er verder niets te wijzigen is (nogTeWijzigen);
+  // wat de owner achter de deur heeft getest, is dus wat nu live gaat. Geen geheim wordt
+  // opnieuw geschreven.
+  if (v.klantportaal && arg.deurWeghalen && v.deur) {
+    await cf.verwijderApp(v.deur.id);
+    stap(
+      "3.5 Access-app op de hostname",
+      `weggehaald (${v.deur.id}). ${KLANTPORTAAL_OPEN}. Verder is er niets gewijzigd`,
+    );
+    resultaat.waarschuwingen.push(
+      `de deur ${v.namen.deur} is weg: https://${v.hostname} is nu open, en iedereen kan per mail een account maken. De regels in de database (RLS) zijn de enige grens`,
+    );
+    resultaat.watNu = [
+      `Start de workflow Controle van buitenaf voor ${arg.app} (stap 6 in beheer/README.md).`,
+      `Log daarna zelf een keer in per mail op https://${v.hostname}, in een privévenster.`,
+      `Werkt inloggen niet: zie "Als het misgaat: terug achter de deur" in beheer/README.md.`,
+    ];
+    resultaat.supabase = { ref: v.project.ref, url: supabaseUrl(v.project.ref) };
+    resultaat.cloudflare = { deur: null, worker: v.workerAccess.id };
+    return resultaat;
+  }
 
   // 3.1 Supabase-project
   let project = v.project;
@@ -1394,6 +1494,11 @@ export async function richtIn(arg, d) {
     if (v.klantportaal && geheim) maskeer(geheim);
   }
   const sitekey = v.klantportaal ? v.portaal.sitekey : null;
+  // Klantportaal: stap 4 komt hier al, vóór inloggen per mail aangaat. Dan staat het merk op
+  // de Access op de Worker voordat er één klantaccount kan bestaan, en ziet Toegang bijwerken
+  // altijd dat accounts zonder inlog via Cloudflare klanten zijn. Een gewone app houdt stap 4
+  // op de plek van versie 42 (na 3.5b).
+  let w = v.klantportaal ? await stapWorker(arg, d, v, policyIds) : null;
   // Klantportaal: eerst de twee hookfuncties in de database, dan pas zet 3.4 ze aan. Een hook
   // die naar een functie wijst die er niet is, laat elke inlog mislukken.
   if (v.klantportaal) {
@@ -1404,6 +1509,27 @@ export async function richtIn(arg, d) {
     );
   }
   const productie = productieAuth(arg, d, v, gewenstAuth);
+  let deur = v.deur;
+  // Een gewone app die klantportaal was (het merk op de Access op de Worker, of de sporen in de
+  // auth-config die deze run toch al leest): het portaal gaat dicht. De deur komt EERST terug,
+  // vóór de auth-config verandert. Mislukt er daarna iets, dan staat het domein nooit zonder
+  // deur. Een app die nooit klantportaal was komt hier niet: geen aanroep meer of eerder dan
+  // op versie 42.
+  let sluit = false;
+  let deurTerug = false;
+  async function sluitPortaal(vorig) {
+    sluit =
+      heeftPortaalMerk(v.workerAccess) ||
+      wasKlantportaal(vorig, portaalHookFuncties(arg.voorvoegsel));
+    if (!sluit) return {};
+    if (!v.tijdelijk && !deur) {
+      deur = await cf.maakApp(
+        deurApp({ naam: v.namen.deur, hostname: v.hostname, policyIds, idps: v.idps }),
+      );
+      deurTerug = true;
+    }
+    return GESLOTEN_PORTAAL;
+  }
   const koppeling = await koppelInlog(d, v, {
     ref: project.ref,
     serviceRole: sleutels.serviceRole,
@@ -1412,6 +1538,7 @@ export async function richtIn(arg, d) {
     // Bij een klantportaal komt hier inloggen per mail bij; de testdatabase hieronder
     // krijgt altijd de gewone instellingen (gewenstAuth).
     gewenstAuth: productie,
+    voorWijziging: v.klantportaal ? undefined : sluitPortaal,
   });
   resultaat.issuer = koppeling.issuer;
   stap("3.3 custom provider custom:cloudflare", koppeling.provider);
@@ -1420,7 +1547,7 @@ export async function richtIn(arg, d) {
   // De klanten krijgen het klantkenmerk en worden afgemeld; geband wordt er niemand. Dat
   // herhaalt elke run van zo'n app (één vraag meer), zodat een run die hier halverwege stopte
   // het de volgende keer alsnog doet. Een app die nooit klantportaal was, komt hier niet.
-  if (!v.klantportaal && wasKlantportaal(koppeling.vorig, portaalHookFuncties(arg.voorvoegsel))) {
+  if (sluit) {
     const rijen = await supabase.voerSqlUit(project.ref, KLANTEN_MARKEREN_SQL);
     await supabase.voerSqlUit(project.ref, KLANTEN_AFMELDEN_SQL);
     const aantal = Array.isArray(rijen) ? `${rijen.length} ` : "";
@@ -1428,8 +1555,14 @@ export async function richtIn(arg, d) {
       "3.4 klanten van het gesloten klantportaal",
       `${aantal}klantaccounts (zonder inlog via Cloudflare) gemarkeerd en afgemeld; niemand geband. Toegang bijwerken laat ze met rust`,
     );
-    if (koppeling.vorig?.external_email_enabled === true)
+    if (koppeling.vorig?.external_email_enabled === true || heeftPortaalMerk(v.workerAccess)) {
       resultaat.waarschuwingen.push(portaalDicht(arg, v));
+      resultaat.watNu = [
+        `Het klantportaal van ${arg.app} is dicht: de deur staat er, inloggen per mail is uit en geen klant is geband.`,
+        "Start Toegang bijwerken opnieuw (Actions, Toegang bijwerken, Run workflow); die is nu groen.",
+        `Was dit om iets te herstellen: begin daarna opnieuw bij stap 2 in beheer/README.md.`,
+      ];
+    }
   }
   if (v.klantportaal) {
     // De sessieduur apart: Supabase biedt hem alleen op Pro en hoger. Weigert hij, dan staat
@@ -1469,10 +1602,14 @@ export async function richtIn(arg, d) {
   if (test) resultaat.testdatabase = { project_ref: test.ref, anon_key: test.inGit };
 
   // 3.5 de deur; in de tijdelijke stand is er geen hostname en is stap 4 de deur
-  let deur = v.deur;
   if (v.tijdelijk) stap("3.5 Access-app op de hostname", GEEN_DEUR);
   else if (v.klantportaal) {
-    // Geen deur. Een deur die er nog staat gaat pas weg als allerlaatste stap (zie onderaan).
+    // Geen deur. Een deur die er nog staat haalt alleen de run met het vinkje weg (zie boven).
+  } else if (deurTerug) {
+    stap(
+      "3.5 Access-app op de hostname",
+      `aangemaakt (${deur.id}), vóór de auth-config: een klantportaal dat sluit krijgt eerst zijn deur terug`,
+    );
   } else if (!deur) {
     deur = await cf.maakApp(
       deurApp({ naam: v.namen.deur, hostname: v.hostname, policyIds, idps: v.idps }),
@@ -1502,7 +1639,7 @@ export async function richtIn(arg, d) {
   // 4 Access op de Worker, vóór 3.6: pas met de GitHub-variabelen kan er uitgerold
   // worden, en dan moet de deur er al staan. Zo nodig zet deze stap eerst een
   // placeholder neer, want workers.dev staat in beide standen aan.
-  const w = await stapWorker(arg, d, v, policyIds);
+  w ??= await stapWorker(arg, d, v, policyIds);
   stap(w.stap, w.actie);
   if (w.waarschuwing) resultaat.waarschuwingen.push(w.waarschuwing);
 
@@ -1598,27 +1735,28 @@ export async function richtIn(arg, d) {
   if (weg.length) stap("3.2 Access-policies", `overbodig verwijderd: ${weg.join(", ")}`);
 
   // 3.5 bij een klantportaal: de deur. Een mens haalt hem weg, niet de code: alleen een run met
-  // --deur-weghalen doet dat, als allerlaatste aanroep. Alles hierboven is dan gelukt (de
-  // inlogmail, de hooks en de captcha in 3.4, de Access op de Worker in 4, de variabelen in
-  // 3.6), en de verkenning heeft vooraf nagelopen dat het er vóór deze run al stond. Mislukt
-  // er iets, dan staat de deur er nog. Zonder het vinkje raakt geen enkele run de deur aan.
+  // --deur-weghalen doet dat, en die run doet niets anders (zie boven). Deze run raakt de deur
+  // niet aan.
   if (v.klantportaal) {
-    if (!deur) stap("3.5 Access-app op de hostname", `geen deur. ${KLANTPORTAAL_OPEN}`);
-    else if (!arg.deurWeghalen) {
+    if (!deur) {
+      stap("3.5 Access-app op de hostname", `geen deur. ${KLANTPORTAAL_OPEN}`);
+      resultaat.watNu = [
+        `Het klantportaal van ${arg.app} is live; deze run heeft de instellingen bijgewerkt.`,
+        "Start de workflow Controle van buitenaf als je wilt nalopen dat alleen het domein open is.",
+      ];
+    } else {
       stap(
         "3.5 Access-app op de hostname",
         `blijft staan (${deur.id}): alleen een run met ${VINKJE} haalt hem weg`,
       );
       resultaat.waarschuwingen.push(
-        `de deur ${v.namen.deur} staat er nog, en klanten kunnen er dus nog niet in. Alles staat klaar. Doe nu dit: 1. rol de app uit (merge iets naar main van de app-repo, of start daar de laatste run van de workflow Uitrollen opnieuw); 2. ga op https://${v.hostname} door de deur, log uit en log in per mail met een privéadres; 3. werkt dat, draai App inrichten voor ${arg.app} dan nog een keer met ${VINKJE}. Deze run zonder vinkje kun je zo vaak herhalen als je wilt`,
+        `de deur ${v.namen.deur} staat er nog, en klanten kunnen er dus nog niet in. Alles staat klaar. Deze run zonder vinkje kun je zo vaak herhalen als je wilt`,
       );
-    } else {
-      await cf.verwijderApp(deur.id);
-      stap("3.5 Access-app op de hostname", `weggehaald (${deur.id}). ${KLANTPORTAAL_OPEN}`);
-      deur = null;
-      resultaat.waarschuwingen.push(
-        `de deur ${v.namen.deur} is weg: https://${v.hostname} is nu open. Start de workflow Controle van buitenaf, en log zelf een keer in per mail. Werkt inloggen niet, dan zet je de deur terug door "klantportaal" in toegang.json weer weg te halen en App inrichten te draaien (zie "Als het misgaat" in beheer/README.md)`,
-      );
+      resultaat.watNu = [
+        "Rol de app uit: ga naar de app-repo, Actions, Uitrollen, de laatste run, Re-run all jobs (stap 4 in beheer/README.md).",
+        `Test achter de deur: open https://${v.hostname}, log uit in de app en log in per mail met een privéadres.`,
+        `Werkt dat, draai App inrichten voor ${arg.app} dan nog een keer met ${VINKJE} en droogloop uit (stap 5).`,
+      ];
     }
     resultaat.waarschuwingen.push(
       deur
@@ -1842,79 +1980,34 @@ async function schrijfTestHook(d, t, app, ref, voorvoegsel) {
 }
 
 /**
- * Zou Toegang bijwerken bij deze gewone app nu een account bannen dat eruitziet als een klant
- * (wel een inlog per mail, geen inlog via Cloudflare, geen klantkenmerk)? Alleen rekenen, uit
- * de gebruikerslijst die er toch al is.
- */
-function zouKlantBannen(gebruikers, t, app, nu = new Date()) {
-  return gebruikers.some(
-    (g) =>
-      g.email &&
-      !(g.banned_until && new Date(g.banned_until) > nu) &&
-      lijktKlant(g) &&
-      !isOudKlant(g) &&
-      magAanmelden(g.email, t, app) === "nee",
-  );
-}
-
-/** Een fout die alleen deze app raakt: Toegang bijwerken gaat door met de volgende app. */
-function foutBijApp(melding) {
-  const fout = new Error(melding);
-  fout.bijApp = true;
-  return fout;
-}
-
-/**
  * Ban en afmelden in één Supabase-project voor wie niet (meer) bij de app mag. In de
  * testdatabase (`test: true`) blijven de testaccounts en de testgebruiker buiten schot.
  *
- * De rem (`zonderDeur`): een app die volgens toegang.json een gewone app is, maar waar
- * inloggen per mail in productie nog AAN staat, is een klantportaal waarvan `klantportaal` net
- * uit het bestand is gehaald en waar App inrichten nog niet (of maar half) heeft gedraaid. Dan gaat het zoals
- * bij een klantportaal: accounts met een inlog via Cloudflare worden beoordeeld en ingetrokken
- * (een vertrokken medewerker ontsnapt nooit), klanten niet. Het resultaat krijgt `rem: true`
- * en de run eindigt rood.
- *
- * Om dat te zien is één leesvraag nodig (de auth-config). Die komt er alleen als de deur van
- * de app ontbreekt én er een account geband zou worden dat eruitziet als een klant. Een
- * gewone app met een deur krijgt hem nooit. Een gewone app zonder deur (hernoemd, weggehaald,
- * of de tijdelijke stand) waar alleen accounts van Cloudflare in te trekken zijn ook niet: die
- * gedraagt zich exact als versie 42.
+ * `alsPortaal`: de app is volgens toegang.json een klantportaal, of hij is het volgens het merk
+ * op zijn Access op de Worker nog (`klantportaal` is uit het bestand gehaald en App inrichten
+ * heeft het portaal nog niet gesloten). Dan worden alleen accounts met een inlog via Cloudflare
+ * beoordeeld en ingetrokken (een vertrokken medewerker ontsnapt nooit); accounts zonder zijn
+ * klanten en blijven ongemoeid. Een gewone app zonder merk krijgt precies de aanroepen van
+ * versie 42: geen leesvraag erbij, wat er ook met zijn deur of zijn instellingen is gebeurd.
  */
-async function trekInOp(d, t, app, ref, { test = false, zonderDeur = false, voorvoegsel } = {}) {
+async function trekInOp(d, t, app, ref, { test = false, alsPortaal = false } = {}) {
   const sleutels = await d.supabase.sleutels(ref);
   d.maskeer?.(sleutels.serviceRole);
   const admin = (d.maakAdmin ?? standaardAdmin)(supabaseUrl(ref), sleutels.serviceRole);
   // Alleen de productiedatabase van een klantportaal heeft klanten; de testdatabase kent
   // per mail alleen testaccounts en blijft zoals hij was.
-  const klantportaal = !test && isKlantportaal(t, app);
+  const klantportaal = !test && alsPortaal;
   const gebruikers = await alleGebruikers(admin);
-  let rem = false;
-  if (zonderDeur && zouKlantBannen(gebruikers, t, app)) {
-    try {
-      const auth = await d.supabase.authConfig(ref);
-      // Mail nog aan, of het sluiten bleef halverwege steken (mail al uit, de klanten nog
-      // zonder kenmerk): in beide gevallen zijn dit klanten van een klantportaal.
-      rem =
-        auth?.external_email_enabled === true ||
-        wasKlantportaal(auth, portaalHookFuncties(voorvoegsel));
-    } catch (fout) {
-      throw foutBijApp(
-        `er staat geen deur en er zijn accounts die klanten kunnen zijn, maar de auth-instellingen waren niet te lezen (${fout.message})`,
-      );
-    }
-  }
-  const alsPortaal = klantportaal || rem;
   // NAGAAN (U7): dat POST /database/query de rijen als lijst objecten teruggeeft. Is dat
   // anders, dan stopt cloudflareIdentiteiten en wordt er bij deze app niets ingetrokken.
-  const cloudflare = alsPortaal
+  const cloudflare = klantportaal
     ? cloudflareIdentiteiten(await d.supabase.voerSqlUit(ref, CLOUDFLARE_IDENTITEITEN_SQL))
     : null;
   const r = await trekIn({
     gebruikers,
     toegang: t,
     app,
-    ...(alsPortaal ? { klantportaal: true, cloudflare } : {}),
+    ...(klantportaal ? { klantportaal: true, cloudflare } : {}),
     testaccounts: test ? testaccountsVan(t, app) : [],
     ban: async (id) => {
       const { error } = await admin.updateUserById(id, { ban_duration: BAN_DUUR });
@@ -1926,8 +2019,7 @@ async function trekInOp(d, t, app, ref, { test = false, zonderDeur = false, voor
       if (error) throw new Error(`Supabase updateUserById: ${error.message ?? error}`);
     },
   });
-  if (rem) r.rem = true;
-  if (klantportaal)
+  if (klantportaal && isKlantportaal(t, app))
     r.klantOpMedewerkeradres = klantenOpMedewerkeradres(gebruikers, cloudflare, t, app);
   return r;
 }
@@ -1982,15 +2074,23 @@ function klantportaalRegels(t, vv, apps) {
 }
 
 /**
- * Het resultaat van Toegang bijwerken eindigt rood als er `fouten` in staan: bij een app is
- * niet (of maar deels) ingetrokken. De rest van het resultaat blijft erbij, zodat te zien is
- * wat wel is gedaan.
+ * Het resultaat van Toegang bijwerken eindigt rood als er `fouten` in staan: bij een
+ * klantportaal (of een app die het volgens het merk nog is) is niet of maar deels ingetrokken,
+ * of het portaal wacht op App inrichten. Een gewone app zet nooit iets in `fouten`: die is
+ * groen of stopt met een fout, precies als op versie 42. De rest van het resultaat blijft
+ * erbij, zodat te zien is wat wel is gedaan.
  */
 export function eindstatus(modus, resultaat) {
   const fouten = resultaat?.fouten ?? [];
   return fouten.length
     ? { status: "mislukt", modus, reden: fouten.join("; "), ...resultaat }
     : { status: "gelukt", modus, ...resultaat };
+}
+
+/** De ene melding waarmee Toegang bijwerken rood eindigt zolang een portaal half gesloten is. */
+export function wachtOpInrichten(app, klanten) {
+  const aantal = klanten === null ? "de" : `de ${klanten}`;
+  return `${app}: wacht op App inrichten. In toegang.json staat ${app} als gewone app, maar ${app} is nog ingericht als klantportaal. Medewerkers zijn gewoon beoordeeld en zo nodig ingetrokken; ${aantal} klantaccounts zijn met rust gelaten en geen klant is geband. Draai App inrichten voor ${app} (droogloop uit, zonder vinkje): dat zet de deur terug als die weg was, zet inloggen per mail uit en meldt de klanten af. Is dit een vergissing, zet dan "klantportaal": true terug in toegang.json. Deze melding blijft tot een van de twee is gedaan`;
 }
 
 /**
@@ -2007,7 +2107,12 @@ export async function werkToegangBij(arg, d) {
   const policies = await cf.policies();
   const apps = await cf.apps();
   const projecten = await supabase.projecten();
-  const doelApps = (arg.app ? [arg.app] : Object.keys(t.apps)).filter((app) => t.apps[app]);
+  const doelApps = (arg.app ? [arg.app] : Object.keys(t.apps)).filter((app) =>
+    Object.hasOwn(t.apps, app),
+  );
+  // Het merk van een klantportaal, uit de lijst Access-apps die hierboven toch al is gelezen.
+  const merkVan = (app) => heeftPortaalMerk(apps.find((a) => a.name === appNamen(app, vv).worker));
+  const alsPortaal = (app) => isKlantportaal(t, app) || merkVan(app);
   const projectVan = (app) => projecten.find((p) => p.name === appNamen(app, vv).project);
   const testProjectVan = (app) => projecten.find((p) => p.name === appNamen(app, vv).test);
   if (arg.droogloop) {
@@ -2055,77 +2160,106 @@ export async function werkToegangBij(arg, d) {
   const onbekend = {};
   const klanten = {};
   const waarschuwingen = [];
-  // Redenen om rood te eindigen: bij een app is niet of maar deels ingetrokken.
+  // Redenen om rood te eindigen; alleen een klantportaal (of een app met het merk) zet hier iets.
   const fouten = [];
+  // De volgende stap voor de owner, in de samenvatting van de run; alleen bij een klantportaal.
+  const watNu = Object.keys(t.apps)
+    .filter((app) => isKlantportaal(t, app))
+    .filter((app) => apps.some((a) => a.name === appNamen(app, vv).deur))
+    .map(
+      (app) =>
+        `Klantportaal ${app}: de deur staat er nog. Draai App inrichten voor ${app} zonder vinkje (stap 3 in beheer/README.md); is dat al gedaan en getest, dan met ${VINKJE} (stap 5).`,
+    );
   const hooks = [];
-  for (const app of doelApps) {
+  // Klantportalen eerst. Een fout bij een gewone app stopt de run (zoals op versie 42); staat
+  // er een klantportaal achter in het bestand, dan is daar dan al ingetrokken. Tussen gewone
+  // apps onderling blijft de volgorde die van het bestand.
+  const volgorde = [...doelApps.filter(alsPortaal), ...doelApps.filter((a) => !alsPortaal(a))];
+  for (const app of volgorde) {
     const project = projectVan(app);
     if (!project) continue;
-    try {
-      await werkEenAppBij(app, project);
-    } catch (fout) {
-      // Een fout bij een klantportaal (of bij een app die erop lijkt) houdt het intrekken bij
-      // de apps erna niet tegen: vastleggen, doorgaan, rood eindigen. Een fout bij een gewone
-      // app stopt de run, zoals altijd.
-      if (!isKlantportaal(t, app) && !fout.bijApp) throw fout;
-      fouten.push(
-        `${app}: het intrekken is niet (helemaal) gelukt: ${fout.message}. Bij de andere apps is gewoon ingetrokken. Los dit op en start Toegang bijwerken opnieuw`,
-      );
+    if (alsPortaal(app)) await werkPortaalBij(app, project);
+    else await werkGewoneAppBij(app, project);
+  }
+  /**
+   * De testdatabase: eerst de aanmeld-hook (die het nieuwe bestand moet volgen), dan pas
+   * inloggen met e-mail aan. Zo staat e-mail nooit aan zonder hook.
+   */
+  async function werkTestHookBij(app, testProject) {
+    const functie = await schrijfTestHook(d, t, app, testProject.ref, vv);
+    hooks.push(`aanmeld-hook public.${functie} van ${app} (test) bijgewerkt`);
+    const anders = verschil(await supabase.authConfig(testProject.ref), hookInstellingen(functie));
+    if (Object.keys(anders).length) {
+      await supabase.werkAuthBij(testProject.ref, anders);
+      hooks.push(`inloggen met e-mail in ${app} (test) aangezet, alleen voor testaccounts`);
     }
   }
-  async function werkEenAppBij(app, project) {
-    // De testdatabase: eerst de aanmeld-hook (die het nieuwe bestand moet volgen), dan
-    // pas inloggen met e-mail aan. Zo staat e-mail nooit aan zonder hook.
-    const testProject = testProjectVan(app);
-    // Een klantportaal: de aanmeld-hook van productie volgt de groepen (wie medewerker is).
-    // Alleen de functie; aanzetten doet App inrichten.
-    if (isKlantportaal(t, app)) {
-      const f = await schrijfPortaalHooks(d, t, app, project.ref, vv, { alleenAanmelden: true });
-      hooks.push(`aanmeld-hook public.${f.aanmelden} van klantportaal ${app} bijgewerkt`);
-    }
-    if (testProject) {
-      const functie = await schrijfTestHook(d, t, app, testProject.ref, vv);
-      hooks.push(`aanmeld-hook public.${functie} van ${app} (test) bijgewerkt`);
-      const anders = verschil(
-        await supabase.authConfig(testProject.ref),
-        hookInstellingen(functie),
+  async function trekInBij(app, sleutel, p, test) {
+    const r = await trekInOp(d, t, app, p.ref, { test, alsPortaal: alsPortaal(app) });
+    if (r.ingetrokken.length) ingetrokken[sleutel] = r.ingetrokken;
+    if (r.toegelaten.length) toegelaten[sleutel] = r.toegelaten;
+    if (r.onbekend.length) onbekend[sleutel] = r.onbekend;
+    if (r.klanten !== undefined) klanten[sleutel] = r.klanten;
+    waarschuwingen.push(...meldKlantenOpMedewerkeradres(sleutel, r.klantOpMedewerkeradres ?? []));
+    for (const naam of r.zonderAdres ?? []) {
+      waarschuwingen.push(
+        `${sleutel}: ${naam} heeft via Cloudflare een account zonder adres gekregen, omdat er al een klantaccount op dat adres bestond. Zo kan hij niet als medewerker inloggen; zie "Een klantaccount op het adres van een medewerker" in beheer/KLANTPORTAAL.md`,
       );
-      if (Object.keys(anders).length) {
-        await supabase.werkAuthBij(testProject.ref, anders);
-        hooks.push(`inloggen met e-mail in ${app} (test) aangezet, alleen voor testaccounts`);
-      }
     }
+    for (const naam of r.ookPerMail ?? []) {
+      waarschuwingen.push(
+        `${sleutel}: ${naam} is ingetrokken als medewerker en kon met hetzelfde account ook per mail inloggen. Het hele account is dicht, ook de klantkant; dat is bewust. Moet deze persoon klant blijven, zie "Toegang bijwerken bij een klantportaal" in beheer/KLANTPORTAAL.md`,
+      );
+    }
+    return r;
+  }
+  /** Een gewone app: de aanroepen en de volgorde van versie 42. Een fout stopt de run. */
+  async function werkGewoneAppBij(app, project) {
+    const testProject = testProjectVan(app);
+    if (testProject) await werkTestHookBij(app, testProject);
+    await trekInBij(app, app, project, false);
     // Ook in de testdatabase: wie eruit is, komt ook in de previews niet meer binnen.
     // De testaccounts daar blijven staan.
-    const doelen = [
-      [app, project, false],
-      [`${app} (test)`, testProject, true],
-    ];
-    for (const [sleutel, p, test] of doelen) {
-      if (!p) continue;
-      const zonderDeur =
-        !test && !isKlantportaal(t, app) && !apps.some((a) => a.name === appNamen(app, vv).deur);
-      const r = await trekInOp(d, t, app, p.ref, { test, zonderDeur, voorvoegsel: vv });
-      if (r.rem) {
+    if (testProject) await trekInBij(app, `${app} (test)`, testProject, true);
+  }
+  /**
+   * Een klantportaal (of een app die het volgens het merk nog is). Eerst intrekken in
+   * productie; pas daarna de testdatabase en de aanmeld-hook. Elk deel vangt zijn eigen fout:
+   * een hook die niet te schrijven is houdt het intrekken van een vertrokken medewerker nooit
+   * tegen, en een fout hier houdt de andere apps niet tegen. De run eindigt dan rood.
+   */
+  async function werkPortaalBij(app, project) {
+    const testProject = testProjectVan(app);
+    const deel = async (wat, werk) => {
+      try {
+        await werk();
+      } catch (fout) {
         fouten.push(
-          `${app}: volgens toegang.json is ${app} een gewone app, maar inloggen per mail staat in productie nog aan (of het sluiten is halverwege blijven steken) en er staat geen deur: dit is een klantportaal waar App inrichten nog niet klaar is. Medewerkers (accounts met een inlog via Cloudflare) zijn gewoon beoordeeld en zo nodig ingetrokken; de ${r.klanten ?? 0} klanten zijn met rust gelaten. Draai App inrichten voor ${app}: dat zet de deur terug, zet inloggen per mail uit en meldt de klanten af (zonder ban). Is dit een vergissing, zet dan "klantportaal": true terug in toegang.json. Deze run blijft rood tot een van de twee is gedaan`,
+          `${app}: ${wat} is niet (helemaal) gelukt: ${fout.message}. De rest van deze run is gewoon gedaan. Los dit op en start Toegang bijwerken opnieuw`,
         );
       }
-      if (r.ingetrokken.length) ingetrokken[sleutel] = r.ingetrokken;
-      if (r.toegelaten.length) toegelaten[sleutel] = r.toegelaten;
-      if (r.onbekend.length) onbekend[sleutel] = r.onbekend;
-      if (r.klanten !== undefined) klanten[sleutel] = r.klanten;
-      waarschuwingen.push(...meldKlantenOpMedewerkeradres(sleutel, r.klantOpMedewerkeradres ?? []));
-      for (const naam of r.zonderAdres ?? []) {
-        waarschuwingen.push(
-          `${sleutel}: ${naam} heeft via Cloudflare een account zonder adres gekregen, omdat er al een klantaccount op dat adres bestond. Zo kan hij niet als medewerker inloggen; zie "Een medewerker die eerst als klant inlogde" in beheer/README.md`,
-        );
-      }
-      for (const naam of r.ookPerMail ?? []) {
-        waarschuwingen.push(
-          `${sleutel}: ${naam} is ingetrokken als medewerker en kon met hetzelfde account ook per mail inloggen. Het hele account is dicht, ook de klantkant; dat is bewust. Moet deze persoon klant blijven, zie "Toegang bijwerken bij een klantportaal" in beheer/README.md`,
-        );
-      }
+    };
+    let klantenHier = null;
+    await deel("het intrekken", async () => {
+      klantenHier = (await trekInBij(app, app, project, false)).klanten ?? 0;
+    });
+    if (!isKlantportaal(t, app)) {
+      fouten.push(wachtOpInrichten(app, klantenHier));
+      watNu.push(`Draai App inrichten voor ${app}: droogloop uit, zonder vinkje.`);
+    }
+    if (testProject) {
+      await deel("het bijwerken van de testdatabase", async () => {
+        await werkTestHookBij(app, testProject);
+        await trekInBij(app, `${app} (test)`, testProject, true);
+      });
+    }
+    // De aanmeld-hook van productie volgt de groepen (wie medewerker is). Alleen de functie;
+    // aanzetten doet App inrichten.
+    if (isKlantportaal(t, app)) {
+      await deel("het bijwerken van de aanmeld-hook", async () => {
+        const f = await schrijfPortaalHooks(d, t, app, project.ref, vv, { alleenAanmelden: true });
+        hooks.push(`aanmeld-hook public.${f.aanmelden} van klantportaal ${app} bijgewerkt`);
+      });
     }
   }
   // Pas na het intrekken: een policy die nog aan een app hangt, weigert Cloudflare te
@@ -2154,6 +2288,7 @@ export async function werkToegangBij(arg, d) {
     waarschuwingen,
     // Alleen als er iets misging: dan eindigt de run rood (zie eindstatus).
     ...(fouten.length ? { fouten } : {}),
+    ...(watNu.length ? { watNu } : {}),
   };
 }
 
@@ -2167,6 +2302,74 @@ export function uitvoerRegel(object, geheimen = []) {
     tekst = tekst.replaceAll(g, "***").replaceAll(JSON.stringify(g).slice(1, -1), "***");
   }
   return `INRICHTING ${tekst}\n`;
+}
+
+const TITELS = {
+  inrichten: "App inrichten",
+  toegang: "Toegang bijwerken",
+  opruimen: "Opruimen",
+  tweedeDoorgang: "Tweede doorgang",
+};
+
+/**
+ * De samenvatting van de run voor de owner, in gewone taal (Markdown): wat er is gedaan, de
+ * waarschuwingen en, bij een klantportaal, wat de volgende stap is. Alles komt uit het
+ * resultaat dat ook in de regel INRICHTING staat. Adressen staan er niet in: van het
+ * intrekken alleen aantallen.
+ */
+export function samenvatting(modus, eind) {
+  const r = [];
+  const lijst = (kop, regels, teken = "-") => {
+    if (!regels?.length) return;
+    r.push("", `**${kop}**`, "");
+    regels.forEach((x, i) => {
+      r.push(`${teken === "1" ? `${i + 1}.` : "-"} ${String(x).replaceAll("\n", " ")}`);
+    });
+  };
+  const waar = eind.app ? `: ${eind.app}` : "";
+  r.push(
+    `## ${TITELS[modus] ?? modus}${waar}${eind.droogloop ? " (droogloop, er is niets gewijzigd)" : ""}`,
+  );
+  r.push("", eind.status === "gelukt" ? "Gelukt." : `**Mislukt.** ${eind.reden ?? ""}`);
+  lijst(eind.droogloop ? "Wat een echte run zou doen" : "Wat er is gedaan", [
+    ...(eind.stappen ?? []).map((x) => `${x.stap}: ${x.actie}`),
+    ...(eind.acties ?? []),
+    ...(eind.verwijderd ?? []).map((x) => `${x.soort} ${x.naam} verwijderd`),
+    ...(eind.melding ? [eind.melding] : []),
+  ]);
+  const tel = (kop, per) =>
+    Object.entries(per ?? {}).map(
+      ([app, x]) => `${app}: ${Array.isArray(x) ? x.length : x} ${kop}`,
+    );
+  lijst("Toegang", [
+    ...tel("ingetrokken (geband en afgemeld)", eind.ingetrokken),
+    ...tel("weer toegelaten", eind.toegelaten),
+    ...tel("niet te beoordelen (groep van de identiteitsdienst)", eind.onbekend),
+    ...tel("klantaccounts overgeslagen", eind.klanten),
+  ]);
+  lijst("Waarschuwingen", eind.waarschuwingen);
+  lijst("Wat nu", eind.watNu, "1");
+  return `${r.join("\n")}\n`;
+}
+
+/**
+ * Schrijft de samenvatting naar het bestand dat GitHub Actions toont bij de run
+ * (GITHUB_STEP_SUMMARY), met elk bekend geheim vervangen. Buiten GitHub Actions gebeurt er
+ * niets. Het is een bestand erbij, geen aanroep: lukt het schrijven niet, dan verandert dat
+ * niets aan de run.
+ */
+export function schrijfSamenvatting(tekst, geheimen = [], env = process.env) {
+  if (!env.GITHUB_STEP_SUMMARY) return false;
+  let uit = tekst;
+  for (const g of geheimen) {
+    if (typeof g === "string" && g.length >= 4) uit = uit.replaceAll(g, "***");
+  }
+  try {
+    appendFileSync(env.GITHUB_STEP_SUMMARY, uit);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function eis(naam) {
@@ -2259,9 +2462,12 @@ if (
     const resultaat = await uitvoeren(arg, d);
     const eind = eindstatus(modus, resultaat);
     process.stdout.write(uitvoerRegel(eind, geheimen));
+    schrijfSamenvatting(samenvatting(modus, eind), geheimen);
     if (eind.status !== "gelukt") process.exitCode = 1;
   } catch (fout) {
-    process.stdout.write(uitvoerRegel({ status: "mislukt", modus, reden: fout.message }, geheimen));
+    const eind = { status: "mislukt", modus, reden: fout.message };
+    process.stdout.write(uitvoerRegel(eind, geheimen));
+    schrijfSamenvatting(samenvatting(modus, eind), geheimen);
     process.exitCode = 1;
   }
 }

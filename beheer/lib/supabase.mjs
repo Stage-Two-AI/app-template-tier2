@@ -314,27 +314,55 @@ export function andereHooks(auth, functies) {
  * portaalTokenHookSql in toegang.mjs). Schrijf de functies altijd eerst: een hook die naar een
  * functie wijst die niet bestaat, laat elke inlog mislukken.
  */
-export function portaalHookInstellingen(functies, eigen = {}) {
+export function portaalHookInstellingen(functies) {
   for (const f of [functies?.aanmelden, functies?.token]) {
     if (!/^[a-z_][a-z0-9_]{0,62}$/.test(f ?? "")) throw new Error("de hookfuncties ontbreken");
   }
-  // `eigen`: de app heeft daar een eigen hook die de weigering overneemt ("eigen_hooks": true
-  // in toegang.json); die blijft dan staan.
   return {
-    ...(eigen.aanmelden
-      ? {}
-      : {
-          hook_before_user_created_enabled: true,
-          hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
-        }),
-    ...(eigen.token
-      ? {}
-      : {
-          hook_custom_access_token_enabled: true,
-          hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
-        }),
+    hook_before_user_created_enabled: true,
+    hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
+    hook_custom_access_token_enabled: true,
+    hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
   };
 }
+
+/**
+ * De zeven meldingsmails die Supabase Auth sinds 2026 kan sturen (wachtwoord gewijzigd, adres
+ * gewijzigd, enzovoort). Ze staan standaard uit; een klantportaal zet ze uitdrukkelijk uit,
+ * zodat een instelling met de hand er geen mail met een standaardtekst bij maakt. De veldnamen
+ * staan in UpdateAuthConfigBody van de Management API (13-11-2026).
+ */
+export const MELDINGSMAILS_UIT = Object.fromEntries(
+  [
+    "password_changed",
+    "email_changed",
+    "phone_changed",
+    "mfa_factor_enrolled",
+    "mfa_factor_unenrolled",
+    "identity_linked",
+    "identity_unlinked",
+  ].map((soort) => [`mailer_notifications_${soort}_enabled`, false]),
+);
+
+/**
+ * Wat App inrichten bij het sluiten van een klantportaal (terug naar een gewone app) extra zet,
+ * bovenop authInstellingen. Een gewone app heeft `mailer_autoconfirm` aan (Cloudflare meldt
+ * niet dat een adres gecontroleerd is); met autoconfirm aan vraagt Supabase Auth bij een
+ * adreswijziging maar één bevestiging. Daarom krijgt de mail voor adres wijzigen hier een vaste
+ * tekst zonder code en zonder link, wat er ook stond: een adreswijziging blijft onmogelijk te
+ * bevestigen. Zelf een inlog loskoppelen en anoniem aanmelden blijven uit. Alleen een app die
+ * klantportaal was krijgt dit; een gewone app krijgt precies wat hij op versie 42 kreeg.
+ */
+export const GESLOTEN_PORTAAL = {
+  mailer_secure_email_change_enabled: true,
+  security_manual_linking_enabled: false,
+  external_anonymous_users_enabled: false,
+  mailer_subjects_email_change: "Je adres wijzigen kan hier niet",
+  mailer_templates_email_change_content:
+    "<p>Er is gevraagd om het e-mailadres van een account te wijzigen. Dat kan niet zelf: er is niets gewijzigd.</p>\n<p>Heb je dit niet zelf gevraagd? Dan hoef je niets te doen.</p>",
+  mailer_subjects_reauthentication: GEEN_CONTROLECODE.onderwerp,
+  mailer_templates_reauthentication_content: GEEN_CONTROLECODE.inhoud,
+};
 
 /**
  * De auth-instellingen van een klantportaal, alleen voor productie; ze komen bovenop
@@ -367,8 +395,6 @@ export function portaalHookInstellingen(functies, eigen = {}) {
  * verandert alleen een run met het vinkje "Deur weghalen" iets aan de captcha, anders sluit een
  * nieuwe sleutel klanten buiten tot de app ermee is uitgerold. Het geheim moet er dan wel al zijn.
  *
- * `eigenHooks` (`{ aanmelden?, token? }`): die hook is van de app zelf en blijft staan.
- *
  * Adres wijzigen, de controlecode en de uitnodiging krijgen een mail zonder link en zonder
  * code (neutraleMails), en `mailer_secure_email_change_enabled` staat aan: mocht iemand een
  * code van acht cijfers willen raden om een adreswijziging toch te bevestigen, dan moet hij er
@@ -385,7 +411,6 @@ export function klantportaalInstellingen({
   captcha = true,
   captchaGeheim,
   hooks,
-  eigenHooks = {},
 }) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
@@ -400,7 +425,10 @@ export function klantportaalInstellingen({
     // medewerker zijn Cloudflare-inlog loskoppelen, als "klant" verder gaan met dezelfde
     // sessie, en bij zijn vertrek aan Toegang bijwerken ontsnappen.
     security_manual_linking_enabled: false,
-    ...portaalHookInstellingen(hooks, eigenHooks),
+    // Anoniem aanmelden (een account zonder adres) hoort hier niet: de aanmeld-hook weigert
+    // het al, en zo staat het ook in Supabase zelf uit.
+    external_anonymous_users_enabled: false,
+    ...portaalHookInstellingen(hooks),
     smtp_host: SMTP_HOST,
     smtp_port: SMTP_POORT,
     smtp_user: SMTP_GEBRUIKER,
@@ -419,6 +447,7 @@ export function klantportaalInstellingen({
     mailer_templates_recovery_content: mail.inhoud,
     // Alles wat Supabase Auth verder kan mailen: zonder link en zonder code.
     ...neutraleMails(afzender.naam),
+    ...MELDINGSMAILS_UIT,
     mailer_secure_email_change_enabled: true,
     ...REM,
     ...(captcha === CAPTCHA_LATER
@@ -457,7 +486,7 @@ export function verschil(huidig, gewenst) {
 }
 
 /**
- * SUPABASE_ORG_SLUG mag meerdere organisaties noemen, met komma's: `winco,plantas`. Een
+ * SUPABASE_ORG_SLUG mag meerdere organisaties noemen, met komma's: `eerste,tweede`. Een
  * klant met meer dan één BV houdt zo per BV een eigen organisatie (en rekening), en de
  * beheer-repo vindt de projecten in elk ervan. Een nieuw project komt altijd in de eerste.
  */
@@ -469,7 +498,7 @@ export function organisaties(orgSlug) {
 }
 
 /** De velden van de auth-config waar een geheim in staat. */
-const GEHEIME_VELDEN = ["smtp_pass", "security_captcha_secret"];
+export const GEHEIME_VELDEN = ["smtp_pass", "security_captcha_secret"];
 
 export const TURNSTILE_SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
@@ -545,6 +574,18 @@ export function supabaseBeheer({ fetchFn = fetch, token, orgSlug, slaap = wacht 
       }
       const publishable = lijst.find((k) => k.type === "publishable")?.api_key ?? null;
       return { anon: anon.api_key, serviceRole: service.api_key, publishable };
+    },
+    /**
+     * Alleen de openbare sleutel van een project, voor wie alleen leest (de knop Controle van
+     * buitenaf). Zonder `reveal`, en de service role wordt hier niet uitgelezen of bewaard.
+     */
+    async openbareSleutel(ref) {
+      const lijst = (await s(`/projects/${ref}/api-keys`)) ?? [];
+      const openbaar =
+        lijst.find((k) => k.type === "publishable") ?? lijst.find((k) => k.name === "anon");
+      if (!openbaar?.api_key)
+        throw new Error(`de openbare sleutel van Supabase-project ${ref} is niet op te halen`);
+      return openbaar.api_key;
     },
     /**
      * Het adres van de session pooler (IPv4). De directe databasehost is alleen via IPv6

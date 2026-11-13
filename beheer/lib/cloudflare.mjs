@@ -3,7 +3,7 @@
  * (deur, inlogdienst en de Worker zelf) en een paar gegevens van het account.
  *
  * Alles wat dit script maakt heeft een naam die begint met het voorvoegsel (een
- * verplichte instelling: `cf-proef-` voor de proef, `rp-` voor Richplant). Daaraan
+ * verplichte instelling: `cf-proef-` voor de proef, bij een klant bijvoorbeeld `kl-`). Daaraan
  * herkent een volgende run wat van hem is (hergebruiken) en wat niet (afblijven), en
  * daaraan herkent --opruimen wat weg mag. Op hetzelfde account kunnen ook andere apps
  * draaien; alles zonder dit voorvoegsel is van iemand anders.
@@ -20,12 +20,12 @@ const PER_PAGINA = 100;
 
 /**
  * Een voorvoegsel is een kleine letter, dan hoogstens vijftien kleine letters of cijfers,
- * en precies één streepje, aan het eind (bijvoorbeeld `rp-`). De enige uitzondering is
+ * en precies één streepje, aan het eind (bijvoorbeeld `kl-`). De enige uitzondering is
  * het voorvoegsel van de proef, `cf-proef-`; `cf-` zelf en elk ander voorvoegsel met
  * `cf-` ervoor is geweigerd.
  *
  * Daardoor kan geen geldig voorvoegsel met een ander geldig voorvoegsel beginnen: wat
- * met `rp-` begint is van `rp-` en van niemand anders (een `rp-x-` bestaat niet). Het
+ * met `kl-` begint is van `kl-` en van niemand anders (een `kl-x-` bestaat niet). Het
  * eigendom op het gedeelde account hangt aan die garantie. Ook de hookfunctie die ervan
  * afgeleid wordt (streepjes worden liggende streepjes) is daardoor altijd veilig in SQL.
  */
@@ -39,12 +39,12 @@ function geldigVoorvoegsel(voorvoegsel) {
 export function valideerVoorvoegsel(voorvoegsel) {
   if (voorvoegsel === undefined || voorvoegsel === null || voorvoegsel === "") {
     throw new Error(
-      "het voorvoegsel ontbreekt: geef --voorvoegsel <voorvoegsel> mee of zet BEHEER_VOORVOEGSEL (proef: cf-proef-, Richplant: rp-). Alles wat het script aanmaakt, hergebruikt of opruimt hangt eraan.",
+      "het voorvoegsel ontbreekt: geef --voorvoegsel <voorvoegsel> mee of zet BEHEER_VOORVOEGSEL (proef: cf-proef-, bij een klant bijvoorbeeld kl-). Alles wat het script aanmaakt, hergebruikt of opruimt hangt eraan.",
     );
   }
   if (typeof voorvoegsel !== "string" || !geldigVoorvoegsel(voorvoegsel)) {
     throw new Error(
-      `het voorvoegsel "${voorvoegsel}" is ongeldig: een kleine letter, dan hoogstens vijftien kleine letters of cijfers, en één streepje aan het eind (bijvoorbeeld rp-); ${PROEF_VOORVOEGSEL} is de enige uitzondering en cf- is voor de proef gereserveerd`,
+      `het voorvoegsel "${voorvoegsel}" is ongeldig: een kleine letter, dan hoogstens vijftien kleine letters of cijfers, en één streepje aan het eind (bijvoorbeeld kl-); ${PROEF_VOORVOEGSEL} is de enige uitzondering en cf- is voor de proef gereserveerd`,
     );
   }
   return voorvoegsel;
@@ -240,7 +240,7 @@ export function inlogApp({ naam, callback, policyIds, idps }) {
  * "Cloudflare Access" bij een Worker in het dashboard aanmaakt. NAGAAN (U7): of een
  * wildcard vooraan in het eerste label als destination wordt geaccepteerd.
  */
-export function workerApp({ naam, worker, subdomein, policyIds, idps }) {
+export function workerApp({ naam, worker, subdomein, policyIds, idps, merk = false }) {
   if (!subdomein || subdomein.includes("*")) throw new Error("het workers.dev-subdomein ontbreekt");
   const basis = `${worker}.${subdomein}.workers.dev`;
   return {
@@ -255,6 +255,8 @@ export function workerApp({ naam, worker, subdomein, policyIds, idps }) {
     session_duration: "720h", // 30 dagen: ook een app op het beginscherm blijft ingelogd
     ...inlogmethoden(idps),
     policies: policyLijst(policyIds),
+    // Alleen bij een klantportaal (zie PORTAAL_MERK).
+    ...(merk ? { custom_deny_message: PORTAAL_MERK } : {}),
   };
 }
 
@@ -299,31 +301,38 @@ export function afwijkingen(app, policyIds, idps) {
 }
 
 /**
- * Dekt een bestaande Access-app dezelfde adressen als `gewenst` (een body van workerApp)?
- * Vergeleken worden `domain` en de adressen in `destinations`, zonder op volgorde of
- * hoofdletters te letten. Een Access op de Worker die naar een andere Worker wijst (de Worker
- * is hernoemd, of de app is met de hand verbogen) bewaakt de echte Worker niet.
+ * Bewaakt een bestaande Access-app alle adressen van `gewenst` (een body van workerApp)?
+ * Geeft `{ onbekend, ontbreekt }`. `ontbreekt` zijn de gewenste adressen die niet in
+ * `destinations` (of als `domain`) staan, zonder op hoofdletters te letten; extra adressen die
+ * iemand er met de hand bij zette tellen niet en blijven staan. `onbekend` is true als
+ * Cloudflare een bestemming teruggeeft zonder adres (`uri`): zo beschrijft de API de nieuwe
+ * bestemmingen voor Workers (een `worker_id`). Dan is niet te zien welke Worker de app bewaakt.
+ * Alleen de inrichting van een klantportaal kijkt hiernaar; een gewone app blijft zoals op
+ * versie 42.
  */
-export function zelfdeAdressen(app, gewenst) {
+export function adresStand(app, gewenst) {
   const klein = (x) => String(x ?? "").toLowerCase();
-  const uris = (a) => [...new Set((a?.destinations ?? []).map((d) => klein(d?.uri)))].sort();
-  return (
-    klein(app?.domain) === klein(gewenst.domain) &&
-    JSON.stringify(uris(app)) === JSON.stringify(uris(gewenst))
-  );
+  const bestemmingen = app?.destinations ?? [];
+  const onbekend = bestemmingen.some((d) => typeof d?.uri !== "string" || !d.uri);
+  const er = new Set([klein(app?.domain), ...bestemmingen.map((d) => klein(d?.uri))]);
+  const ontbreekt = (gewenst.destinations ?? []).map((d) => d.uri).filter((u) => !er.has(klein(u)));
+  return { onbekend, ontbreekt };
 }
 
 /**
- * Hetzelfde als zelfdeAdressen, met een derde uitkomst: "onbekend" als Cloudflare een
- * bestemming teruggeeft zonder adres (`uri`). Zo beschrijft de API de nieuwe bestemmingen voor
- * Workers (een `worker_id` in plaats van een adres). Dan is niet te zien welke Worker de app
- * bewaakt, en mag de inrichting hem niet "herstellen": dat zou elke run een goede app
- * overschrijven. Geeft "zelfde", "anders" of "onbekend".
+ * Het merk van een klantportaal: de tekst die Cloudflare toont aan wie op het workers.dev-adres
+ * of een preview wordt geweigerd (`custom_deny_message` van de Access op de Worker). De
+ * inrichting van een klantportaal zet hem, vóór inloggen per mail aangaat, en haalt hem pas weg
+ * als het portaal weer helemaal dicht is. Toegang bijwerken leest de Access-apps toch al: aan
+ * dit merk ziet hij, zonder één aanroep meer dan op versie 42, dat een app klantportaal is
+ * (geweest) en dat accounts zonder inlog via Cloudflare klanten zijn. Een app die nooit
+ * klantportaal was heeft het merk niet. NAGAAN (U7): dat Cloudflare `custom_deny_message` in
+ * de lijst teruggeeft en een lege tekst accepteert om hem weg te halen.
  */
-export function adresStand(app, gewenst) {
-  const zonderAdres = (app?.destinations ?? []).some((d) => typeof d?.uri !== "string" || !d.uri);
-  if (zonderAdres) return "onbekend";
-  return zelfdeAdressen(app, gewenst) ? "zelfde" : "anders";
+export const PORTAAL_MERK = "Dit adres is alleen voor medewerkers (klantportaal).";
+
+export function heeftPortaalMerk(app) {
+  return app?.custom_deny_message === PORTAAL_MERK;
 }
 
 /** De body voor een bestaande app met de gewenste policies én inlogmethoden. */
