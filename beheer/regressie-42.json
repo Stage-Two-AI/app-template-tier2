@@ -6027,7 +6027,7 @@
         "methode": "POST",
         "url": "https://api.supabase.com/v1/projects",
         "body": {
-          "name": "rp-start",
+          "name": "kl-start",
           "organization_slug": "stagetwo",
           "db_pass": "GeheimDatabaseWachtwoord1234567",
           "region": "eu-central-1"
@@ -6045,7 +6045,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6060,7 +6060,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "ref00000000000000001"
       },
@@ -6072,7 +6072,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name"
         ],
@@ -6087,7 +6087,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "GeheimDatabaseWachtwoord1234567"
       },
@@ -6116,7 +6116,7 @@
         "methode": "POST",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/policies",
         "body": {
-          "name": "rp-klant",
+          "name": "kl-klant",
           "decision": "allow",
           "include": [
             {
@@ -6144,7 +6144,7 @@
         "methode": "POST",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/policies",
         "body": {
-          "name": "rp-stagetwo",
+          "name": "kl-stagetwo",
           "decision": "allow",
           "include": [
             {
@@ -6166,7 +6166,7 @@
         "methode": "POST",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps",
         "body": {
-          "name": "rp-start-inlog",
+          "name": "kl-start-inlog",
           "type": "saas",
           "app_launcher_visible": false,
           "allowed_idps": ["idp-entra", "idp-otp"],
@@ -6230,7 +6230,7 @@
         "url": "https://api.supabase.com/v1/projects/ref00000000000000001/config/auth",
         "body": {
           "site_url": "https://start.klant.nl",
-          "uri_allow_list": "https://start.klant.nl/**,https://pr-*-rp-start.stagetwo-acc.workers.dev/**,https://actueel-rp-start.stagetwo-acc.workers.dev/**",
+          "uri_allow_list": "https://start.klant.nl/**,https://pr-*-kl-start.stagetwo-acc.workers.dev/**,https://actueel-kl-start.stagetwo-acc.workers.dev/**",
           "external_email_enabled": false,
           "mailer_autoconfirm": true
         },
@@ -6244,7 +6244,7 @@
         "methode": "POST",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps",
         "body": {
-          "name": "rp-start",
+          "name": "kl-start",
           "type": "self_hosted",
           "domain": "start.klant.nl",
           "destinations": [
@@ -6272,7 +6272,7 @@
       {
         "soort": "fetch",
         "methode": "GET",
-        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/rp-start",
+        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/kl-start",
         "body": null,
         "headers": {
           "Authorization": "Bearer cf-token",
@@ -6282,7 +6282,7 @@
       {
         "soort": "fetch",
         "methode": "PUT",
-        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/rp-start",
+        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/kl-start",
         "body": "<multipart>",
         "headers": {
           "Authorization": "Bearer cf-token"
@@ -6291,7 +6291,7 @@
       {
         "soort": "fetch",
         "methode": "POST",
-        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/rp-start/subdomain",
+        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/kl-start/subdomain",
         "body": {
           "enabled": true,
           "previews_enabled": true
@@ -6306,17 +6306,17 @@
         "methode": "POST",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps",
         "body": {
-          "name": "rp-start-worker",
+          "name": "kl-start-worker",
           "type": "self_hosted",
-          "domain": "rp-start.stagetwo-acc.workers.dev",
+          "domain": "kl-start.stagetwo-acc.workers.dev",
           "destinations": [
             {
               "type": "public",
-              "uri": "rp-start.stagetwo-acc.workers.dev"
+              "uri": "kl-start.stagetwo-acc.workers.dev"
             },
             {
               "type": "public",
-              "uri": "*-rp-start.stagetwo-acc.workers.dev"
+              "uri": "*-kl-start.stagetwo-acc.workers.dev"
             }
           ],
           "app_launcher_visible": false,
@@ -6343,7 +6343,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6367,7 +6367,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6382,7 +6382,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "https://ref00000000000000001.supabase.co"
       },
@@ -6395,7 +6395,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "anon-ref00000000000000001"
       },
@@ -6408,7 +6408,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "cloudflare"
       },
@@ -6421,7 +6421,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "acc"
       },
@@ -6434,7 +6434,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "aws-0-eu-central-1.pooler.supabase.com"
       },
@@ -6447,7 +6447,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "https://abc@o1.ingest.de.sentry.io/1"
       },
@@ -6459,7 +6459,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6474,7 +6474,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "https://ref00000000000000001.supabase.co"
       },
@@ -6487,7 +6487,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "anon-ref00000000000000001"
       },
@@ -6500,7 +6500,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "cloudflare"
       },
@@ -6513,7 +6513,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "acc"
       },
@@ -6526,7 +6526,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "aws-0-eu-central-1.pooler.supabase.com"
       },
@@ -6539,75 +6539,38 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": "https://abc@o1.ingest.de.sentry.io/1"
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "list",
-          "--repo",
-          "Richplant-BV/richplant-start",
-          "--json",
-          "name,value"
-        ],
+        "args": ["variable", "list", "--repo", "klant-org/start", "--json", "name,value"],
         "invoer": null
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "set",
-          "PREVIEW_VITE_SUPABASE_URL",
-          "--repo",
-          "Richplant-BV/richplant-start"
-        ],
+        "args": ["variable", "set", "PREVIEW_VITE_SUPABASE_URL", "--repo", "klant-org/start"],
         "invoer": "https://ref00000000000000001.supabase.co"
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "set",
-          "PREVIEW_VITE_SUPABASE_ANON_KEY",
-          "--repo",
-          "Richplant-BV/richplant-start"
-        ],
+        "args": ["variable", "set", "PREVIEW_VITE_SUPABASE_ANON_KEY", "--repo", "klant-org/start"],
         "invoer": "anon-ref00000000000000001"
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "set",
-          "PREVIEW_VITE_SUPABASE_SCHEMA",
-          "--repo",
-          "Richplant-BV/richplant-start"
-        ],
+        "args": ["variable", "set", "PREVIEW_VITE_SUPABASE_SCHEMA", "--repo", "klant-org/start"],
         "invoer": "public"
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "set",
-          "PREVIEW_VITE_INLOGDIENST",
-          "--repo",
-          "Richplant-BV/richplant-start"
-        ],
+        "args": ["variable", "set", "PREVIEW_VITE_INLOGDIENST", "--repo", "klant-org/start"],
         "invoer": "cloudflare"
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "set",
-          "PREVIEW_VITE_SENTRY_DSN",
-          "--repo",
-          "Richplant-BV/richplant-start"
-        ],
+        "args": ["variable", "set", "PREVIEW_VITE_SENTRY_DSN", "--repo", "klant-org/start"],
         "invoer": "https://abc@o1.ingest.de.sentry.io/1"
       },
       {
@@ -6618,7 +6581,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name"
         ],
@@ -6628,7 +6591,7 @@
         "soort": "gh",
         "args": [
           "api",
-          "repos/Richplant-BV/richplant-start/contents/.github/workflows/deploy-db.yml",
+          "repos/klant-org/start/contents/.github/workflows/deploy-db.yml",
           "-q",
           ".content"
         ],
@@ -6643,7 +6606,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start"
+          "klant-org/start"
         ],
         "invoer": null
       }
@@ -6659,7 +6622,7 @@
         },
         {
           "stap": "3.2 Access-policies",
-          "actie": "policy rp-klant aangemaakt; policy rp-stagetwo aangemaakt"
+          "actie": "policy kl-klant aangemaakt; policy kl-stagetwo aangemaakt"
         },
         {
           "stap": "3.2 Access SaaS-app (OIDC)",
@@ -6702,8 +6665,8 @@
       "issuer": "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/sso/oidc/cid-4",
       "uri_allow_list": [
         "https://start.klant.nl/**",
-        "https://pr-*-rp-start.stagetwo-acc.workers.dev/**",
-        "https://actueel-rp-start.stagetwo-acc.workers.dev/**"
+        "https://pr-*-kl-start.stagetwo-acc.workers.dev/**",
+        "https://actueel-kl-start.stagetwo-acc.workers.dev/**"
       ],
       "cloudflare": {
         "policies": {
@@ -6783,7 +6746,7 @@
         "methode": "PUT",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps/app-4",
         "body": {
-          "name": "rp-start-inlog",
+          "name": "kl-start-inlog",
           "type": "saas",
           "app_launcher_visible": false,
           "allowed_idps": ["idp-entra"],
@@ -6830,7 +6793,7 @@
         "methode": "PUT",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps/app-6",
         "body": {
-          "name": "rp-start",
+          "name": "kl-start",
           "type": "self_hosted",
           "domain": "start.klant.nl",
           "destinations": [
@@ -6858,7 +6821,7 @@
       {
         "soort": "fetch",
         "methode": "GET",
-        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/rp-start",
+        "url": "https://api.cloudflare.com/client/v4/accounts/acc/workers/scripts/kl-start",
         "body": null,
         "headers": {
           "Authorization": "Bearer cf-token",
@@ -6870,17 +6833,17 @@
         "methode": "PUT",
         "url": "https://api.cloudflare.com/client/v4/accounts/acc/access/apps/app-7",
         "body": {
-          "name": "rp-start-worker",
+          "name": "kl-start-worker",
           "type": "self_hosted",
-          "domain": "rp-start.stagetwo-acc.workers.dev",
+          "domain": "kl-start.stagetwo-acc.workers.dev",
           "destinations": [
             {
               "type": "public",
-              "uri": "rp-start.stagetwo-acc.workers.dev"
+              "uri": "kl-start.stagetwo-acc.workers.dev"
             },
             {
               "type": "public",
-              "uri": "*-rp-start.stagetwo-acc.workers.dev"
+              "uri": "*-kl-start.stagetwo-acc.workers.dev"
             }
           ],
           "app_launcher_visible": false,
@@ -6907,7 +6870,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6931,7 +6894,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6945,7 +6908,7 @@
           "--env",
           "preview",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name,value"
         ],
@@ -6953,14 +6916,7 @@
       },
       {
         "soort": "gh",
-        "args": [
-          "variable",
-          "list",
-          "--repo",
-          "Richplant-BV/richplant-start",
-          "--json",
-          "name,value"
-        ],
+        "args": ["variable", "list", "--repo", "klant-org/start", "--json", "name,value"],
         "invoer": null
       },
       {
@@ -6971,7 +6927,7 @@
           "--env",
           "production",
           "--repo",
-          "Richplant-BV/richplant-start",
+          "klant-org/start",
           "--json",
           "name"
         ],
@@ -7030,8 +6986,8 @@
       "issuer": "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/sso/oidc/cid-4",
       "uri_allow_list": [
         "https://start.klant.nl/**",
-        "https://pr-*-rp-start.stagetwo-acc.workers.dev/**",
-        "https://actueel-rp-start.stagetwo-acc.workers.dev/**"
+        "https://pr-*-kl-start.stagetwo-acc.workers.dev/**",
+        "https://actueel-kl-start.stagetwo-acc.workers.dev/**"
       ],
       "cloudflare": {
         "policies": {

@@ -30,14 +30,14 @@ const ARG = {
   voorvoegsel: "cf-proef-",
   droogloop: false,
 };
-const RP = {
+const KL = {
   ...ARG,
   app: "start",
   hostname: "start.klant.nl",
-  worker: "rp-start",
-  voorvoegsel: "rp-",
+  worker: "kl-start",
+  voorvoegsel: "kl-",
 };
-const TOEGANG_RP = { groepen: GROEPEN, apps: { start: ["klant"] } };
+const TOEGANG_KL = { groepen: GROEPEN, apps: { start: ["klant"] } };
 
 const GEBRUIKERS = () => [
   { id: "00000000-0000-4000-8000-000000000001", email: "piet@klant.nl" },
@@ -201,13 +201,13 @@ export async function draaiScenarios(m) {
       idps: ["idp-entra", "idp-otp"],
       sentryDsn: "https://abc@o1.ingest.de.sentry.io/1",
     };
-    const arg = { ...RP, repo: "Richplant-BV/richplant-start" };
-    await stap("D1 klant, eerste inrichting", w, () => m.richtIn(arg, opzet(w, TOEGANG_RP, extra)));
+    const arg = { ...KL, repo: "klant-org/start" };
+    await stap("D1 klant, eerste inrichting", w, () => m.richtIn(arg, opzet(w, TOEGANG_KL, extra)));
     await stap("D2 klant, andere inlogmethoden", w, () =>
-      m.richtIn(arg, opzet(w, TOEGANG_RP, { ...extra, idps: ["idp-entra"] })),
+      m.richtIn(arg, opzet(w, TOEGANG_KL, { ...extra, idps: ["idp-entra"] })),
     );
     await stap("D3 klant, toegang bijwerken", w, () =>
-      m.werkToegangBij({ voorvoegsel: "rp-" }, opzet(w, TOEGANG_RP)),
+      m.werkToegangBij({ voorvoegsel: "kl-" }, opzet(w, TOEGANG_KL)),
     );
   }
 

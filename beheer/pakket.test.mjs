@@ -120,12 +120,6 @@ const KLANTNAMEN = [
   ["together", "to", "grow"],
   ["t", "2", "g"],
 ].map((delen) => delen.join(""));
-/**
- * Twee bestanden zijn bevroren: de vastgelegde aanroepen van versie 42 en de scenario's
- * waarmee ze zijn gemaakt. Daarin staat nog een voorbeeldnaam van toen; ze veranderen pas als
- * de vergelijking met versie 42 vervalt.
- */
-const BEVROREN = ["regressie-42.json", "regressie-scenarios.mjs"];
 
 function alleBestanden(map) {
   return readdirSync(map, { withFileTypes: true }).flatMap((e) => {
@@ -135,12 +129,13 @@ function alleBestanden(map) {
   });
 }
 
-test("geen klantnamen of klantdomeinen in beheer/: de README, voorbeelden, foutmeldingen, commentaar en testgegevens gebruiken klant.nl, Voorbeeld en shop", () => {
-  const patroon = new RegExp(KLANTNAMEN.join("|"), "i");
+test("geen klantnamen, klantvoorvoegsels of klantdomeinen in beheer/: de README, voorbeelden, foutmeldingen, commentaar, testgegevens en de vastgelegde aanroepen van versie 42 gebruiken klant.nl, kl-, Voorbeeld en shop", () => {
+  // Ook het voorvoegsel van een klant (in stukken, zoals de namen) als het als naam in een
+  // tekst staat, bijvoorbeeld "<voorvoegsel>start".
+  const patroon = new RegExp(`${KLANTNAMEN.join("|")}|["'\`/]${["r", "p"].join("")}-[a-z]`, "i");
   const gevonden = [];
   for (const pad of alleBestanden(BEHEER)) {
     const naam = relative(BEHEER, pad);
-    if (BEVROREN.includes(naam)) continue;
     readFileSync(pad, "utf8")
       .split("\n")
       .forEach((regel, i) => {
