@@ -1,11 +1,12 @@
 import { fail, pass, skip } from "./lib/changed-files.mjs";
 import {
   leesMigraties,
+  problemenKlantportaal,
   problemenMetOpenPolicies,
   schrijfrechtenVoorLeesrollen,
   tabellenInPublic,
 } from "./lib/rls-regels.mjs";
-import { bezitDatabase, leesRollen, openTabellen } from "./lib/stack-config.mjs";
+import { bezitDatabase, klantportaal, leesRollen, openTabellen } from "./lib/stack-config.mjs";
 
 /**
  * In een browser-app is de database je beveiliging: er is geen tussenlaag die
@@ -20,7 +21,11 @@ import { bezitDatabase, leesRollen, openTabellen } from "./lib/stack-config.mjs"
  *    `authenticated` (of een eigen rol) alleen op een tabel in `open_tabellen` in
  *    stack.config.json, met een reden;
  * 3. een leesrol (`leesrollen` in stack.config.json, de rol waarmee een andere app deze
- *    database leest) krijgt nergens insert, update, delete of truncate.
+ *    database leest) krijgt nergens insert, update, delete of truncate;
+ * 4. alleen bij een klantportaal (`"klantportaal": true` in stack.config.json): wie alleen een
+ *    e-mailadres heeft, mag niets. Elke policy voor ingelogde gebruikers heeft een poort als
+ *    harde eis, en elke `security definer`-functie of view waar een ingelogde gebruiker bij
+ *    kan, roept een poort aan. Zonder de schakelaar gebeurt hier niets.
  *
  * Dit is de snelle controle op de tekst van de migraties, al bij een concept-PR. De echte
  * poort voor 2 en 3 is tests/rls/open-policies.test.ts: die leest de policies en rechten uit
@@ -63,6 +68,36 @@ if (schrijvendeLeesrollen.length > 0) {
     "database leest. Die mag alleen lezen: geef hem `select`, bij voorkeur op views in `api`.",
     "Schrijven gaat via een functie in de app die de database beheert.",
   ]);
+}
+
+const portaal = klantportaal();
+if (portaal !== null) {
+  const problemen = problemenKlantportaal(sql, portaal);
+  if (problemen.length > 0) {
+    fail("Klantportaal: iemand met alleen een e-mailadres kan hier iets.", [
+      ...problemen.map((p) => `- ${p}`),
+      "",
+      'Deze app is een klantportaal (`"klantportaal": true` in stack.config.json). Iedereen op',
+      "internet kan er per mail een account maken, dus `to authenticated` is iedereen met een",
+      "e-mailadres. Zo'n account mag niets tot een medewerker het goedkeurt. De regel:",
+      "",
+      "  1. Elke policy voor ingelogde gebruikers heeft in elke `using` en `with check` een poort",
+      "     als harde eis: `public.is_medewerker()` of `public.is_goedgekeurde_klant()`, met",
+      "     `and` aan de rest vast, in elke tak van een `or`:",
+      "       using (public.is_goedgekeurde_klant() and auth.uid() = owner_id)",
+      "     Of zet één keer de poort op de hele tabel; de policies die er al zijn blijven dan staan:",
+      '       create policy "<tabel>_poort" on public.<tabel> as restrictive for all to authenticated',
+      "         using (public.is_medewerker() or public.is_goedgekeurde_klant());",
+      "  2. Een `security definer`-functie die een ingelogde gebruiker mag aanroepen, roept zelf",
+      "     een poort aan. Is hij voor niemand bedoeld, trek het recht dan in:",
+      "       revoke all on function public.<functie>() from public, anon, authenticated;",
+      "     Mag iemand zonder goedkeuring hem echt aanroepen, zet hem dan met een reden in",
+      '     stack.config.json: "klantportaal_vrije_functies": { "<functie>": "<waarom>" }.',
+      "     Een view krijgt `with (security_invoker = true)`, of een poort in zijn vraag.",
+      "",
+      "Schrijf de poort voluit, met `public.` ervoor. Meer uitleg: docs/WERKWIJZE.md.",
+    ]);
+  }
 }
 
 if (tables.size === 0) pass("geen tabellen in het schema public");

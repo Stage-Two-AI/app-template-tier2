@@ -51,7 +51,16 @@
     "leesrollen: rollen waarmee een ándere app deze database leest (bijvoorbeeld een datalake",
     "dat door een interne app wordt gelezen). Zo'n rol mag alleen lezen; elke",
     "`grant insert|update|delete` aan een rol in deze lijst is rood in de poort. Schrijven gaat",
-    "via een functie in de app die de database beheert. Voorbeeld: \"leesrollen\": [\"intern_lezer\"]"
+    "via een functie in de app die de database beheert. Voorbeeld: \"leesrollen\": [\"intern_lezer\"]",
+    "",
+    "klantportaal (optioneel, standaard uit): is dit een app zonder deur van Cloudflare, waar",
+    "klanten met een code per mail inloggen? Zet dan \"klantportaal\": true. Iedereen op internet",
+    "kan daar een account maken, dus eist de poort dat wie alleen een e-mailadres heeft niets",
+    "mag: elke policy voor ingelogde gebruikers heeft `public.is_medewerker()` of",
+    "`public.is_goedgekeurde_klant()` als harde eis, en open_tabellen is leeg. Zie",
+    "docs/WERKWIJZE.md. Twee lijsten horen erbij, allebei met per functie een reden:",
+    "  \"klantportaal_poorten\": { \"is_inkoper\": \"medewerker van de afdeling inkoop\" }",
+    "  \"klantportaal_vrije_functies\": { \"meld_storing\": \"mag iedereen met een account\" }"
   ],
   "database": true,
   "testmail": "",

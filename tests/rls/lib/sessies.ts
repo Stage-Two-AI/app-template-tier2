@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "../../../src/lib/database.types";
-import { wachtOpInlogmail } from "../../lib/mailvanger";
+import { wachtOpBericht, wachtOpInlogmail } from "../../lib/mailvanger";
 import { admin } from "./afscherming";
 import { codeVoor, type Persoon } from "./inlogdienst-nep";
 
@@ -242,6 +242,62 @@ export function zetSessieBegin(sessieId: string, urenGeleden: number): void {
   if (aantal !== "1") throw new Error(`Verwachtte één sessie, maar vond er ${aantal}.`);
 }
 
+/**
+ * Hangt een sessie in de administratie van Supabase aan een ander account. Dat kan alleen wie
+ * de database beheert; de test doet het om te bewijzen dat `sessie_via_cloudflare()` ook
+ * nakijkt van wie de sessie is, en niet alleen dat hij bestaat.
+ */
+export function hangSessieAanAccount(sessieId: string, userId: string): void {
+  if (!UUID.test(sessieId) || !UUID.test(userId)) throw new Error("Ongeldige testgegevens.");
+  const aantal = alsBeheerder(
+    `with gewijzigd as (
+       update auth.sessions set user_id = '${userId}' where id = '${sessieId}' returning 1
+     )
+     select count(*) from gewijzigd`,
+  );
+  if (aantal !== "1") throw new Error(`Verwachtte één sessie, maar vond er ${aantal}.`);
+}
+
+/**
+ * Zet de koppeling met de nagebootste dienst om naar een gewone e-mailkoppeling: daarna hangt
+ * er geen enkele inlogdienst meer aan het account, terwijl de sessie die via de dienst begon
+ * nog loopt. Alleen wie de database beheert kan dit.
+ */
+export function maakKoppelingEmail(userId: string): void {
+  if (!UUID.test(userId)) throw new Error("Ongeldige testgegevens.");
+  const aantal = alsBeheerder(
+    `with gewijzigd as (
+       update auth.identities set provider = 'email'
+        where user_id = '${userId}' and provider = '${LOKALE_DIENST}'
+       returning 1
+     )
+     select count(*) from gewijzigd`,
+  );
+  if (aantal !== "1") {
+    throw new Error(`Verwachtte één koppeling met de inlogdienst, maar vond er ${aantal}.`);
+  }
+}
+
+/**
+ * Zet tijdens één test de poort van een klantportaal op een tabel (docs/WERKWIJZE.md): één
+ * policy die zegt dat alleen een medewerker of een goedgekeurde klant erbij mag. Zo is te
+ * bewijzen wat die ene regel doet, zonder dat de template zelf een klantportaal is. De
+ * policy gaat na afloop altijd weer weg.
+ */
+export async function metPoortOp(tabel: string, doe: () => Promise<void>): Promise<void> {
+  if (!/^[a-z_]+$/.test(tabel)) throw new Error("Ongeldige testgegevens.");
+  const naam = `${tabel}_poort_test`;
+  alsBeheerder(
+    `create policy "${naam}" on public.${tabel} as restrictive for all to authenticated
+       using (public.is_medewerker() or public.is_goedgekeurde_klant())`,
+  );
+  try {
+    await doe();
+  } finally {
+    alsBeheerder(`drop policy if exists "${naam}" on public.${tabel}`);
+  }
+}
+
 export function nieuwAdres(label: string): string {
   return `rls-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@voorbeeld.nl`;
 }
@@ -260,6 +316,32 @@ export function nieuwPersoon(label: string, o: { adresBevestigd: boolean }): Per
 export function wachtOpMail(email: string) {
   return wachtOpInlogmail({ email, mailUrl });
 }
+
+/** Als `wachtOpMail`, maar voor elke mail: geeft de HTML, of null als er geen mail komt. */
+export function wachtOpElkeMail(email: string) {
+  return wachtOpBericht({ email, mailUrl });
+}
+
+/** Een code aanvragen zonder in te loggen, met één herhaling als Supabase "te snel" zegt. */
+export async function vraagCodeAan(
+  email: string,
+  opties: { emailRedirectTo?: string; shouldCreateUser?: boolean } = {},
+) {
+  const client = nieuweClient();
+  let aanvraag = await client.auth.signInWithOtp({ email, options: opties });
+  if (aanvraag.error?.status === 429) {
+    await wacht(1500);
+    aanvraag = await client.auth.signInWithOtp({ email, options: opties });
+  }
+  return aanvraag;
+}
+
+/** Een verse client zonder sessie, zoals een bezoeker die de inlogpagina opent. */
+export function bezoeker(): SupabaseClient<Database> {
+  return nieuweClient();
+}
+
+export const pauze = wacht;
 
 export async function verwijderAccount(id: string | undefined): Promise<void> {
   if (id) await admin.auth.admin.deleteUser(id);

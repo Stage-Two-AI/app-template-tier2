@@ -170,3 +170,61 @@ export function leesRollen() {
   }
   return lijst.map((r) => r.toLowerCase());
 }
+
+/** Een lijst namen met per naam een reden, zoals `open_tabellen`. */
+function namenMetReden(sleutel, voorbeeld) {
+  const lijst = stackConfig()[sleutel] ?? {};
+  if (typeof lijst !== "object" || Array.isArray(lijst) || lijst === null) {
+    throw new Error(
+      `stack.config.json: \`${sleutel}\` hoort een object te zijn met per functie een reden.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
+    );
+  }
+  for (const [naam, reden] of Object.entries(lijst)) {
+    if (!/^[a-z_][a-z0-9_]*$/.test(naam)) {
+      throw new Error(
+        `stack.config.json: ${sleutel}.${naam} is geen naam van een functie in het schema public (kleine letters, zonder schema en zonder haakjes).`,
+      );
+    }
+    if (typeof reden !== "string" || reden.trim() === "") {
+      throw new Error(`stack.config.json: bij ${sleutel}.${naam} hoort een reden.`);
+    }
+  }
+  return lijst;
+}
+
+/**
+ * Is deze app een klantportaal: een app zonder deur van Cloudflare, waar klanten met een code
+ * per mail inloggen? Dan is "ingelogd" iedereen op internet met een e-mailadres, en eist
+ * `guard:rls` dat elke regel in de database langs een poort gaat (`public.is_medewerker()` of
+ * `public.is_goedgekeurde_klant()`); zie scripts/lib/rls-regels.mjs en docs/WERKWIJZE.md.
+ *
+ *   "klantportaal": true
+ *
+ * Standaard uit: dan verandert er niets. Twee lijsten horen erbij, allebei optioneel en
+ * allebei met per functie een reden die de reviewer in de pull request ziet:
+ *
+ *   "klantportaal_poorten": { "is_inkoper": "medewerker van de afdeling inkoop" }
+ *       eigen functies in `public` die als poort tellen. Zo'n functie roept zelf een poort
+ *       van de template aan.
+ *   "klantportaal_vrije_functies": { "meld_storing": "mag iedereen met een account" }
+ *       `security definer`-functies die iemand zonder goedkeuring mag aanroepen.
+ *
+ * Geeft null als de app geen klantportaal is.
+ */
+export function klantportaal() {
+  const waarde = stackConfig().klantportaal;
+  if (waarde === undefined || waarde === false) return null;
+  if (waarde !== true) {
+    throw new Error(
+      `stack.config.json: "klantportaal" is ${JSON.stringify(waarde)}; kies true of false.`,
+    );
+  }
+  return {
+    poorten: namenMetReden("klantportaal_poorten", '{ "is_inkoper": "medewerker van inkoop" }'),
+    vrijeFuncties: namenMetReden(
+      "klantportaal_vrije_functies",
+      '{ "meld_storing": "mag iedereen met een account" }',
+    ),
+    openTabellen: openTabellen(),
+  };
+}

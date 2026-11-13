@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { vraagDatabase } from "./lib/database";
+import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
 
 /**
  * De beveiligingsregels zoals ze echt in de database staan, na alle migraties. Nauwkeuriger
@@ -8,13 +9,17 @@ import { vraagDatabase } from "./lib/database";
  * functie zijn gemaakt of later zijn weggegooid.
  *
  * Deze test is van de template en komt met elke versie mee. Uitzonderingen staan in
- * stack.config.json (`open_tabellen`, `leesrollen`), niet hier.
+ * stack.config.json (`open_tabellen`, `leesrollen`, en bij een klantportaal
+ * `klantportaal_poorten` en `klantportaal_vrije_functies`), niet hier.
  */
 
 /** De uitzonderingen uit stack.config.json; guard-rls.mjs controleert de vorm al. */
 const config = JSON.parse(readFileSync("stack.config.json", "utf8")) as {
   open_tabellen?: Record<string, string>;
   leesrollen?: string[];
+  klantportaal?: boolean;
+  klantportaal_poorten?: Record<string, string>;
+  klantportaal_vrije_functies?: Record<string, string>;
 };
 
 type OpenPolicy = {
@@ -78,6 +83,22 @@ describe("leesrollen", () => {
         rechten.map((r) => `${r.grantee}: ${r.recht} op ${r.schema}.${r.tabel}`),
         "een leesrol mag alleen select",
       ).toEqual([]);
+    },
+  );
+});
+
+describe("klantportaal", () => {
+  // Alleen met `"klantportaal": true` in stack.config.json. De regel staat in
+  // scripts/lib/rls-regels.mjs en in docs/WERKWIJZE.md.
+  it.skipIf(config.klantportaal !== true)(
+    "wie alleen een e-mailadres heeft, mag niets: elke policy, functie en view gaat door de poort",
+    () => {
+      const problemen = problemenKlantportaalInDatabase({
+        poorten: config.klantportaal_poorten ?? {},
+        vrijeFuncties: config.klantportaal_vrije_functies ?? {},
+        openTabellen: config.open_tabellen ?? {},
+      });
+      expect(problemen, "zie docs/WERKWIJZE.md, het stuk over het klantportaal").toEqual([]);
     },
   );
 });

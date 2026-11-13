@@ -1,4 +1,7 @@
+import { createHmac } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { linksUit } from "../lib/mailvanger";
 import {
   type Actor,
   admin,
@@ -8,23 +11,32 @@ import {
   verwijderActor,
 } from "./lib/afscherming";
 import { type NepInlogdienst, type Persoon, startNepInlogdienst } from "./lib/inlogdienst-nep";
+import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
 import {
   accountsVan,
+  hangSessieAanAccount,
   inloggenMetCode,
   inloggenMetMailcode,
   inloggenViaInlogdienst,
   leesToken,
+  maakKoppelingEmail,
+  metPoortOp,
   metToken,
   nieuwAdres,
   nieuwPersoon,
   noemIdentiteitCloudflare,
+  pauze,
   type Sessie,
   sessieViaInlogdienst,
   type ViaInlogdienst,
   verwijderAccount,
+  wachtOpElkeMail,
   wachtOpMail,
   zetSessieBegin,
 } from "./lib/sessies";
+
+const url = String(import.meta.env.SUPABASE_URL);
+const anonKey = String(import.meta.env.SUPABASE_ANON_KEY);
 
 /**
  * Het klantportaal: medewerkers en klanten in dezelfde app, zonder deur ervoor.
@@ -84,6 +96,61 @@ async function isMedewerker(sessie: Pick<Sessie, "client">): Promise<boolean | n
   const { data, error } = await sessie.client.rpc("is_medewerker");
   if (error) throw new Error(`is_medewerker gaf een fout: ${error.message}`);
   return data;
+}
+
+/** Een verse klant met een eigen account, per mail ingelogd; wordt aan het eind opgeruimd. */
+async function nieuweKlant(label: string): Promise<Sessie> {
+  const sessie = await inloggenMetMailcode(nieuwAdres(label));
+  opruimen.add(sessie.userId);
+  return sessie;
+}
+
+async function regelVan(userId: string) {
+  const { data, error } = await admin
+    .from("klanten")
+    .select("e_mail, goedgekeurd")
+    .eq("user_id", userId);
+  if (error) throw new Error(`Kon de klantenlijst niet nakijken: ${error.message}`);
+  return data[0];
+}
+
+async function keurGoed(userId: string): Promise<void> {
+  const { error } = await admin.from("klanten").update({ goedgekeurd: true }).eq("user_id", userId);
+  if (error) throw new Error(`Goedkeuren als beheerder mislukt: ${error.message}`);
+}
+
+async function isGoedgekeurd(sessie: Pick<Sessie, "client">): Promise<boolean | null> {
+  const { data, error } = await sessie.client.rpc("is_goedgekeurde_klant");
+  if (error) throw new Error(`is_goedgekeurde_klant gaf een fout: ${error.message}`);
+  return data;
+}
+
+function b64(waarde: unknown): string {
+  return Buffer.from(JSON.stringify(waarde)).toString("base64url");
+}
+
+/**
+ * Een klant wijzigt zelf het adres van zijn account, zoals Supabase dat toelaat als de
+ * inrichting het niet dichtzet: beide adressen krijgen een mail en beide links worden
+ * aangeklikt. Daarna staat het nieuwe adres op het account.
+ */
+async function wijzigAdres(sessie: Sessie, van: string, naar: string): Promise<void> {
+  const naarOud = await wachtOpElkeMail(van);
+  const naarNieuw = await wachtOpElkeMail(naar);
+  // Supabase stuurt per adres niet vaker dan eens per seconde.
+  await pauze(1200);
+  const { error } = await sessie.client.auth.updateUser({ email: naar });
+  if (error) throw new Error(`De adreswijziging aanvragen mislukte: ${error.message}`);
+  for (const lees of [naarOud, naarNieuw]) {
+    const link = linksUit((await lees(8000)) ?? "").find((href) =>
+      href.includes("/auth/v1/verify"),
+    );
+    if (link) await fetch(link, { redirect: "manual" });
+  }
+  const { data } = await admin.auth.admin.getUserById(sessie.userId);
+  if (data.user?.email !== naar) {
+    throw new Error("De opzet klopt niet: het adres van het account is niet gewijzigd.");
+  }
 }
 
 /** Een persoon met een eigen account, ingelogd via de inlogdienst; ruimt zichzelf op. */
@@ -171,11 +238,21 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
     expect(await isMedewerker(sessie)).toBe(false);
   });
 
-  it("een klant is geen medewerker, en een bezoeker zonder inlog mag het niet eens vragen", async () => {
+  it("een klant is geen medewerker", async () => {
     expect(await isMedewerker(klant)).toBe(false);
-    const { data, error } = await anoniem().rpc("is_medewerker");
-    expect(data).toBeNull();
-    expect(error).not.toBeNull();
+  });
+
+  it("een bezoeker zonder inlog mag geen van de vier functies aanroepen", async () => {
+    for (const functie of [
+      "sessie_via_cloudflare",
+      "is_medewerker",
+      "klant_aanmelden",
+      "is_goedgekeurde_klant",
+    ] as const) {
+      const { data, error } = await anoniem().rpc(functie);
+      expect(error, `${functie} is aan te roepen zonder inlog`).not.toBeNull();
+      expect(data, functie).toBeNull();
+    }
   });
 
   it("blijft na verversen van het token: per mail nee, via Cloudflare ja", async () => {
@@ -292,6 +369,117 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
       expect(await isMedewerker({ client: metToken(oudToken) })).toBe(false);
     });
   });
+
+  it("ook als een andere sessie op het account iedereen uitlogt, is het oude token niets meer waard", async () => {
+    await metAccountViaDienst("uitgelogd-door-ander", async (sessie, persoon) => {
+      noemIdentiteitCloudflare(sessie.userId);
+      const mail = await inloggenMetMailcode(persoon.email);
+      await mail.client.auth.signOut({ scope: "others" });
+      expect(await isMedewerker({ client: metToken(sessie.token) })).toBe(false);
+    });
+  });
+
+  it("de twaalf uur tellen voor de sessie van dit token, niet voor een andere sessie op het account", async () => {
+    // Dezelfde medewerker logt twee keer in via Cloudflare. De oude sessie is over de tijd;
+    // dat er op het account ook een verse sessie loopt, geeft het oude token niets terug.
+    const persoon = nieuwPersoon("twee-sessies", { adresBevestigd: true });
+    try {
+      const oud = await sessieViaInlogdienst(persoon);
+      const vers = await sessieViaInlogdienst(persoon);
+      expect(vers.userId).toBe(oud.userId);
+      expect(vers.sessieId).not.toBe(oud.sessieId);
+      noemIdentiteitCloudflare(oud.userId);
+      expect(await isMedewerker(oud)).toBe(true);
+      zetSessieBegin(oud.sessieId, 13);
+      expect(await isMedewerker(oud)).toBe(false);
+      expect(await isMedewerker(vers)).toBe(true);
+    } finally {
+      for (const id of await accountsVan(persoon)) await verwijderAccount(id);
+    }
+  });
+
+  it("de sessie moet van het account zelf zijn: een sessie die bij een ander account hoort, telt niet", async () => {
+    await metAccountViaDienst("sessie-van-ander", async (eerste) => {
+      noemIdentiteitCloudflare(eerste.userId);
+      await metAccountViaDienst("sessie-ontvanger", async (tweede) => {
+        noemIdentiteitCloudflare(tweede.userId);
+        expect(await isMedewerker(eerste)).toBe(true);
+        // In de administratie van Supabase hoort de sessie nu bij het andere account. Het
+        // token van het eerste account wijst er nog naar.
+        hangSessieAanAccount(eerste.sessieId, tweede.userId);
+        expect(await isMedewerker({ client: metToken(eerste.token) })).toBe(false);
+      });
+    });
+  });
+
+  it("zonder koppeling met Cloudflare is ook een sessie via een inlogdienst geen medewerker", async () => {
+    // De sessie begon via een inlogdienst (oauth), maar aan het account hangt daarna alleen
+    // nog een e-mailkoppeling. Dat er geen ándere dienst aan hangt is niet genoeg: de
+    // koppeling met Cloudflare moet er zijn.
+    await metAccountViaDienst("zonder-koppeling", async (sessie) => {
+      maakKoppelingEmail(sessie.userId);
+      expect(sessie.methodes).toEqual(["oauth"]);
+      expect(await isMedewerker(sessie)).toBe(false);
+    });
+  });
+
+  it("een wachtwoord dat de mailsessie zelf op het account zet, geeft geen medewerkerrechten", async () => {
+    await metAccountViaDienst("eigen-wachtwoord", async (viaDienst, persoon) => {
+      noemIdentiteitCloudflare(viaDienst.userId);
+      const mail = await inloggenMetMailcode(persoon.email);
+      const wachtwoord = `Zelf-gezet-${Date.now()}`;
+      await mail.client.auth.updateUser({ password: wachtwoord });
+      const client = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const inlog = await client.auth.signInWithPassword({
+        email: persoon.email,
+        password: wachtwoord,
+      });
+      // Lukt het inloggen (lokaal mag een wachtwoord), dan is het nog steeds geen medewerker.
+      if (!inlog.error) expect(await isMedewerker({ client })).toBe(false);
+      expect(await isMedewerker(mail)).toBe(false);
+    });
+  });
+
+  it("een zelfgemaakt of aangepast token wordt niet aangenomen", async () => {
+    const inhoud = {
+      ...leesToken(perMail.token),
+      amr: [{ method: "oauth", timestamp: Math.floor(Date.now() / 1000) }],
+      session_id: viaCloudflare.sessieId,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+    const [kop, , handtekening] = perMail.token.split(".");
+    const zelfOndertekend = `${b64({ alg: "HS256", typ: "JWT" })}.${b64(inhoud)}`;
+    const pogingen = [
+      // Het mailtoken met een andere inhoud en de oude handtekening.
+      `${kop}.${b64(inhoud)}.${handtekening}`,
+      // Zonder handtekening.
+      `${b64({ alg: "none", typ: "JWT" })}.${b64(inhoud)}.`,
+      // Ondertekend met de openbare sleutel van de app als geheim.
+      `${zelfOndertekend}.${createHmac("sha256", anonKey).update(zelfOndertekend).digest("base64url")}`,
+    ];
+    for (const token of pogingen) {
+      const { data, error } = await metToken(token).rpc("is_medewerker");
+      expect(error).not.toBeNull();
+      expect(data).toBeNull();
+    }
+  });
+
+  it("de administratie van Supabase zelf (sessies, koppelingen) is via de API niet te lezen", async () => {
+    for (const schema of ["auth", "public"]) {
+      for (const tabel of ["sessions", "identities", "mfa_amr_claims"]) {
+        const antwoord = await fetch(`${url}/rest/v1/${tabel}?select=*&limit=1`, {
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${perMail.token}`,
+            "Accept-Profile": schema,
+          },
+        });
+        expect(antwoord.status, `${schema}.${tabel}`).not.toBe(200);
+      }
+    }
+  });
 });
 
 describe("klanten: zonder rechten tot een medewerker goedkeurt", () => {
@@ -307,32 +495,88 @@ describe("klanten: zonder rechten tot een medewerker goedkeurt", () => {
     });
   });
 
-  it("een nieuwe klant ziet alleen zijn eigen regel en is niet goedgekeurd", async () => {
-    const { data, error } = await klant.client.from("klanten").select("user_id, goedgekeurd");
+  it("een nieuwe klant staat op de lijst, is niet goedgekeurd en ziet de lijst zelf niet", async () => {
+    expect(await regelVan(klant.userId)).toMatchObject({ goedgekeurd: false });
+    expect(await isGoedgekeurd(klant)).toBe(false);
+    // Ook zijn eigen regel niet: of hij is goedgekeurd, hoort hij van is_goedgekeurde_klant().
+    const { data, error } = await klant.client.from("klanten").select("user_id");
     expect(error).toBeNull();
-    expect(data).toEqual([{ user_id: klant.userId, goedgekeurd: false }]);
-    const { data: goedgekeurd } = await klant.client.rpc("is_goedgekeurde_klant");
-    expect(goedgekeurd).toBe(false);
+    expect(data).toEqual([]);
+    const telling = await klant.client.from("klanten").select("*", { count: "exact", head: true });
+    expect(telling.count ?? 0).toBe(0);
   });
 
-  it("het adres komt uit het account, niet uit wat de klant meestuurt", async () => {
-    const { data } = await admin.from("klanten").select("e_mail").eq("user_id", klant.userId);
-    expect(data?.[0]?.e_mail).toBe(leesToken(klant.token).email);
-    const { error } = await klant.client
+  it("wie zich niet heeft aangemeld, kan zelf geen regel maken, ook geen goedgekeurde", async () => {
+    // Een verse klant zonder regel: hier kan de poging niet stuklopen op "bestaat al".
+    const vers = await nieuweKlant("zelf-regel");
+    const poging = await vers.client
       .from("klanten")
-      .insert({ user_id: klant.userId, e_mail: "iemand@anders.nl", goedgekeurd: true });
-    expect(error).not.toBeNull();
+      .insert({ user_id: vers.userId, e_mail: "iemand@anders.nl", goedgekeurd: true });
+    expect(poging.error).not.toBeNull();
+    await vers.client
+      .from("klanten")
+      .upsert({ user_id: vers.userId, e_mail: "iemand@anders.nl", goedgekeurd: true });
+    expect(await regelVan(vers.userId)).toBeUndefined();
+    expect(await isGoedgekeurd(vers)).toBe(false);
   });
 
-  it("een klant kan zichzelf niet goedkeuren", async () => {
+  it("het adres komt uit het account: niet uit user_metadata en niet uit wat de klant meestuurt", async () => {
+    const vers = await nieuweKlant("adres-uit-account");
+    const echt = String(leesToken(vers.token).email);
+    // user_metadata vult een gebruiker zelf; het staat daarna in zijn token.
+    const gezet = await vers.client.auth.updateUser({
+      data: { e_mail: "directie@bedrijf.nl", email: "directie@bedrijf.nl" },
+    });
+    expect(gezet.error).toBeNull();
+    await vers.client.auth.refreshSession();
+    const { data } = await vers.client.auth.getSession();
+    expect(leesToken(data.session?.access_token ?? "").user_metadata).toMatchObject({
+      e_mail: "directie@bedrijf.nl",
+    });
+    // Argumenten kent de functie niet; zo'n aanroep doet niets.
+    await vers.client.rpc("klant_aanmelden", { e_mail: "directie@bedrijf.nl" } as never);
+    await vers.client.rpc("klant_aanmelden", { user_id: klant.userId, goedgekeurd: true } as never);
+    const aanmelden = await vers.client.rpc("klant_aanmelden");
+    expect(aanmelden.error).toBeNull();
+    expect(await regelVan(vers.userId)).toEqual({ e_mail: echt, goedgekeurd: false });
+  });
+
+  it("een klant kan zichzelf niet goedkeuren: niet via de tabel, niet via alle rijen tegelijk, niet via GraphQL", async () => {
     const poging = await klant.client
       .from("klanten")
       .update({ goedgekeurd: true })
       .eq("user_id", klant.userId)
       .select("user_id");
     expect(poging.data ?? []).toEqual([]);
-    const { data } = await admin.from("klanten").select("goedgekeurd").eq("user_id", klant.userId);
-    expect(data).toEqual([{ goedgekeurd: false }]);
+    await klant.client.from("klanten").update({ goedgekeurd: true }).neq("e_mail", "");
+    await klant.client
+      .from("klanten")
+      .upsert({ user_id: klant.userId, e_mail: "x@y.nl", goedgekeurd: true });
+    await fetch(`${url}/graphql/v1`, {
+      method: "POST",
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${klant.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        query:
+          "mutation { updateklantenCollection(set: {goedgekeurd: true}, atMost: 100) { affectedCount } }",
+      }),
+    });
+    expect(await regelVan(klant.userId)).toMatchObject({ goedgekeurd: false });
+  });
+
+  it("een klant wijzigt geen adres of datum en haalt geen regel weg, ook zijn eigen niet", async () => {
+    const voor = await regelVan(klant.userId);
+    const eigen = klant.client.from("klanten");
+    await eigen.update({ e_mail: "directie@bedrijf.nl" }).eq("user_id", klant.userId);
+    await klant.client
+      .from("klanten")
+      .update({ aangemeld_op: "2000-01-01" })
+      .eq("user_id", klant.userId);
+    await klant.client.from("klanten").delete().eq("user_id", klant.userId);
+    expect(await regelVan(klant.userId)).toEqual(voor);
   });
 
   it("een mailsessie op het adres van een medewerker ziet de klant niet en keurt niet goed", async () => {
@@ -344,8 +588,7 @@ describe("klanten: zonder rechten tot een medewerker goedkeurt", () => {
       .eq("user_id", klant.userId)
       .select("user_id");
     expect(poging.data ?? []).toEqual([]);
-    const { data } = await admin.from("klanten").select("goedgekeurd").eq("user_id", klant.userId);
-    expect(data).toEqual([{ goedgekeurd: false }]);
+    expect(await regelVan(klant.userId)).toMatchObject({ goedgekeurd: false });
   });
 
   it("dezelfde medewerker via Cloudflare ziet de klant en keurt hem goed", async () => {
@@ -361,8 +604,7 @@ describe("klanten: zonder rechten tot een medewerker goedkeurt", () => {
       .select("user_id");
     expect(goedkeuren.error).toBeNull();
     expect(goedkeuren.data).toEqual([{ user_id: klant.userId }]);
-    const { data } = await klant.client.rpc("is_goedgekeurde_klant");
-    expect(data).toBe(true);
+    expect(await isGoedgekeurd(klant)).toBe(true);
   });
 
   it("ook een medewerker wijzigt alleen de goedkeuring, niet het adres", async () => {
@@ -371,5 +613,159 @@ describe("klanten: zonder rechten tot een medewerker goedkeurt", () => {
       .update({ e_mail: "ander@adres.nl" })
       .eq("user_id", klant.userId);
     expect(error?.code).toBe("42501");
+  });
+
+  it("na uitloggen is ook de goedkeuring niets meer waard met het oude token", async () => {
+    const vers = await nieuweKlant("uitgelogde-klant");
+    await vers.client.rpc("klant_aanmelden");
+    await keurGoed(vers.userId);
+    expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(true);
+    await vers.client.auth.signOut({ scope: "local" });
+    expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(false);
+  });
+});
+
+describe("de poort van een klantportaal: wie alleen een mailadres heeft, mag niets", () => {
+  // De template zelf is geen klantportaal; de voorbeeldtabel `items` heeft de poort dus niet.
+  // Met `"klantportaal": true` eist `pnpm guard:rls` de poort op elke tabel. Deze test zet
+  // hem voor even op `items` en bewijst wat die ene regel doet (docs/WERKWIJZE.md).
+  it("zonder goedkeuring leest en schrijft een account niets; na goedkeuring wel, en alleen het eigen", async () => {
+    const vreemde = await nieuweKlant("vreemde");
+    const goedgekeurd = await nieuweKlant("goedgekeurd");
+    await goedgekeurd.client.rpc("klant_aanmelden");
+    await keurGoed(goedgekeurd.userId);
+
+    await metPoortOp("items", async () => {
+      const schrijven = await vreemde.client
+        .from("items")
+        .insert({ owner_id: vreemde.userId, title: "van een vreemde" });
+      expect(schrijven.error).not.toBeNull();
+      // Ook aanmelden alleen is niet genoeg: een medewerker moet goedkeuren.
+      await vreemde.client.rpc("klant_aanmelden");
+      const naAanmelden = await vreemde.client
+        .from("items")
+        .insert({ owner_id: vreemde.userId, title: "aangemeld, niet goedgekeurd" });
+      expect(naAanmelden.error).not.toBeNull();
+      const { count } = await admin
+        .from("items")
+        .select("*", { count: "exact", head: true })
+        .eq("owner_id", vreemde.userId);
+      expect(count).toBe(0);
+
+      const eigen = await goedgekeurd.client
+        .from("items")
+        .insert({ owner_id: goedgekeurd.userId, title: "van een goedgekeurde klant" })
+        .select("id");
+      expect(eigen.error).toBeNull();
+      expect(eigen.data).toHaveLength(1);
+      // De poort komt bovenop de regels die er al waren: het blijft alleen het eigen.
+      const lezen = await vreemde.client.from("items").select("id");
+      expect(lezen.data ?? []).toEqual([]);
+      const namensAnder = await goedgekeurd.client
+        .from("items")
+        .insert({ owner_id: vreemde.userId, title: "namens een ander" });
+      expect(namensAnder.error).not.toBeNull();
+
+      // Een medewerker via Cloudflare komt ook door de poort.
+      const alsMedewerker = await viaCloudflare.client
+        .from("items")
+        .insert({ owner_id: viaCloudflare.userId, title: "van een medewerker" })
+        .select("id");
+      expect(alsMedewerker.error).toBeNull();
+      // Dezelfde persoon per mail niet.
+      const perMailSchrijven = await perMail.client
+        .from("items")
+        .insert({ owner_id: perMail.userId, title: "per mail" });
+      expect(perMailSchrijven.error).not.toBeNull();
+    });
+  });
+});
+
+describe("de poort van een klantportaal, gelezen uit de database zelf", () => {
+  // Met `"klantportaal": true` draait deze controle in tests/rls/open-policies.test.ts en moet
+  // de lijst leeg zijn. De template zelf is geen klantportaal; hier staat wat de controle in
+  // de echte database vindt, zodat hij ook zonder de schakelaar bewezen is.
+  it("vindt de tabel klanten en de functies van het klantportaal in orde, en het voorbeeld items niet", () => {
+    const problemen = problemenKlantportaalInDatabase();
+    expect(problemen.filter((probleem) => !probleem.startsWith("public.items "))).toEqual([]);
+    expect(
+      problemen.map((probleem) => /^public\.items \(policy "([^"]+)"\)/.exec(probleem)?.[1]),
+    ).toEqual([
+      "items_delete_own",
+      "items_insert_own",
+      "items_select_own",
+      "items_update_own",
+      "items_update_own",
+    ]);
+  });
+
+  it("met de poort op items is er niets meer mis", async () => {
+    await metPoortOp("items", async () => {
+      expect(problemenKlantportaalInDatabase()).toEqual([]);
+    });
+  });
+});
+
+describe("een klant wijzigt zijn e-mailadres niet zelf", () => {
+  // De inrichting zet de mail voor een adreswijziging dicht. Lokaal staat hij open; zo is te
+  // bewijzen wat de database doet als het toch gebeurt.
+  it("na een adreswijziging loopt het adres op de lijst mee, vervalt de goedkeuring en is de oude sessie uitgelogd", async () => {
+    const eerst = nieuwAdres("eerst");
+    const daarna = nieuwAdres("daarna");
+    const sessie = await inloggenMetMailcode(eerst);
+    opruimen.add(sessie.userId);
+    await sessie.client.rpc("klant_aanmelden");
+    await keurGoed(sessie.userId);
+    expect(await isGoedgekeurd(sessie)).toBe(true);
+
+    await wijzigAdres(sessie, eerst, daarna);
+
+    // De medewerker ziet het adres dat nu op het account staat, en keurt opnieuw goed.
+    expect(await regelVan(sessie.userId)).toEqual({ e_mail: daarna, goedgekeurd: false });
+    await keurGoed(sessie.userId);
+    // De sessie van vóór de wijziging heeft daar niets aan: die bestaat niet meer.
+    expect(await isGoedgekeurd({ client: metToken(sessie.token) })).toBe(false);
+    const verversen = await sessie.client.auth.refreshSession();
+    expect(verversen.error).not.toBeNull();
+    // Wie bij de mailbox van het nieuwe adres kan, logt gewoon in en is de goedgekeurde klant.
+    const opnieuw = await inloggenMetMailcode(daarna);
+    expect(opnieuw.userId).toBe(sessie.userId);
+    expect(await isGoedgekeurd(opnieuw)).toBe(true);
+  });
+
+  it("aanmelden op andermans adres lukt niet: na de wijziging is de aanvaller zijn sessie kwijt", async () => {
+    // De aanvaller wijzigt het adres van zijn eigen account in dat van een bekende klant; die
+    // klikt alleen op "bevestig" in een mail. Zou de aanvaller zich daarna met zijn oude sessie
+    // aanmelden, dan keurde de medewerker het adres van de klant goed op het account van de
+    // aanvaller.
+    const eigen = nieuwAdres("aanvaller");
+    const vanSlachtoffer = nieuwAdres("bekende-klant");
+    const sessie = await inloggenMetMailcode(eigen);
+    opruimen.add(sessie.userId);
+
+    await wijzigAdres(sessie, eigen, vanSlachtoffer);
+
+    await sessie.client.rpc("klant_aanmelden");
+    await metToken(sessie.token).rpc("klant_aanmelden");
+    expect(await regelVan(sessie.userId)).toBeUndefined();
+    // Ook als een medewerker het adres later goedkeurt (de klant zelf meldde zich aan), heeft
+    // het oude token van de aanvaller geen rechten.
+    const slachtoffer = await inloggenMetMailcode(vanSlachtoffer);
+    expect(slachtoffer.userId).toBe(sessie.userId);
+    await slachtoffer.client.rpc("klant_aanmelden");
+    await keurGoed(sessie.userId);
+    expect(await isGoedgekeurd(slachtoffer)).toBe(true);
+    expect(await isGoedgekeurd({ client: metToken(sessie.token) })).toBe(false);
+  });
+
+  it("ook als een beheerder het adres wijzigt, vervalt de goedkeuring tot een medewerker opnieuw kijkt", async () => {
+    const vers = await nieuweKlant("door-beheerder");
+    await vers.client.rpc("klant_aanmelden");
+    await keurGoed(vers.userId);
+    const nieuw = nieuwAdres("door-beheerder-nieuw");
+    const { error } = await admin.auth.admin.updateUserById(vers.userId, { email: nieuw });
+    expect(error).toBeNull();
+    expect(await regelVan(vers.userId)).toEqual({ e_mail: nieuw, goedgekeurd: false });
+    expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(false);
   });
 });

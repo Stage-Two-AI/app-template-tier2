@@ -161,10 +161,10 @@ De template heeft daar een functie voor, `sessie_via_cloudflare()`, en een voorb
 (`supabase/migrations/20261114100000_klantportaal.sql`):
 
 ```sql
--- Goed: alleen een sessie via Cloudflare ziet alle klanten.
-create policy "klanten_select_eigen_of_medewerker" on public.klanten
+-- Goed: alleen een sessie via Cloudflare ziet de klanten.
+create policy "klanten_select_medewerker" on public.klanten
   for select to authenticated
-  using ((select auth.uid()) = user_id or (select public.is_medewerker()));
+  using ((select public.is_medewerker()));
 
 -- Fout: het adres kan iedereen met toegang tot die mailbox claimen.
 --   using (auth.jwt() ->> 'email' like '%@bedrijf.nl')
@@ -172,23 +172,102 @@ create policy "klanten_select_eigen_of_medewerker" on public.klanten
 --   using (auth.jwt() -> 'user_metadata' ->> 'rol' = 'medewerker')
 ```
 
-Drie dingen die daarbij horen:
+Wat daarbij hoort:
 
 - **Per mail is een medewerker gewoon klant.** Dat is de bedoeling: wie meer wil mogen, logt
-  in met de knop voor medewerkers.
-- **Een nieuwe klant mag niets tot een medewerker hem goedkeurt.** Iedereen kan per mail een
-  account maken, dus een account alleen is geen recht. In het voorbeeld meldt een klant zich
-  aan (`klant_aanmelden()`), zet een medewerker `goedgekeurd` aan, en gebruiken de policies
-  van de eigen tabellen `is_goedgekeurde_klant()`. Het adres in die tabel komt uit het
-  account zelf, niet uit wat de browser meestuurt.
+  in met de knop voor medewerkers. Die knop staat ook op `/login` voor wie al is ingelogd,
+  dus uitloggen hoeft daar niet voor.
 - **Medewerkerrechten gelden twaalf uur na het inloggen via Cloudflare.** Daarna is de
   medewerker nog ingelogd, maar als klant, tot hij opnieuw op de knop voor medewerkers
   klikt. Zo houdt iemand die bij Cloudflare is afgesloten zijn rechten niet wekenlang. De
   duur staat op één plek, in `sessie_via_cloudflare()`; de tijd komt uit de administratie
   van Supabase (`auth.sessions.created_at`) en niet uit iets wat de gebruiker kan aanpassen.
+  Een scherm voor medewerkers toont na die twaalf uur "Log opnieuw in als medewerker" in
+  plaats van een leeg scherm, met `useMedewerkersessie` en `OpnieuwAlsMedewerker` uit
+  `src/features/auth/medewerkersessie.tsx`.
 - **Cloudflare is de enige inlogdienst naast mail.** Het token zegt "via een inlogdienst",
   niet welke. Zet daarom in Supabase niet ook Google of Microsoft rechtstreeks aan; hangt er
   een tweede dienst aan een account, dan zegt de functie nee.
+- **Eén account per adres.** Vult een medewerker zijn werkadres in het vak voor klanten in,
+  dan bestaat er daarna een klantaccount op dat adres. De inlogpagina wijst medewerkers
+  daarom op de knop, en zegt het eerlijk als de knop daardoor vastloopt.
+
+**Wie alleen een e-mailadres heeft, mag niets.** Iedereen op internet kan bij een
+klantportaal per mail een account maken. Een policy `to authenticated` geldt daar dus voor
+iedereen met een e-mailadres, ook `using (auth.uid() = owner_id)`: een vreemde vult dan zijn
+eigen rijen in jouw tabellen. Een account mag pas iets als een medewerker het heeft
+goedgekeurd. In het voorbeeld meldt een klant zich aan met `klant_aanmelden()`, zet een
+medewerker `goedgekeurd` aan in de tabel `klanten`, en is `is_goedgekeurde_klant()` daarna
+waar. De klant ziet die tabel zelf niet.
+
+Zet in `stack.config.json` de schakelaar `"klantportaal": true`. Dan dwingt `pnpm guard:rls`
+(en in de databasejob `tests/rls/open-policies.test.ts`, op de database zelf) deze regel af:
+
+1. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in elke
+   `using` en `with check` een poort als harde eis: `public.is_medewerker()` of
+   `public.is_goedgekeurde_klant()`, met `and` aan de rest vast, in elke tak van een `or`.
+   Eén policy `as restrictive for all` met alleen die eis dekt de hele tabel.
+2. Elke `security definer`-functie en elke view waar een ingelogde gebruiker bij kan, roept
+   zelf een poort aan, of staat met een reden in `klantportaal_vrije_functies`. Er zijn geen
+   `open_tabellen`.
+
+De eenvoudigste weg voor een tabel die er al is: één poort erbij, en de policies die er
+stonden blijven zoals ze zijn. Voor de voorbeeldtabel `items`:
+
+```sql
+create policy "items_poort" on public.items as restrictive for all to authenticated
+  using (public.is_medewerker() or public.is_goedgekeurde_klant());
+```
+
+Een `restrictive` policy komt bovenop de andere: zonder poort komt niemand erdoor, mét poort
+gelden de gewone regels (alleen je eigen rijen). Bij een nieuwe tabel kan de poort ook in de
+policy zelf:
+
+```sql
+-- Goed: zonder goedkeuring is dit nooit waar.
+using (public.is_goedgekeurde_klant() and auth.uid() = owner_id)
+using (public.is_medewerker() or (public.is_goedgekeurde_klant() and auth.uid() = owner_id))
+
+-- Fout: de tweede tak heeft geen poort.
+--   using (public.is_medewerker() or auth.uid() = owner_id)
+-- Fout: zonder `public.` kan een andere functie met die naam bedoeld zijn.
+--   using (is_medewerker())
+```
+
+Schrijf de poort voluit, met `public.` ervoor. Een functie die een ingelogde gebruiker niet
+hoort aan te roepen, raakt het recht kwijt met
+`revoke all on function public.<naam>() from public, anon, authenticated`; een view krijgt
+`with (security_invoker = true)`. Kent de app soorten medewerkers, maak dan een eigen functie
+die zelf `public.is_medewerker()` aanroept en zet hem met een reden in `klantportaal_poorten`.
+De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft de poort
+niet. Zonder de schakelaar verandert er voor een app niets.
+
+**Een klant wijzigt zijn e-mailadres niet zelf.** Dat loopt via een medewerker, en de
+inrichting zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past
+het adres aan in Supabase), dan loopt het adres in `klanten` mee, vervalt de goedkeuring tot
+een medewerker opnieuw kijkt, en eindigen alle sessies van dat account.
+
+**De link in de inlogmail.** De mail bevat de code en een link naar de inlogpagina. De link
+gaat altijd naar het adres van de app zelf, wat de aanvrager ook opgeeft, en logt pas in na
+een klik op de pagina. Is de mail niet in dezelfde browser aangevraagd, dan vraagt de pagina
+eerst "Heb je deze mail zelf aangevraagd?": een ander kan je ook de link uit zíjn mail
+sturen, en dan log je in op zijn account. Na het inloggen staat kort bovenin op welk adres
+je binnen bent.
+
+Bekende beperkingen, die de app niet kan oplossen:
+
+- **Wie de mail heeft, is binnen.** De code en de link werken voor iedereen die de mail kan
+  lezen, ook na doorsturen. Na gebruik werken ze niet nog eens, maar twee mensen die de link
+  op hetzelfde moment openen kan Supabase niet uit elkaar houden.
+- **Een vreemde kan een lopende code ongeldig maken** door zelf een code aan te vragen op
+  het adres van een klant. De klant vraagt dan opnieuw een code aan. De rem per adres en de
+  controle tegen robots uit de inrichting beperken dit, ze voorkomen het niet.
+- **Rechtstreeks bij Supabase is te zien of een adres een account heeft.** De inlogpagina
+  geeft bij een bekend en een onbekend adres hetzelfde antwoord, maar wie de API van Supabase
+  zelf aanroept met "maak geen nieuw account", ziet het verschil.
+- **De twaalf uur is zo hard als de sessieduur bij Cloudflare.** Wie na twaalf uur opnieuw op
+  de knop klikt en bij Cloudflare nog een geldige sessie heeft, is zonder opnieuw in te
+  loggen weer medewerker. Iemand buitensluiten doe je dus bij Cloudflare.
 
 Test het zoals RLS: `tests/rls/klantportaal.test.ts` logt echt in per mail op het adres van
 een medewerker en verwacht geen medewerkerrechten; dezelfde persoon via Cloudflare krijgt ze

@@ -96,11 +96,13 @@ $$;
 comment on function public.is_medewerker() is
   'Medewerkerrechten: alleen in een sessie via Cloudflare. Gebruik deze functie in policies, nooit een e-mailadres of auth.uid().';
 
--- Het voorbeeld van "klant zonder rechten tot de app hem goedkeurt". Iedereen mag per mail
--- een account maken; dat account mag niets tot een medewerker het goedkeurt. Een klant
--- meldt zich aan met `klant_aanmelden()` en ziet alleen zijn eigen regel. Een medewerker
--- ziet alle regels en zet `goedgekeurd`. Gebruik in de policies van de eigen tabellen
--- `is_goedgekeurde_klant()` voor wat alleen een goedgekeurde klant mag.
+-- "Een klant mag niets tot een medewerker hem goedkeurt." Iedereen kan per mail een account
+-- maken, dus een account alleen is geen recht. Een klant meldt zich aan met
+-- `klant_aanmelden()`; een medewerker ziet de lijst en zet `goedgekeurd`. Of hij is
+-- goedgekeurd, hoort de klant van `is_goedgekeurde_klant()`: de tabel zelf ziet alleen een
+-- medewerker. Gebruik in de policies van de eigen tabellen `public.is_medewerker()` en
+-- `public.is_goedgekeurde_klant()` als harde eis; met `"klantportaal": true` in
+-- stack.config.json dwingt `pnpm guard:rls` dat af (docs/WERKWIJZE.md).
 create table public.klanten (
   user_id uuid primary key references auth.users (id) on delete cascade,
   e_mail text not null,
@@ -114,16 +116,17 @@ comment on table public.klanten is
 alter table public.klanten enable row level security;
 
 -- Smal: lezen, en van één kolom wijzigen. Een regel maken gaat alleen via
--- klant_aanmelden(), zodat niemand zelf een adres of een goedkeuring kan invullen.
+-- klant_aanmelden(), zodat niemand zelf een adres of een goedkeuring kan invullen. Een regel
+-- weghalen kan niemand via de app.
 revoke all on public.klanten from public, anon, authenticated;
 grant select on public.klanten to authenticated;
 grant update (goedgekeurd) on public.klanten to authenticated;
 
-create policy "klanten_select_eigen_of_medewerker"
+create policy "klanten_select_medewerker"
   on public.klanten
   for select
   to authenticated
-  using ((select auth.uid()) = user_id or (select public.is_medewerker()));
+  using ((select public.is_medewerker()));
 
 create policy "klanten_update_medewerker"
   on public.klanten
@@ -132,7 +135,9 @@ create policy "klanten_update_medewerker"
   using ((select public.is_medewerker()))
   with check ((select public.is_medewerker()));
 
--- Het adres komt uit het account zelf, niet uit wat de browser meestuurt.
+-- Het adres komt uit het account zelf, niet uit wat de browser of het token meestuurt. De
+-- sessie van het token moet nog bestaan: na uitloggen, of na een adreswijziging (zie
+-- hieronder), doet een oud token hier niets meer.
 create function public.klant_aanmelden()
 returns void
 language sql
@@ -144,8 +149,17 @@ as $$
     from auth.users u
    where u.id = auth.uid()
      and u.email is not null
+     and exists (
+       select 1
+         from auth.sessions s
+        where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid
+          and s.user_id = auth.uid()
+     )
   on conflict (user_id) do nothing
 $$;
+
+comment on function public.klant_aanmelden() is
+  'Zet het eigen account op de lijst van klanten, niet goedgekeurd. Het adres komt uit het account. Meer kan deze functie niet.';
 
 create function public.is_goedgekeurde_klant()
 returns boolean
@@ -160,12 +174,56 @@ as $$
      where k.user_id = auth.uid()
        and k.goedgekeurd
   )
+  and exists (
+    select 1
+      from auth.sessions s
+     where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid
+       and s.user_id = auth.uid()
+  )
 $$;
 
-revoke all on function public.sessie_via_cloudflare() from public, anon;
-revoke all on function public.is_medewerker() from public, anon;
-revoke all on function public.klant_aanmelden() from public, anon;
-revoke all on function public.is_goedgekeurde_klant() from public, anon;
+comment on function public.is_goedgekeurde_klant() is
+  'Heeft een medewerker dit account als klant goedgekeurd, en bestaat de sessie nog? Gebruik deze functie in policies voor wat alleen een goedgekeurde klant mag.';
+
+-- Een klant wijzigt zijn e-mailadres niet zelf: dat loopt via een medewerker, en de inrichting
+-- zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past het adres
+-- aan, of de instelling staat open), dan mag de goedkeuring niet meeverhuizen naar een adres
+-- dat de medewerker nooit heeft gezien, en mag wie het account eerst had er niet in blijven:
+--   * het adres in `klanten` loopt mee met het account, zodat de medewerker ziet wat er nu
+--     staat;
+--   * de goedkeuring vervalt: een medewerker keurt het nieuwe adres opnieuw goed;
+--   * alle sessies van het account eindigen. Wie het account op het oude adres had, is
+--     uitgelogd en komt er alleen weer in met de mailbox van het nieuwe adres.
+create function public.klant_adres_gewijzigd()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update public.klanten
+     set e_mail = coalesce(new.email, ''),
+         goedgekeurd = false
+   where user_id = new.id;
+  delete from auth.sessions where user_id = new.id;
+  return null;
+end
+$$;
+
+create trigger klant_adres_gewijzigd
+  after update on auth.users
+  for each row
+  when (old.email is distinct from new.email)
+  execute function public.klant_adres_gewijzigd();
+
+-- Wie mag wat aanroepen. Standaard mag iedereen elke nieuwe functie uitvoeren; dat gaat er
+-- eerst af. De vier functies van het klantportaal zijn voor ingelogde gebruikers, de functie
+-- achter de trigger voor niemand.
+revoke all on function public.sessie_via_cloudflare() from public, anon, authenticated;
+revoke all on function public.is_medewerker() from public, anon, authenticated;
+revoke all on function public.klant_aanmelden() from public, anon, authenticated;
+revoke all on function public.is_goedgekeurde_klant() from public, anon, authenticated;
+revoke all on function public.klant_adres_gewijzigd() from public, anon, authenticated;
 grant execute on function public.sessie_via_cloudflare() to authenticated;
 grant execute on function public.is_medewerker() to authenticated;
 grant execute on function public.klant_aanmelden() to authenticated;

@@ -110,6 +110,7 @@
       "tests/unit/verwachting.test.ts",
       "tests/rls/open-policies.test.ts",
       "tests/rls/lib/database.ts",
+      "tests/rls/lib/klantportaal-poort.ts",
       "tests/rls/lib/afscherming.ts",
       "scripts/lib/onderdelen.mjs",
       "tests/unit/onderdelen.test.ts",
