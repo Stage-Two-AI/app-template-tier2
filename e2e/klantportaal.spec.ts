@@ -48,14 +48,14 @@ test("een nieuwe klant logt in met de code uit de mail", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Vul de code in" })).toBeVisible();
   await expect(page.getByText(nieuweKlant)).toBeVisible();
-  const codevak = page.getByLabel("Code van zes cijfers");
+  const codevak = page.getByLabel("Code van acht cijfers");
   await expect(codevak).toBeFocused();
   await expect(codevak).toHaveAttribute("autocomplete", "one-time-code");
   await expect(codevak).toHaveAttribute("inputmode", "numeric");
 
   const { code } = await leesMail();
-  expect(code).toMatch(/^\d{6}$/);
-  // Zes cijfers typen is genoeg: de pagina controleert de code dan zelf.
+  expect(code).toMatch(/^\d{8}$/);
+  // Acht cijfers typen is genoeg: de pagina controleert de code dan zelf.
   await codevak.pressSequentially(code);
 
   await expect(page.getByRole("heading", { name: "Mijn lijst" })).toBeVisible();
@@ -76,8 +76,8 @@ test("een verkeerde code geeft een nette melding en geen toegang", async ({ page
   await expect(page.getByRole("heading", { name: "Vul de code in" })).toBeVisible();
 
   const { code } = await leesMail();
-  const fout = code === "000000" ? "000001" : "000000";
-  const codevak = page.getByLabel("Code van zes cijfers");
+  const fout = code === "00000000" ? "00000001" : "00000000";
+  const codevak = page.getByLabel("Code van acht cijfers");
   await codevak.pressSequentially(fout);
   await expect(page.getByRole("alert")).toContainText("Deze code klopt niet");
   await expect(page.getByRole("heading", { name: "Mijn lijst" })).toBeHidden();

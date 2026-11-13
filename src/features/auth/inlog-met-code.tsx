@@ -15,7 +15,7 @@ import { useMailcode } from "@/features/auth/use-mailcode";
 
 /**
  * De inlogpagina van een klantportaal: klanten vullen hun e-mailadres in en krijgen een
- * code van zes cijfers, medewerkers loggen in via Cloudflare. Deze component tekent alleen;
+ * code van acht cijfers, medewerkers loggen in via Cloudflare. Deze component tekent alleen;
  * de stappen en regels staan in mailcode.ts.
  *
  * Deze pagina staat open voor iedereen en geeft niemand rechten: dat doet de database.
@@ -135,7 +135,7 @@ function AdresStap({ mailcode, robot, toonFout }: MetRobot & { toonFout: boolean
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
       <p className="text-sm text-muted-foreground">
-        Vul je e-mailadres in. Je krijgt een mail met een code van zes cijfers.
+        Vul je e-mailadres in. Je krijgt een mail met een code van acht cijfers.
       </p>
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">E-mailadres</Label>
@@ -181,7 +181,7 @@ function CodeStap({ mailcode, robot }: MetRobot) {
   function wijzig(invoer: string) {
     const nieuw = leesCode(invoer);
     setCode(nieuw);
-    // Zes cijfers getypt of geplakt (of door de telefoon ingevuld): meteen controleren.
+    // Acht cijfers getypt of geplakt (of door de telefoon ingevuld): meteen controleren.
     if (isHeleCode(nieuw) && nieuw !== code && !bezig) void mailcode.controleer(nieuw);
   }
 
@@ -198,7 +198,7 @@ function CodeStap({ mailcode, robot }: MetRobot) {
       </p>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="code">Code van zes cijfers</Label>
+          <Label htmlFor="code">Code van acht cijfers</Label>
           <Input
             ref={veld}
             id="code"

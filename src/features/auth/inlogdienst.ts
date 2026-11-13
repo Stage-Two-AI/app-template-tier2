@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *               door de deur mag, krijgt ook geen Supabase-account.
  *   azure       Supabase logt zelf in bij Microsoft.
  *   google      Supabase logt zelf in bij Google.
- *   mailcode    Supabase stuurt een mail met een code van zes cijfers en een link.
+ *   mailcode    Supabase stuurt een mail met een code van acht cijfers en een link.
  *   wachtwoord  e-mail en wachtwoord; alleen lokaal en in CI, voor de tests.
  *
  * Een klantportaal zet er twee naast elkaar: `VITE_INLOGDIENST=cloudflare,mailcode`.

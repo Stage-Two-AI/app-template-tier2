@@ -18,8 +18,8 @@ import { z } from "zod";
  *    (zie `sessie_via_cloudflare()` in supabase/migrations).
  */
 
-/** Zes cijfers en een kwartier geldig: zo staat het ook in supabase/config.toml en in de inrichting. */
-export const CODE_LENGTE = 6;
+/** Acht cijfers en een kwartier geldig: zo staat het ook in supabase/config.toml en in de inrichting. */
+export const CODE_LENGTE = 8;
 export const CODE_GELDIG_MS = 15 * 60 * 1000;
 /** Zo lang wacht de knop "nieuwe code". Supabase zelf weigert een tweede mail binnen een minuut. */
 export const WACHT_OPNIEUW_MS = 60 * 1000;
@@ -76,8 +76,8 @@ export function leesAdres(invoer: string): string | null {
 }
 
 /**
- * Wat iemand in het codevak typt of plakt, teruggebracht tot cijfers. "123 456" en
- * "123-456" (zo plakken sommige mailprogramma's) worden "123456"; de rest valt weg.
+ * Wat iemand in het codevak typt of plakt, teruggebracht tot cijfers. "1234 5678" en
+ * "1234-5678" (zo plakken sommige mailprogramma's) worden "12345678"; de rest valt weg.
  */
 export function leesCode(invoer: string): string {
   return invoer.replace(/\D/g, "").slice(0, CODE_LENGTE);

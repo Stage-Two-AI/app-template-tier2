@@ -31,7 +31,7 @@ async function mailsVoor(url: string, email: string): Promise<string[]> {
 /**
  * Roep dit aan vóórdat de code wordt aangevraagd. Het onthoudt welke mails er al waren en
  * geeft een functie terug die wacht op de eerstvolgende nieuwe mail voor dit adres, en daar
- * de code van zes cijfers en de link uit haalt.
+ * de code van acht cijfers en de link uit haalt.
  *
  *   const leesMail = await wachtOpInlogmail({ email });
  *   ... code aanvragen ...
@@ -51,7 +51,7 @@ export async function wachtOpInlogmail(o: {
       if (nieuw) {
         const antwoord = await fetch(`${url}/api/v1/message/${nieuw}`);
         const html = ((await antwoord.json()) as Bericht).HTML ?? "";
-        const code = /id="code"[^>]*>\s*(\d{6})\s*</.exec(html)?.[1];
+        const code = /id="code"[^>]*>\s*(\d{8})\s*</.exec(html)?.[1];
         const link = /id="link"[^>]*href="([^"]+)"/.exec(html)?.[1];
         if (!code || !link) {
           throw new Error(

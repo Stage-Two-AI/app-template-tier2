@@ -232,7 +232,7 @@ web3 = 30
 # inlogdienst aan; dat gebeurt via de Management API, niet via dit bestand.
 #
 # Inloggen met een code per mail (klantportaal) werkt lokaal zoals in productie: een code van
-# zes cijfers, een kwartier geldig, en een nieuw adres moet eerst bevestigd worden met die
+# acht cijfers, een kwartier geldig, en een nieuw adres moet eerst bevestigd worden met die
 # code. De mail zelf komt in de lokale mailvanger (zie [local_smtp]); daar lezen de tests de
 # code uit.
 [auth.email]
@@ -251,7 +251,7 @@ secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
-otp_length = 6
+otp_length = 8
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 900
 

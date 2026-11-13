@@ -33,7 +33,7 @@ afterEach(() => {
 async function naarCodestap(adres = "piet@klant.nl") {
   await userEvent.type(screen.getByLabelText("E-mailadres"), adres);
   await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
-  return await screen.findByLabelText("Code van zes cijfers");
+  return await screen.findByLabelText("Code van acht cijfers");
 }
 
 describe("klantportaal: bij wie log je in", () => {
@@ -208,7 +208,7 @@ describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", ()
     expect(signInWithOtp).not.toHaveBeenCalled();
 
     widgets[0]?.opties.callback("bewijs-laat");
-    await screen.findByLabelText("Code van zes cijfers");
+    await screen.findByLabelText("Code van acht cijfers");
     expect(signInWithOtp.mock.calls[0]?.[0].options.captchaToken).toBe("bewijs-laat");
   });
 
@@ -221,7 +221,7 @@ describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", ()
     widgets[0]?.opties.callback("bewijs-1");
     await user.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
     await user.click(screen.getByRole("button", { name: "Doorgaan" }));
-    await screen.findByLabelText("Code van zes cijfers");
+    await screen.findByLabelText("Code van acht cijfers");
     // De widget van het eerste scherm is weg; die op het codescherm haalt een nieuw bewijs.
     await waitFor(() => expect(widgets).toHaveLength(2));
     expect(remove).toHaveBeenCalledWith("widget-1");
@@ -264,7 +264,7 @@ describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", ()
     await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
     await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("geen robot");
-    expect(screen.queryByLabelText("Code van zes cijfers")).toBeNull();
+    expect(screen.queryByLabelText("Code van acht cijfers")).toBeNull();
   });
 
   it("een tikfout in het adres wacht niet op de controle", async () => {
@@ -293,14 +293,14 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     expect(screen.queryByRole("button", { name: "Inloggen voor medewerkers" })).toBeNull();
   });
 
-  it("controleert de code zodra er zes cijfers staan", async () => {
+  it("controleert de code zodra er acht cijfers staan", async () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);
     const code = await naarCodestap();
-    await userEvent.type(code, "123456");
+    await userEvent.type(code, "12345678");
     await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(1));
     expect(verifyOtp).toHaveBeenCalledWith({
       email: "piet@klant.nl",
-      token: "123456",
+      token: "12345678",
       type: "email",
     });
   });
@@ -318,12 +318,12 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     verifyOtp.mockResolvedValueOnce({ data: {}, error: AFGEWEZEN });
     render(<LoginPage dienst={KLANTPORTAAL} />);
     const code = await naarCodestap();
-    await userEvent.type(code, "000000");
+    await userEvent.type(code, "00000000");
     expect(await screen.findByRole("alert")).toHaveTextContent("Deze code klopt niet");
     expect(code).toHaveAttribute("aria-invalid", "true");
     expect(code).toHaveFocus();
     await userEvent.clear(code);
-    await userEvent.type(code, "123456");
+    await userEvent.type(code, "12345678");
     await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
@@ -378,7 +378,7 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     await naarCodestap();
     cleanup();
     render(<LoginPage dienst={KLANTPORTAAL} />);
-    expect(screen.getByLabelText("Code van zes cijfers")).toBeInTheDocument();
+    expect(screen.getByLabelText("Code van acht cijfers")).toBeInTheDocument();
     expect(screen.getByText("piet@klant.nl")).toBeInTheDocument();
     expect(signInWithOtp).toHaveBeenCalledTimes(1);
   });
@@ -395,7 +395,7 @@ describe("klantportaal: nieuwe code en verlopen code", () => {
   async function naarCode(user: ReturnType<typeof userEvent.setup>) {
     await user.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
     await user.click(screen.getByRole("button", { name: "Doorgaan" }));
-    return await screen.findByLabelText("Code van zes cijfers");
+    return await screen.findByLabelText("Code van acht cijfers");
   }
 
   it("laat pas na een minuut een nieuwe code sturen", async () => {
@@ -423,7 +423,7 @@ describe("klantportaal: nieuwe code en verlopen code", () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);
     const code = await naarCode(user);
     await vi.advanceTimersByTimeAsync(16 * 60_000);
-    await user.type(code, "123456");
+    await user.type(code, "12345678");
     expect(await screen.findByRole("alert")).toHaveTextContent("verlopen");
     expect(
       await screen.findByRole("button", { name: "Stuur een nieuwe code" }, { timeout: 4000 }),
