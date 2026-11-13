@@ -6,7 +6,7 @@ name: Tijdelijk - browsertest op concept
 
 on:
   push:
-    branches: ["uitgave/43", "aanval/43-inlog-2"]
+    branches: ["uitgave/43"]
 
 permissions:
   contents: read
@@ -82,4 +82,4 @@ jobs:
       - run: pnpm exec supabase start -x studio,imgproxy,logflare,vector,supavisor
       - run: pnpm env:local
       - name: Mutaties
-        run: node tests/rls/aanval2-mutaties-migratie.mjs a0-geen a1-goedgekeurd-sessie-van-ander a3-zoekpad-weg
+        run: node .github/tijdelijk/mutaties-klantportaal.mjs
