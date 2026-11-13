@@ -10,11 +10,13 @@ Wat erin zit:
 |---|---|
 | `inrichten-cloudflare.mjs` | het script: inrichten, tweede doorgang, toegang bijwerken, opruimen |
 | `lib/cloudflare.mjs` | Access-policies, Access-apps, workers.dev-subdomein, placeholder-Worker |
-| `lib/supabase.mjs` | project, sleutels, auth-config, custom provider `custom:cloudflare` |
+| `lib/supabase.mjs` | project, sleutels, auth-config, custom provider `custom:cloudflare`, de inlogmail en de rem van een klantportaal |
 | `lib/toegang.mjs` | `toegang.json` controleren, vertalen naar policies, intrekken, de aanmeld-hook van de testdatabase |
+| `controle-doorsteek.mjs` | kijkt van buitenaf of de deur dicht zit (en bij een klantportaal: of alleen het domein open is) |
 | `toegang.json` | wie bij welke app mag |
 | `package.json` | maakt van `beheer/` een zelfstandig pakket (zie "Los van de template") |
 | `*.test.mjs`, `nep-wolk.mjs` | tests tegen een nagebootste API (`pnpm beheer:test`) |
+| `regressie-42.*`, `regressie-scenarios.mjs` | bewijs dat een app zonder `klantportaal` exact dezelfde inrichting krijgt als op versie 42 (zie "Lokaal testen") |
 
 Alles wat het script aanmaakt heeft een naam die begint met het voorvoegsel. Dat is een
 verplichte instelling: `--voorvoegsel <vv->` of de omgevingsvariabele
@@ -193,12 +195,14 @@ staan daar nooit leesbaar in.
 
 Inloggen in productie loopt altijd via Cloudflare; in productie staat inloggen met e-mail
 uit. Werkt de keten Cloudflare naar Supabase niet, dan herstellen we Cloudflare. Er is
-geen tweede deur.
+geen tweede deur. De enige uitzondering is een app die in `toegang.json` als klantportaal
+staat: zie "Klantportaal" hieronder.
 
 **Proef toegang bijwerken** (`proef-toegang.yml`) draait vanzelf als `toegang.json` op
 `main` verandert. Hij zet de policies gelijk aan het bestand, hangt ze aan de
 Access-apps en trekt de toegang in van wie er niet meer in staat: een ban en afmelden
-van alle sessies in Supabase. In de testdatabase schrijft hij ook de aanmeld-hook
+van alle sessies in Supabase. Bij een klantportaal geldt dat alleen voor medewerkers;
+klanten staan niet in het bestand en blijven ongemoeid (zie "Klantportaal"). In de testdatabase schrijft hij ook de aanmeld-hook
 opnieuw, zodat die het nieuwe bestand volgt, en de testaccounts (met de testgebruiker)
 blijven daar ongemoeid; een eerder geband testaccount krijgt de ban opgeheven.
 
@@ -244,12 +248,166 @@ object zijn. De korte vorm blijft werken:
   tot je die weghaalt. Een groep mag niet `publiek` heten (zo heet die policy). Wat een
   publieke pagina mag tonen, staat in `docs/WERKWIJZE.md` (hoofdstuk 2). Het veld heet en
   werkt hetzelfde als `publiek` in tier 1. Eén verschil: tier 1 kent ook een site die bijna
-  helemaal publiek is (`["/*"]` met `dicht`); tier 2 niet, want zonder de deur kan niemand
-  inloggen bij de database van de app.
+  helemaal publiek is (`["/*"]` met `dicht`); tier 2 niet. Moet de hele app open voor
+  klanten, dan is dat een klantportaal (hieronder), geen publiek pad. `publiek` en
+  `klantportaal` kunnen niet samen bij één app.
 - `gegevens_naar_test` (standaard `true`): met `false` zet Testdatabase verversen in de
   beheer-repo voor deze app geen gegevens en bestanden van productie meer in de
   testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een
   gebruiker hangen en er toch niets te kopiëren valt.
+
+- `klantportaal`, met `afzender` en `captcha`: zie het volgende hoofdstuk.
+
+## Klantportaal
+
+Een klantportaal is een app die open is voor klanten: een webshop of een portaal waar
+honderden mensen van buiten het bedrijf zelf inloggen. Eén regel in `toegang.json`:
+
+```json
+"apps": {
+  "direct": {
+    "groepen": ["kantoor"],
+    "klantportaal": true,
+    "afzender": "Winco Direct <noreply@wincoapps.com>"
+  }
+}
+```
+
+De groepen zijn dan alleen nog de medewerkers. Klanten staan nergens in het bestand: iedereen
+mag per mail een account maken, en een nieuw account kan niets tot de app het goedkeurt.
+
+**Wat er verandert, en wat dicht blijft.**
+
+| Onderdeel | Gewone app | Klantportaal |
+|---|---|---|
+| Het eigen domein | achter de deur (Access-app `<vv><app>`) | open, geen Access-app |
+| `workers.dev` en de previews per pull request | dicht (Access op de Worker) | dicht, ongewijzigd |
+| Inloggen voor medewerkers | via Cloudflare (SaaS-app `<vv><app>-inlog`, de groepen) | hetzelfde, ongewijzigd |
+| Inloggen per mail in productie | uit | aan: een link en een code van zes cijfers, 15 minuten geldig |
+| `mailer_autoconfirm` in productie | aan | uit: elk adres moet eerst bewezen worden |
+| De testdatabase | e-mail alleen voor testaccounts | hetzelfde, ongewijzigd |
+| `VITE_INLOGDIENST` | `cloudflare` | `cloudflare,mailcode` in `production`; de previews houden `cloudflare` |
+| Toegang bijwerken | trekt iedereen in die niet in een groep staat | trekt alleen medewerkers in; klanten nooit |
+
+**De regels in de database zijn nu de enige grens.** Bij een gewone app komt niemand van
+buiten verder dan het inlogscherm van Cloudflare. Bij een klantportaal kan iedereen ter
+wereld de app openen en een account maken. Wat zo iemand kan zien of doen, bepalen alleen de
+regels in de database (RLS). Zet een app dus pas als klantportaal in `toegang.json` als:
+
+- elke tabel regels heeft die op de rol van de gebruiker letten, en een nieuw account niets
+  ziet;
+- een recht van een medewerker nooit hangt aan iets wat een klant zelf kan krijgen, zoals
+  een e-mailadres. Medewerkerrechten horen alleen te gelden in een sessie die via Cloudflare
+  binnenkwam; wie per mail inlogt op het adres van een medewerker is gewoon klant;
+- de app op versie 43 of later staat en het inlogscherm met beide manieren heeft
+  (`docs/routes/klantportaal.md` in de app). Een oudere app begrijpt
+  `cloudflare,mailcode` niet.
+
+De inrichting zet deze waarschuwing bij elke run in het resultaat.
+
+**Wat de owner doet, in deze volgorde.**
+
+1. Bij Resend het domein van de afzender verifiëren (bijvoorbeeld `wincoapps.com`) en een
+   sleutel maken met alleen het recht om te versturen.
+2. Die sleutel als secret `SMTP_WACHTWOORD` in de omgeving van de beheer-repo zetten (waar
+   ook `SUPABASE_ACCESS_TOKEN` staat). De workflow App inrichten moet hem doorgeven aan het
+   script, als `SMTP_WACHTWOORD` in de omgeving van de stap.
+3. In `toegang.json` bij de app `"klantportaal": true` en `"afzender"` zetten, via een pull
+   request. De afzender is een adres op het geverifieerde domein, of `"Naam <adres>"`; de
+   naam staat in het onderwerp en de tekst van de mail. Zonder naam is dat de naam van de app.
+4. App inrichten draaien, eerst als droogloop. Die toont wat er met de deur en de mail zou
+   gebeuren. Daarna echt.
+5. Controleren van buitenaf: `node beheer/controle-doorsteek.mjs --klantportaal ...` (het
+   domein open, `workers.dev` en de previews dicht). Daarna zelf inloggen per mail en als
+   medewerker.
+
+Ontbreekt `SMTP_WACHTWOORD`, dan stopt App inrichten vóór de eerste wijziging, met een
+melding. Zo blijft er nooit een app achter zonder deur en zonder mail. De volgorde in de run
+is daarop gebouwd: eerst de inlogmail aan bij Supabase, dan de Access op de Worker
+nalopen, en als allerlaatste de deur van het domein weg. Mislukt een stap, dan staat de deur
+er nog. Het wachtwoord gaat alleen naar Supabase en staat nooit in het logboek of het
+resultaat. Een nieuwe sleutel bij Resend: het secret vervangen en App inrichten opnieuw
+draaien.
+
+Een klantportaal vraagt een eigen domein. In de tijdelijke stand (alleen `workers.dev`)
+weigert de inrichting het: dat adres blijft altijd dicht.
+
+**Mail.** De mail gaat via Resend over SMTP (`smtp.resend.com`, poort 465, gebruiker
+`resend`). Supabase stuurt dezelfde mail naar een nieuw en naar een bekend adres: de code om
+over te typen en een link, allebei 15 minuten geldig en één keer te gebruiken. De code staat
+erbij omdat een link uit WhatsApp of Gmail vaak in een ingebouwde browser opent, waarna de
+klant in zijn gewone browser niet is ingelogd.
+
+**De rem tegen misbruik.** Een open inlogformulier dat mails verstuurt, wordt misbruikt: om
+iemand te bestoken met mails, om kosten te maken bij Resend, of om codes te raden. De
+inrichting zet daarom deze grenzen van Supabase Auth, bij elke run opnieuw:
+
+| Instelling | Waarde | Waarom dit getal |
+|---|---|---|
+| mails per uur, het hele project samen (`rate_limit_email_sent`) | 100 | Een klant logt zelden opnieuw in (een sessie blijft staan), dus 100 is ruim voor een drukke ochtend. Een mailbom kost hoogstens 2400 mails per dag |
+| tijd tussen twee mails naar hetzelfde adres (`smtp_max_frequency`) | 60 seconden | Eén adres krijgt hoogstens één mail per minuut |
+| aanvragen per vijf minuten per IP-adres (`rate_limit_otp`) | 15 | Eén mens heeft er één of twee nodig; een kantoor achter één internetadres kan ermee vooruit |
+| pogingen om een code of link in te wisselen, per vijf minuten per IP-adres (`rate_limit_verify`) | 15 | In het kwartier dat een code geldt zijn dat 45 gokken per IP-adres, op een miljoen mogelijkheden |
+
+De keerzijde van de eerste grens: is hij bereikt, dan krijgt dat uur niemand meer een
+inlogmail, ook een echte klant niet. Gebeurt dat, zet dan de captcha aan. De getallen staan
+op één plek (`REM` in `lib/supabase.mjs`); wie ze met de hand in Supabase verandert, ziet ze
+bij de volgende run terugkomen.
+
+**Captcha (Turnstile), een schakelaar.** Met `"captcha": true` bij de app zet de inrichting
+de captcha van Supabase Auth aan met Turnstile van Cloudflare. Dan weigert Supabase elke
+aanvraag voor een inlogmail zonder geldig bewijs van de widget. Nodig: een Turnstile-widget
+voor het domein (Cloudflare-dashboard), de geheime sleutel als secret `TURNSTILE_GEHEIM` in
+de omgeving van de beheer-repo (ook doorgegeven aan het script), en de widget in het
+inlogscherm van de app. Zet de schakelaar pas om als de app de widget toont: zonder widget
+kan geen klant meer inloggen per mail. Medewerkers via Cloudflare merken er niets van. Staat
+`captcha` aan en ontbreekt het secret, dan stopt de inrichting vóór de eerste wijziging.
+
+**Toegang bijwerken bij een klantportaal.** In het bestand staan alleen medewerkers. Daarom
+beoordeelt Toegang bijwerken alleen accounts met een inlog via Cloudflare. Of een account die
+heeft, leest hij uit de database van de app (`auth.identities`); lukt dat niet, dan stopt hij
+zonder iemand in te trekken.
+
+- Een account zonder Cloudflare-inlog is een klant: geen ban, geen afmelding. Een klant die
+  de app of de owner zelf heeft geblokkeerd, blijft geblokkeerd. Het resultaat noemt het
+  aantal overgeslagen klanten.
+- Een medewerker die uit `toegang.json` gaat, wordt net als altijd geband en afgemeld.
+- Een account dat via Cloudflare én per mail kan inloggen (een medewerker die ook eens de
+  klantinlog gebruikte) gaat helemaal dicht zodra de medewerker uit het bestand is. Dat is
+  bewust: alleen de Cloudflare-kant sluiten zou een vertrokken medewerker een werkend
+  account laten houden. Moet zo iemand daarna klant kunnen zijn, verwijder dan zijn account
+  in Supabase (Authentication, Users); hij logt daarna per mail in en begint als nieuwe
+  klant. Alleen de ban opheffen helpt niet: de volgende run zet hem terug.
+- Beoordeeld wordt het adres waarmee Cloudflare iemand binnenliet, niet een adres dat hij
+  zelf op zijn account zette.
+
+**Medewerkers bij een klantportaal.** Omdat elk adres nu eerst bewezen moet worden
+(`mailer_autoconfirm` uit) en Cloudflare aan Supabase niet meldt dat een adres gecontroleerd
+is, merken medewerkers twee dingen. Dit volgt uit de broncode van Supabase Auth en is nog
+niet op een echt project geprobeerd:
+
+- Wie al een account had, merkt niets.
+- Een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer de melding dat
+  zijn adres bevestigd moet worden, en een mail. Na de link of de code in die mail werkt
+  inloggen voor medewerkers gewoon.
+- **Een medewerker die eerst als klant inlogde.** Maakt een medewerker eerst per mail een
+  klantaccount op zijn werkadres en logt hij daarna pas via Cloudflare in, dan maakt
+  Supabase een tweede account zonder adres, dat niet te bevestigen is. Hij kan dan niet als
+  medewerker inloggen. Toegang bijwerken meldt zulke accounts als waarschuwing. Oplossing:
+  verwijder in Supabase (Authentication, Users) het account zonder adres én het klantaccount
+  op dat adres, en laat de medewerker daarna eerst via "Inloggen voor medewerkers" inloggen.
+  Voorkomen: medewerkers loggen de eerste keer altijd als medewerker in.
+
+**Terug naar een deur.** Haal `klantportaal` en `afzender` weg en draai App inrichten: de
+deur komt terug en inloggen per mail gaat uit. Let op wat er daarvóór al gebeurt: zodra het
+bestand op `main` staat, draait Toegang bijwerken, en voor een gewone app is iedereen die
+niet in een groep staat een vreemde. Alle klanten worden dan geband en afgemeld. Zet je de
+app later weer op klantportaal, dan blijven die bans staan; opheffen kan alleen per account
+in Supabase. Doe dit dus alleen als het portaal echt dicht moet. De instellingen voor SMTP
+en de mailsjablonen blijven in Supabase staan; zonder inloggen per mail doen ze niets.
+
+**Van een deur naar een klantportaal** gaat altijd via App inrichten. Toegang bijwerken haalt
+de deur niet weg; staat hij er nog, dan zegt het resultaat dat.
 
 ## Alleen IT mag toegang.json wijzigen (bij een klant)
 
@@ -334,3 +492,10 @@ pnpm beheer:test
 
 De tests praten met een nagebootste Cloudflare, Supabase en GitHub; er gaat niets
 over het netwerk.
+
+`regressie-42.test.mjs` bewaakt de bestaande klanten: voor een `toegang.json` zonder
+`klantportaal` moet elke aanroep naar Cloudflare, Supabase en GitHub exact gelijk zijn aan
+die van versie 42, in volgorde en inhoud, ook de leesvragen. De verwachting
+(`regressie-42.json`) is gemaakt met de code van versie 42 zelf; `regressie-42.maak.mjs`
+zegt hoe. Wordt deze test rood, dan verandert er iets voor een gewone app: los dat op in de
+code, en leg de verwachting alleen opnieuw vast als die verandering de bedoeling is.
