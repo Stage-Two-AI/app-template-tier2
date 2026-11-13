@@ -293,6 +293,17 @@ describe("de databasecontrole: de beoordeling", () => {
   });
 });
 
+describe("tests/rls/open-policies.test.ts draait de databasecontrole van de app", () => {
+  it("precies als de schakelaar aan staat, met alle lijsten uit stack.config.json", () => {
+    // Een overgeslagen test is groen; zo is een stille uitschakeling hier te zien.
+    const test = readFileSync(resolve(__dirname, "../rls/open-policies.test.ts"), "utf8");
+    expect(test).toContain("it.skipIf(config.klantportaal !== true)(");
+    expect(test).toMatch(
+      /problemenKlantportaalInDatabase\(\{[\s\S]*?poorten: config\.klantportaal_poorten[\s\S]*?vrijeFuncties: config\.klantportaal_vrije_functies[\s\S]*?openbaar: config\.klantportaal_openbaar[\s\S]*?openTabellen: config\.open_tabellen/,
+    );
+  });
+});
+
 /**
  * De verwachting in klantportaal-basis.json komt uit de migratie van de template. In een app
  * zonder klantportaal is er niets te vergelijken.

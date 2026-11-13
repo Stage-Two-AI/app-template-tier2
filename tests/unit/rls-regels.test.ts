@@ -944,18 +944,38 @@ describe("scripts/guard-rls.mjs: de schakelaar klantportaal", () => {
   });
 
   it("met de schakelaar en een namen-lijst met een fout is de guard rood", () => {
-    for (const [sleutel, waarde] of [
-      ["klantportaal_poorten", { "is_inkoper()": "x" }],
-      ["klantportaal_vrije_functies", { f: "" }],
-      ["klantportaal_openbaar", { "bucket:": "x" }],
-      ["klantportaal_openbaar", []],
+    // Een app die met de schakelaar groen is; alleen de lijst maakt hem rood.
+    const groen = {
+      config: { database: true },
+      sql: `
+        create function public.sessie_via_cloudflare() returns boolean language sql security definer as $$ select true $$;
+        create function public.is_medewerker() returns boolean language sql security definer as $$ select public.sessie_via_cloudflare() $$;
+        create function public.is_goedgekeurde_klant() returns boolean language sql security definer as $$ select true $$;`,
+    };
+    expect(draai(groen, { klantportaal: true }).status).toBe(0);
+    for (const [sleutel, waarde, melding] of [
+      ["klantportaal_poorten", { "is_inkoper()": "x" }, "is geen naam die de poort kent"],
+      [
+        "klantportaal_vrije_functies",
+        { f: "" },
+        "bij klantportaal_vrije_functies.f hoort een reden",
+      ],
+      [
+        "klantportaal_vrije_functies",
+        { f: "  " },
+        "bij klantportaal_vrije_functies.f hoort een reden",
+      ],
+      ["klantportaal_openbaar", { "bucket:": "x" }, "is geen naam die de poort kent"],
+      ["klantportaal_openbaar", [], "hoort een object te zijn"],
+      [
+        "open_tabellen",
+        { feestdagen: "kalender" },
+        "open_tabellen.feestdagen: een klantportaal kent geen open tabellen",
+      ],
     ] as const) {
-      const uitkomst = draai(GEVALLEN["eigen rijen"] as Geval, {
-        klantportaal: true,
-        [sleutel]: waarde,
-      });
+      const uitkomst = draai(groen, { klantportaal: true, [sleutel]: waarde });
       expect(uitkomst.status, sleutel).toBe(1);
-      expect(uitkomst.fout).toContain(sleutel);
+      expect(uitkomst.fout, sleutel).toContain(melding);
     }
   });
 

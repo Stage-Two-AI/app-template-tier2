@@ -244,6 +244,12 @@ describe("de link uit de mail", () => {
     const uitkomst = await controleerLink(nepAuth({ verify }), "abcdef0123456789abcd");
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "link" } });
   });
+
+  it("een storing bij de link is geen verlopen link", async () => {
+    const verify = { message: "boem", status: 502 };
+    const uitkomst = await controleerLink(nepAuth({ verify }), "abcdef0123456789abcd");
+    expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "dienst" } });
+  });
 });
 
 describe("foutUitAdres", () => {
