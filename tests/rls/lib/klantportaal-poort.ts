@@ -23,7 +23,10 @@ const POLICIES = `
   select n.nspname || '.' || c.relname as tabel,
          p.polname as naam,
          case when p.polroles = '{0}' then array['public']
-              else array(select r.rolname::text from pg_roles r where r.oid = any(p.polroles))
+              -- Een eigen rol waar authenticated lid van is, geldt ook voor elke ingelogde.
+              else array(select case when pg_has_role('authenticated', r.oid, 'member')
+                                     then 'authenticated' else r.rolname::text end
+                           from pg_roles r where r.oid = any(p.polroles))
          end as rollen,
          not p.polpermissive as restrictief,
          case p.polcmd when '*' then 'all' when 'r' then 'select' when 'a' then 'insert'
