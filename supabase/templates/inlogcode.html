@@ -1,8 +1,9 @@
 <!--
   De inlogmail van een klantportaal: één mail met de code van zes cijfers en een link.
   Lokaal en in CI gebruikt supabase/config.toml dit bestand voor een eerste aanmelding
-  (confirmation) en voor elke volgende keer (magic_link). De tests lezen de code uit het
-  element met id="code" en de link uit het element met id="link"; laat die twee staan.
+  (confirmation), voor elke volgende keer (magic_link) en voor een herstelmail (recovery).
+  De tests lezen de code uit het element met id="code" en de link uit het element met
+  id="link"; laat die twee staan.
 
   De link gaat naar de inlogpagina van de app met token_hash, niet naar Supabase zelf. Zo
   werkt hij ook in de ingebouwde browser van een mailprogramma of WhatsApp, en logt de

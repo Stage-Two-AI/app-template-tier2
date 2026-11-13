@@ -13,7 +13,6 @@ import {
   inloggenMetCode,
   inloggenMetMailcode,
   inloggenViaInlogdienst,
-  LOKALE_DIENST,
   leesToken,
   metToken,
   nieuwAdres,
@@ -126,8 +125,10 @@ describe("waar de controle op vertrouwt: wat Supabase in het token zet", () => {
 
   it("app_metadata zegt het niet: daar staat de inlogdienst ook bij een mailsessie", async () => {
     // providers is de lijst van alles wat aan het account hangt, niet hoe deze sessie begon.
+    // Ook in het token van de mailsessie staat dus Cloudflare. Wie daarop vertrouwt, geeft
+    // iedereen met toegang tot de mailbox van een medewerker de rechten van die medewerker.
     const inToken = leesToken(perMail.token).app_metadata as { providers?: string[] };
-    expect(inToken.providers).toContain(LOKALE_DIENST);
+    expect(inToken.providers).toContain("custom:cloudflare");
     const { data } = await admin.auth.admin.getUserById(viaCloudflare.userId);
     const aanHetAccount = data.user?.identities?.map((i) => i.provider) ?? [];
     expect(aanHetAccount).toContain("custom:cloudflare");
@@ -150,6 +151,23 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
 
   it("ook de mailsessie waarmee de medewerker zijn adres bevestigde is geen medewerker", async () => {
     expect(await isMedewerker(naBevestigen)).toBe(false);
+  });
+
+  it("ook de code uit een herstelmail geeft alleen een mailsessie, zonder medewerkerrechten", async () => {
+    // Iedereen kan voor elk adres een herstelmail laten sturen (/recover). Die mail is
+    // dezelfde als de inlogmail, en de code eruit werkt in hetzelfde codevak.
+    const leesMail = await wachtOpMail(medewerker.email);
+    let aanvraag = await anoniem().auth.resetPasswordForEmail(medewerker.email);
+    if (aanvraag.error?.status === 429) {
+      // Supabase stuurt per adres niet vaker dan eens per seconde.
+      await new Promise((klaar) => setTimeout(klaar, 1500));
+      aanvraag = await anoniem().auth.resetPasswordForEmail(medewerker.email);
+    }
+    expect(aanvraag.error).toBeNull();
+    const sessie = await inloggenMetCode(medewerker.email, (await leesMail()).code);
+    expect(sessie.userId).toBe(viaCloudflare.userId);
+    expect(sessie.methodes).not.toContain("oauth");
+    expect(await isMedewerker(sessie)).toBe(false);
   });
 
   it("een klant is geen medewerker, en een bezoeker zonder inlog mag het niet eens vragen", async () => {

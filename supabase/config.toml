@@ -255,12 +255,18 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 900
 
-# Eén mail met code én link, voor een eerste aanmelding en voor elke volgende keer.
+# Eén mail met code én link, voor een eerste aanmelding, voor elke volgende keer, en ook als
+# iemand een herstelmail laat sturen (de code daaruit werkt in hetzelfde codevak). De
+# inrichting zet in productie hetzelfde sjabloon voor dezelfde drie soorten.
 [auth.email.template.confirmation]
 subject = "Je inlogcode"
 content_path = "./supabase/templates/inlogcode.html"
 
 [auth.email.template.magic_link]
+subject = "Je inlogcode"
+content_path = "./supabase/templates/inlogcode.html"
+
+[auth.email.template.recovery]
 subject = "Je inlogcode"
 content_path = "./supabase/templates/inlogcode.html"
 

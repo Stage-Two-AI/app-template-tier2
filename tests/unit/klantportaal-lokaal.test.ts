@@ -38,7 +38,7 @@ describe("supabase/config.toml: de mailcode lokaal", () => {
   });
 
   it("eerste aanmelding en terugkerende klant krijgen dezelfde mail, met code en link", () => {
-    for (const soort of ["confirmation", "magic_link"]) {
+    for (const soort of ["confirmation", "magic_link", "recovery"]) {
       const sjabloon = blok(toml, `auth.email.template.${soort}`);
       expect(sjabloon, soort).toContain('content_path = "./supabase/templates/inlogcode.html"');
     }
