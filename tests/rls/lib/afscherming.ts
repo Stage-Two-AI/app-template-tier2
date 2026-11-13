@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect } from "vitest";
 import type { Database } from "../../../src/lib/database.types";
+import { leesSchakelaar } from "./klantportaal-poort";
 
 /**
  * De A/B-test per tabel: gebruiker A maakt een eigen rij, gebruiker B probeert hem te zien,
@@ -35,20 +34,19 @@ import type { Database } from "../../../src/lib/database.types";
  * Deze hulp is van de template en komt met elke versie mee.
  */
 
-/** Staat de schakelaar van het klantportaal aan in stack.config.json van deze app? */
+/**
+ * Staat de schakelaar van het klantportaal aan in stack.config.json van deze app? Streng gelezen,
+ * zoals guard:rls: een onbekende sleutel, `"klantportaal": "true"` of een bestand dat geen JSON
+ * is, is een fout in elke RLS-test, geen stil "uit". Zonder de sleutel: uit, zoals altijd.
+ */
 function leesKlantportaal(): boolean {
-  try {
-    const pad = fileURLToPath(new URL("../../../stack.config.json", import.meta.url));
-    const config: unknown = JSON.parse(readFileSync(pad, "utf8"));
-    return (
-      typeof config === "object" &&
-      config !== null &&
-      "klantportaal" in config &&
-      config.klantportaal === true
+  const schakelaar = leesSchakelaar();
+  if (schakelaar.fout !== undefined) {
+    throw new Error(
+      `De schakelaar van het klantportaal is niet te lezen, dus weten de RLS-tests niet of de poort moet gelden: ${schakelaar.fout}`,
     );
-  } catch {
-    return false;
   }
+  return schakelaar.aan === true;
 }
 
 export const KLANTPORTAAL = leesKlantportaal();

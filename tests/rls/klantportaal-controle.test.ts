@@ -59,8 +59,8 @@ insert into public.kp_proef_dossiers (klant, geheim) values ('Jansen', 'geheim')
 type Geval = {
   naam: string;
   sql: string;
-  /** Een deel van de melding die de controle moet geven. */
-  verwacht: RegExp;
+  /** Een deel van de melding die de controle moet geven; bij een lijst elk deel. */
+  verwacht: RegExp | RegExp[];
   config?: KlantportaalConfig;
   /** SQL die eerst als supabase_admin moet (wat een migratie zelf niet mag). */
   alsBeheerder?: string;
@@ -277,6 +277,144 @@ const GEVALLEN: Geval[] = [
     sql: "create function public.kp_proef_teller() returns bigint language sql as $$ select count(*) from public.kp_proef_dossiers $$;",
     verwacht: /public\.kp_proef_teller\(\): bezoekers zonder account/,
   },
+  // Wat de derde aanvaller vond, en wat op dezelfde manier langs de controle ging.
+  {
+    naam: "3:1.1 een overload van is_medewerker() die de aanroeper goedkeurt",
+    sql: `create function public.is_medewerker(target uuid) returns boolean
+      language sql security definer set search_path = '' as $fn$
+        insert into public.klanten (user_id, e_mail, goedgekeurd)
+        values (coalesce(auth.uid(), target), 'ingebroken@voorbeeld.nl', true)
+        on conflict (user_id) do update set goedgekeurd = true
+        returning true $fn$;`,
+    verwacht:
+      /public\.is_medewerker\(target uuid\): een tweede functie met de naam van een basisfunctie mag niet/,
+  },
+  {
+    naam: "3:2.1 een overload van is_goedgekeurde_klant()",
+    sql: `create function public.is_goedgekeurde_klant(markeer boolean)
+      returns boolean language sql security definer set search_path = '' as $fn$
+        insert into public.klanten (user_id, e_mail, goedgekeurd)
+        values (auth.uid(), '', markeer) on conflict (user_id) do update set goedgekeurd = markeer
+        returning markeer $fn$;`,
+    verwacht:
+      /public\.is_goedgekeurde_klant\(markeer boolean\): een tweede functie met de naam van een basisfunctie mag niet/,
+  },
+  {
+    naam: "een gelijknamige basisfunctie in een ander schema dat bezoekers kunnen bereiken",
+    sql: `create schema kp_proef_api; grant usage on schema kp_proef_api to authenticated;
+      create function kp_proef_api.is_medewerker() returns boolean
+        language sql security definer set search_path = '' as $fn$ select true $fn$;`,
+    verwacht:
+      /kp_proef_api\.is_medewerker\(\): een tweede functie met de naam van een basisfunctie/,
+  },
+  {
+    naam: "een tweede triggerfunctie met de naam van die op auth.users, in een ander schema",
+    sql: `create schema kp_proef_api; grant usage on schema kp_proef_api to authenticated;
+      create function kp_proef_api.klant_adres_gewijzigd() returns trigger
+        language plpgsql security definer set search_path = '' as $fn$ begin return new; end $fn$;`,
+    verwacht:
+      /kp_proef_api\.klant_adres_gewijzigd\(\): een tweede functie met de naam van een basisfunctie/,
+  },
+  {
+    naam: "3:1.2 een vrije security definer-functie met een onschuldige reden die klanten teruggeeft",
+    config: {
+      vrijeFuncties: { kp_proef_storing: "mag iedereen met een account een storing melden" },
+    },
+    sql: `create function public.kp_proef_storing()
+        returns table (user_id uuid, e_mail text, goedgekeurd boolean)
+        language sql security definer set search_path = '' as $fn$
+          select user_id, e_mail, goedgekeurd from public.klanten $fn$;
+      revoke execute on function public.kp_proef_storing() from public, anon;
+      grant execute on function public.kp_proef_storing() to authenticated;`,
+    verwacht:
+      /public\.kp_proef_storing\(\): een vrijgegeven security definer-functie die public\.klanten of een tabel in auth/,
+  },
+  {
+    naam: "een vrije plpgsql-functie die auth.users leest, met een poort die geen harde eis is",
+    config: { vrijeFuncties: { kp_proef_adressen: "alleen voor medewerkers bedoeld" } },
+    sql: `create function public.kp_proef_adressen() returns setof text
+        language plpgsql security definer set search_path = '' as $fn$
+        begin
+          if not public.is_medewerker() and current_user is not null then raise exception 'nee'; end if;
+          return query select email::text from auth.users;
+        end $fn$;
+      revoke execute on function public.kp_proef_adressen() from public, anon;`,
+    verwacht: /public\.kp_proef_adressen\(\): een vrijgegeven security definer-functie/,
+  },
+  {
+    naam: "3:3.1 een lege reden in klantportaal_openbaar geeft niets vrij",
+    config: { openbaar: { kp_proef_open: " " } },
+    sql: `create table public.kp_proef_open (id int primary key, tekst text);
+      alter table public.kp_proef_open enable row level security;
+      grant select on public.kp_proef_open to anon;
+      create policy "kp_proef_open_anon" on public.kp_proef_open for select to anon using (true);`,
+    verwacht: [
+      /stack\.config\.json: bij klantportaal_openbaar\.kp_proef_open hoort een reden/,
+      /kp_proef_open \(policy "kp_proef_open_anon"\).*bezoekers zonder account/,
+    ],
+  },
+  {
+    naam: "een te korte reden, en een naam met een hoofdletter, op de vrije lijst",
+    config: {
+      vrijeFuncties: {
+        kp_proef_vrij: "ok",
+        "public.Kp_proef_vrij": "mag iedereen met een account",
+      },
+    },
+    sql: `create function public.kp_proef_vrij() returns int language sql security definer set search_path = '' as $$ select 1 $$;
+      revoke execute on function public.kp_proef_vrij() from public, anon;`,
+    verwacht: [
+      /de reden bij klantportaal_vrije_functies\.kp_proef_vrij is te kort/,
+      /klantportaal_vrije_functies\.public\.Kp_proef_vrij is geen naam die de poort kent/,
+      /public\.kp_proef_vrij\(\): security definer \(hij leest/,
+    ],
+  },
+  {
+    naam: "3:4.1 een ruime permissive policy achter een restrictive poort",
+    sql: `create policy "kp_proef_breed" on public.kp_proef_dossiers for select to authenticated
+        using (id is not null);
+      create policy "kp_proef_poort" on public.kp_proef_dossiers as restrictive for all to authenticated
+        using ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()))
+        with check ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()));`,
+    verwacht: /kp_proef_dossiers \(policy "kp_proef_breed"\): de using .* is voor elke rij waar/,
+  },
+  {
+    naam: "de andere vormen van voor iedereen waar, ook achter de poort",
+    sql: `create policy "kp_proef_poort" on public.kp_proef_dossiers as restrictive for all to authenticated
+        using ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()));
+      create policy "kp_proef_een" on public.kp_proef_dossiers for select to authenticated using (1 = 1);
+      create policy "kp_proef_zelf" on public.kp_proef_dossiers for select to authenticated using (klant = klant);
+      create policy "kp_proef_samen" on public.kp_proef_dossiers for update to authenticated
+        using (true) with check (coalesce(klant = '', true));`,
+    verwacht: [
+      /"kp_proef_een"\): de using .* is voor elke rij waar/,
+      /"kp_proef_zelf"\): de using .* is voor elke rij waar/,
+      /"kp_proef_samen"\): de using .* is voor elke rij waar/,
+      /"kp_proef_samen"\): de with check .* is voor elke rij waar/,
+    ],
+  },
+  // Drie mutaties die eerder alle tests overleefden: haal de regel weg en het geval is groen.
+  {
+    naam: "authenticated is lid van een rol met bypassrls",
+    alsBeheerder:
+      "create role kp_proef_omweg nologin bypassrls; grant kp_proef_omweg to authenticated",
+    sql: "select 1;",
+    verwacht:
+      /rol kp_proef_omweg: anon of authenticated is lid van een rol die langs de policies heen mag/,
+  },
+  {
+    naam: "een partitietabel zonder RLS",
+    sql: "create table public.kp_proef_deel (id int, jaar int) partition by range (jaar);",
+    verwacht: /public\.kp_proef_deel: row level security staat uit/,
+  },
+  {
+    naam: "alleen een kolomrecht voor anon, op een view zonder verdere rechten",
+    sql: `create view public.kp_proef_kolom as select id, klant from public.kp_proef_dossiers;
+      revoke all on public.kp_proef_kolom from public, anon, authenticated;
+      grant select (klant) on public.kp_proef_kolom to anon;`,
+    verwacht:
+      /public\.kp_proef_kolom: een view met de rechten van zijn eigenaar, te lezen zonder account/,
+  },
 ];
 
 /**
@@ -354,10 +492,12 @@ metKlantportaal("de databasecontrole van het klantportaal keurt elke bekende omw
     it.runIf(heeftKlantportaal)(geval.naam, () => {
       const model = leesModel(`${BASIS}\n${geval.sql}`, geval.alsBeheerder);
       const nieuw = beoordeel(model, geval.config).filter((p) => !vooraf.includes(p));
-      expect(
-        nieuw.some((p) => geval.verwacht.test(p)),
-        `de controle keurt dit niet (goed) af; nieuwe meldingen:\n${nieuw.join("\n")}`,
-      ).toBe(true);
+      for (const verwacht of [geval.verwacht].flat()) {
+        expect(
+          nieuw.some((p) => verwacht.test(p)),
+          `de controle keurt dit niet (goed) af (${verwacht}); nieuwe meldingen:\n${nieuw.join("\n")}`,
+        ).toBe(true);
+      }
     });
   }
 

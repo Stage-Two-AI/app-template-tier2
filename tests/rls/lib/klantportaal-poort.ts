@@ -85,6 +85,44 @@ export function leesModel(voor = "", alsBeheerder = ""): unknown {
   return JSON.parse(regels.at(-1) ?? "{}");
 }
 
+/**
+ * Voert SQL uit op de lokale database en laat het staan, zoals een migratie (geen rollback).
+ * Alleen voor een test die het daarna zelf weer weghaalt.
+ */
+export function voerUit(sql: string): void {
+  execFileSync("psql", [adresVanDeDatabase(), "-X", "-q", "-v", "ON_ERROR_STOP=1"], {
+    encoding: "utf8",
+    input: sql,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+export type Schakelaar =
+  | { aan: false; fout?: undefined }
+  | { aan: true; config: KlantportaalConfig; fout?: undefined }
+  | { aan?: undefined; fout: string };
+
+/**
+ * De schakelaar van het klantportaal, streng gelezen zoals guard:rls dat doet (`klantportaalStreng`
+ * in scripts/lib/stack-config.mjs): een onbekende sleutel, een afwijkende waarde (`"true"`, 1),
+ * een lijst die niet klopt of een bestand dat geen JSON is, geeft `fout`, geen stil overslaan.
+ */
+export function leesSchakelaar(): Schakelaar {
+  const module = pathToFileURL(resolve(__dirname, "../../../scripts/lib/stack-config.mjs")).href;
+  const script = `import(${JSON.stringify(module)}).then((m) => { let uit; try { uit = m.klantportaalStreng(); } catch (fout) { uit = { fout: String(fout && fout.message ? fout.message : fout) }; } process.stdout.write(JSON.stringify(uit)); })`;
+  return JSON.parse(
+    execFileSync("node", ["--input-type=module", "-e", script], {
+      cwd: resolve(__dirname, "../../.."),
+      encoding: "utf8",
+    }),
+  ) as Schakelaar;
+}
+
+/** Wat een klantportaal vrijgeeft, met de reden: één regel per naam. */
+export function vrijgegeven(config: KlantportaalConfig): string[] {
+  return metModule<string[]>("m.vrijgegevenOverzicht(a)", config);
+}
+
 /** Wat er in de database mis is voor een klantportaal; leeg als alles door de poort gaat. */
 export function beoordeel(model: unknown, config: KlantportaalConfig = {}): string[] {
   return metModule<string[]>("m.beoordeelDatabase(a.model, a.config)", { model, config });

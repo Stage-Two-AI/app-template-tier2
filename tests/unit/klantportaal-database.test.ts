@@ -141,14 +141,28 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(beoordeel({ relaties: [view({ anon: false })] })).toEqual([
       "public.v: een view zonder security_invoker gaat langs de policies heen (hij leest met de rechten van zijn eigenaar)",
     ]);
-    expect(beoordeel({ relaties: [view({ anon: false })] }, { vrijeFuncties: { v: "x" } })).toEqual(
-      [],
-    );
-    expect(beoordeel({ relaties: [view({})] }, { vrijeFuncties: { v: "x" } })).toEqual([
+    expect(
+      beoordeel(
+        { relaties: [view({ anon: false })] },
+        { vrijeFuncties: { v: "met een reden die lang genoeg is" } },
+      ),
+    ).toEqual([]);
+    expect(
+      beoordeel(
+        { relaties: [view({})] },
+        { vrijeFuncties: { v: "met een reden die lang genoeg is" } },
+      ),
+    ).toEqual([
       "public.v: een view met de rechten van zijn eigenaar, te lezen zonder account (anon)",
     ]);
     expect(
-      beoordeel({ relaties: [view({})] }, { vrijeFuncties: { v: "x" }, openbaar: { v: "y" } }),
+      beoordeel(
+        { relaties: [view({})] },
+        {
+          vrijeFuncties: { v: "met een reden die lang genoeg is" },
+          openbaar: { v: "met een reden die lang genoeg is" },
+        },
+      ),
     ).toEqual([]);
     for (const soort of ["m", "f"]) {
       expect(
@@ -171,7 +185,19 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(beoordeel({ policies: [anon] }, { openbaar: { orders: "catalogus" } })).toEqual([]);
     expect(beoordeel({ policies: [{ ...anon, permissief: false }] })).toEqual([]);
     expect(beoordeel({ policies: [policy({ using: "auth.uid() = owner_id" })] })).toHaveLength(1);
-    expect(beoordeel({ policies: [policy({ check: "true", cmd: "update" })] })).toHaveLength(1);
+    // `true` is geen poort, en voor elke rij waar: twee meldingen.
+    expect(beoordeel({ policies: [policy({ check: "true", cmd: "update" })] })).toHaveLength(2);
+    // Ook achter een poort is een ruime voorwaarde rood: de poort zegt niet van wie de rij is.
+    expect(
+      beoordeel({
+        policies: [
+          policy({ permissief: false, cmd: "all", using: "public.is_medewerker()" }),
+          policy({ using: "(id IS NOT NULL)" }),
+        ],
+      }),
+    ).toEqual([
+      'public.orders (policy "p"): de using ((id IS NOT NULL)) is voor elke rij waar, dus ziet elke goedgekeurde klant ook de rijen van een andere klant. De poort zegt alleen of iemand binnen mag; maak de policy smal (auth.uid() = owner_id). Dat klanten elkaars rijen niet zien, bewijst de A/B-test per tabel (controleerAfscherming)',
+    ]);
     // Gedekt door een restrictive policy, per opdracht.
     const poort = policy({ permissief: false, cmd: "all", using: "public.is_medewerker()" });
     const eigen = policy({ cmd: "all", using: "auth.uid() = owner_id" });
@@ -200,7 +226,7 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(
       beoordeel(
         { policies: [inkoper], functies: [eigenPoort] },
-        { poorten: { is_inkoper: "inkoop" } },
+        { poorten: { is_inkoper: "medewerker van inkoop" } },
       ),
     ).toEqual([]);
   });
@@ -210,31 +236,85 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(beoordeel({ functies: [functie({ anon: true, ingelogd: false })] })).toEqual([
       "public.f(): bezoekers zonder account (anon) mogen hem uitvoeren, en hij staat niet in klantportaal_openbaar",
     ]);
-    expect(beoordeel({ functies: [functie({ anon: true })] }, { openbaar: { f: "x" } })).toEqual(
-      [],
-    );
+    expect(
+      beoordeel(
+        { functies: [functie({ anon: true })] },
+        { openbaar: { f: "met een reden die lang genoeg is" } },
+      ),
+    ).toEqual([]);
     const definer = functie({ definer: true, zoekpad: 'search_path=""' });
     expect(beoordeel({ functies: [definer] })).toEqual([
       "public.f(): security definer (hij leest met de rechten van zijn eigenaar), en iedereen met een e-mailadres mag hem uitvoeren",
     ]);
-    expect(beoordeel({ functies: [definer] }, { vrijeFuncties: { f: "x" } })).toEqual([]);
     expect(
-      beoordeel({ functies: [{ ...definer, zoekpad: null }] }, { vrijeFuncties: { f: "x" } }),
+      beoordeel(
+        { functies: [definer] },
+        { vrijeFuncties: { f: "met een reden die lang genoeg is" } },
+      ),
+    ).toEqual([]);
+    expect(
+      beoordeel(
+        { functies: [{ ...definer, zoekpad: null }] },
+        { vrijeFuncties: { f: "met een reden die lang genoeg is" } },
+      ),
     ).toEqual(["public.f(): security definer zonder vast zoekpad; zet `set search_path = ''`"]);
     expect(beoordeel({ functies: [{ ...definer, ingelogd: false }] })).toEqual([]);
     expect(beoordeel({ functies: [{ ...definer, supabase: true }] })).toEqual([]);
-    // Een functie met de naam van een basisfunctie in een ander schema is geen basisfunctie.
-    expect(beoordeel({ functies: [{ ...definer, naam: "api.is_medewerker" }] })).toHaveLength(1);
+    // Een functie met de naam van een basisfunctie in een ander schema, of een overload, is geen
+    // basisfunctie: vergelijkBasis ziet hem (in het model onder basis.functies) en keurt hem af.
+    const metTweede = (extra: Record<string, unknown>) => {
+      const basis = goedeBasis();
+      const functies: Array<Record<string, unknown>> = [
+        ...basis.functies,
+        { naam: "is_medewerker", schema: "public", args: "", ...extra },
+      ];
+      return beoordeel({ basis: { ...basis, functies } });
+    };
+    expect(metTweede({ schema: "api" })).toEqual([
+      "api.is_medewerker(): een tweede functie met de naam van een basisfunctie mag niet. Alleen public.is_medewerker() wordt met de template vergeleken; een overload of een gelijknamige functie in een ander schema valt daarbuiten en kan als security definer de poort omzeilen (bijvoorbeeld een account zichzelf laten goedkeuren). Geef hem een eigen naam",
+    ]);
+    expect(metTweede({ args: "target uuid" })[0]).toMatch(
+      /^public\.is_medewerker\(target uuid\): een tweede functie/,
+    );
+    // Een vrije definer-functie die klanten of auth raakt, heeft de poort als harde eis.
+    const raakt = { ...definer, bron: "select e_mail from public.klanten" };
     expect(
-      beoordeel({ functies: [{ ...definer, naam: "api.f" }] }, { vrijeFuncties: { f: "x" } }),
+      beoordeel(
+        { functies: [raakt] },
+        { vrijeFuncties: { f: "met een reden die lang genoeg is" } },
+      )[0],
+    ).toMatch(/^public\.f\(\): een vrijgegeven security definer-functie/);
+    expect(
+      beoordeel(
+        {
+          functies: [
+            { ...raakt, bron: "select e_mail from public.klanten where public.is_medewerker()" },
+          ],
+        },
+        { vrijeFuncties: { f: "met een reden die lang genoeg is" } },
+      ),
+    ).toEqual([]);
+    // Een lege of te korte reden geeft niets vrij, en is zelf rood.
+    expect(beoordeel({ functies: [definer] }, { vrijeFuncties: { f: "ok" } })).toEqual([
+      'stack.config.json: de reden bij klantportaal_vrije_functies.f is te kort ("ok"); schrijf in een paar woorden waarom dit mag',
+      "public.f(): security definer (hij leest met de rechten van zijn eigenaar), en iedereen met een e-mailadres mag hem uitvoeren",
+    ]);
+    expect(
+      beoordeel(
+        { functies: [{ ...definer, naam: "api.f" }] },
+        { vrijeFuncties: { f: "met een reden die lang genoeg is" } },
+      ),
     ).toHaveLength(1);
     expect(
-      beoordeel({ functies: [{ ...definer, naam: "api.f" }] }, { vrijeFuncties: { "api.f": "x" } }),
+      beoordeel(
+        { functies: [{ ...definer, naam: "api.f" }] },
+        { vrijeFuncties: { "api.f": "met een reden die lang genoeg is" } },
+      ),
     ).toEqual([]);
   });
 
   it("een eigen poort: bestaat, zonder argumenten, en is na te lopen", () => {
-    const poorten = { is_inkoper: "inkoop" };
+    const poorten = { is_inkoper: "medewerker van inkoop" };
     expect(beoordeel({}, { poorten })).toEqual([
       "klantportaal_poorten.is_inkoper: er is geen functie public.is_inkoper() zonder argumenten",
     ]);
@@ -310,13 +390,17 @@ describe("de databasecontrole: de beoordeling", () => {
 });
 
 describe("tests/rls/open-policies.test.ts draait de databasecontrole van de app", () => {
-  it("precies als de schakelaar aan staat, met alle lijsten uit stack.config.json", () => {
+  it("precies als de schakelaar aan staat, streng gelezen, met alle lijsten uit stack.config.json", () => {
     // Een overgeslagen test is groen; zo is een stille uitschakeling hier te zien.
     const test = readFileSync(resolve(__dirname, "../rls/open-policies.test.ts"), "utf8");
-    expect(test).toContain("it.skipIf(config.klantportaal !== true)(");
-    expect(test).toMatch(
-      /problemenKlantportaalInDatabase\(\{[\s\S]*?poorten: config\.klantportaal_poorten[\s\S]*?vrijeFuncties: config\.klantportaal_vrije_functies[\s\S]*?openbaar: config\.klantportaal_openbaar[\s\S]*?openTabellen: config\.open_tabellen/,
-    );
+    expect(test).toContain("const schakelaar = leesSchakelaar();");
+    expect(test).toContain("expect(schakelaar.fout");
+    expect(test).toContain("it.skipIf(schakelaar.aan !== true)(");
+    expect(test).toContain("problemenKlantportaalInDatabase(portaal)");
+    const poort = readFileSync(resolve(__dirname, "../rls/lib/klantportaal-poort.ts"), "utf8");
+    expect(poort).toContain("m.klantportaalStreng()");
+    const afscherming = readFileSync(resolve(__dirname, "../rls/lib/afscherming.ts"), "utf8");
+    expect(afscherming).toContain("const schakelaar = leesSchakelaar();");
   });
 });
 

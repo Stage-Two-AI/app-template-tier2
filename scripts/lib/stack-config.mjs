@@ -171,23 +171,49 @@ export function leesRollen() {
   return lijst.map((r) => r.toLowerCase());
 }
 
-/** Een lijst namen met per naam een reden, zoals `open_tabellen`. */
-function namenMetReden(sleutel, voorbeeld, patroon = NAAM) {
-  const lijst = stackConfig()[sleutel] ?? {};
+/** Zo kort mag een reden in een lijst van het klantportaal hoogstens niet zijn. */
+export const KORTSTE_REDEN = 8;
+
+/**
+ * Wat er mis is met een lijst namen met per naam een reden (de lijsten van het klantportaal).
+ * Leeg als alles klopt. Dezelfde toets draait in guard:rls (via `klantportaal()`) en in de
+ * databasecontrole (scripts/lib/klantportaal-database.mjs), zodat een lege reden of een naam
+ * die op iets anders past dan bedoeld, ook daar rood is.
+ *
+ * `soort` is "naam" (een functie, view of tabel) of "openbaar" (ook `bucket:<id>`).
+ */
+export function problemenMetNamenMetReden(sleutel, lijst, soort = "naam") {
+  if (lijst === undefined) return [];
   if (typeof lijst !== "object" || Array.isArray(lijst) || lijst === null) {
-    throw new Error(
-      `stack.config.json: \`${sleutel}\` hoort een object te zijn met per naam een reden.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
-    );
+    return [`\`${sleutel}\` hoort een object te zijn met per naam een reden`];
   }
+  const patroon = soort === "openbaar" ? OPENBARE_NAAM : NAAM;
+  const problemen = [];
   for (const [naam, reden] of Object.entries(lijst)) {
     if (!patroon.test(naam)) {
-      throw new Error(
-        `stack.config.json: ${sleutel}.${naam} is geen naam die de poort kent. Schrijf de naam van een functie, view of tabel in kleine letters, zonder haakjes, met het schema ervoor als het niet public is (bijvoorbeeld api.zoek_product).`,
+      problemen.push(
+        `${sleutel}.${naam} is geen naam die de poort kent. Schrijf de naam van een functie, view of tabel in kleine letters, zonder haakjes, aanhalingstekens of jokertekens, met het schema ervoor als het niet public is (bijvoorbeeld api.zoek_product)`,
       );
     }
     if (typeof reden !== "string" || reden.trim() === "") {
-      throw new Error(`stack.config.json: bij ${sleutel}.${naam} hoort een reden.`);
+      problemen.push(`bij ${sleutel}.${naam} hoort een reden (waarom mag dit?)`);
+    } else if (reden.trim().length < KORTSTE_REDEN) {
+      problemen.push(
+        `de reden bij ${sleutel}.${naam} is te kort ("${reden.trim()}"); schrijf in een paar woorden waarom dit mag`,
+      );
     }
+  }
+  return problemen;
+}
+
+/** Een lijst namen met per naam een reden (de lijsten van het klantportaal). */
+function namenMetReden(sleutel, voorbeeld, soort = "naam") {
+  const lijst = stackConfig()[sleutel] ?? {};
+  const problemen = problemenMetNamenMetReden(sleutel, lijst, soort);
+  if (problemen.length > 0) {
+    throw new Error(
+      `stack.config.json: ${problemen.join(";\n")}.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
+    );
   }
   return lijst;
 }
@@ -299,8 +325,90 @@ export function klantportaal() {
     openbaar: namenMetReden(
       "klantportaal_openbaar",
       '{ "producten": "de catalogus is voor iedereen", "bucket:logo": "het logo" }',
-      OPENBARE_NAAM,
+      "openbaar",
     ),
     openTabellen: openTabellen(),
   };
+}
+
+/**
+ * De schakelaar zoals de RLS-tests hem lezen: streng, zonder stil overslaan. Een onbekende
+ * sleutel, een afwijkende waarde (`"true"`, 1), een lijst die niet klopt of een bestand dat geen
+ * JSON is, is een fout (die gooit deze functie). Zonder bestand of zonder de schakelaar:
+ * `{ aan: false }`, precies zoals een gewone app.
+ */
+export function klantportaalStreng() {
+  let tekst;
+  try {
+    tekst = readFileSync("stack.config.json", "utf8");
+  } catch (fout) {
+    if (fout?.code === "ENOENT") return { aan: false };
+    throw new Error(`stack.config.json is niet te lezen: ${fout?.message ?? fout}`);
+  }
+  let config;
+  try {
+    config = JSON.parse(tekst);
+  } catch (fout) {
+    throw new Error(`stack.config.json is geen geldige JSON: ${fout?.message ?? fout}`);
+  }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new Error("stack.config.json hoort één object te zijn, met per keuze een sleutel.");
+  }
+  const onbekend = onbekendeSleutels(config);
+  if (onbekend.length > 0) {
+    throw new Error(
+      `stack.config.json heeft een sleutel die de stack niet kent: ${onbekend
+        .map(({ sleutel, dichtst }) => `"${sleutel}" (bedoel je "${dichtst}"?)`)
+        .join(", ")}. Een tikfout zet een schakelaar anders stil uit.`,
+    );
+  }
+  const portaal = klantportaal();
+  return portaal === null ? { aan: false } : { aan: true, config: portaal };
+}
+
+/** Een naam uit een lijst van het klantportaal, voluit: `public.x` voor `x`, `bucket:` blijft. */
+export function voluit(naam) {
+  return naam.startsWith("bucket:") || naam.includes(".") ? naam : `public.${naam}`;
+}
+
+/** De lijsten waarmee een klantportaal iets vrijgeeft, met hun sleutel in stack.config.json. */
+export const VRIJGEEF_LIJSTEN = [
+  "klantportaal_poorten",
+  "klantportaal_vrije_functies",
+  "klantportaal_openbaar",
+];
+
+/**
+ * De namen die een pull request vrijgeeft: in een lijst van het klantportaal in `nu`, en niet
+ * in die lijst in `basis` (stack.config.json op de basisbranch). Stond de schakelaar op de basis
+ * nog uit, dan telt alles wat nu op een lijst staat als nieuw: wie eerst namen zet en later de
+ * schakelaar aan, bevestigt ze dan alsnog. Zonder de schakelaar nu: niets.
+ */
+export function nieuwVrijgegeven(nu, basis) {
+  if (nu?.klantportaal !== true) return [];
+  const basisAan = basis?.klantportaal === true;
+  const uit = [];
+  for (const sleutel of VRIJGEEF_LIJSTEN) {
+    const lijst = nu[sleutel];
+    if (typeof lijst !== "object" || lijst === null || Array.isArray(lijst)) continue;
+    const eerder = basisAan ? Object.keys(basis?.[sleutel] ?? {}).map(voluit) : [];
+    for (const [naam, reden] of Object.entries(lijst)) {
+      if (!eerder.includes(voluit(naam))) uit.push({ lijst: sleutel, naam, reden });
+    }
+  }
+  return uit;
+}
+
+/** De regel in de PR-tekst die bevestigt dat `naam` bewust is vrijgegeven. */
+export function bevestigingVrijgeven(naam) {
+  return `Bevestigd: klantportaal vrijgegeven: ${naam}`;
+}
+
+/** Staat de bevestiging voor `naam` (of dezelfde naam voluit) in de PR-tekst? */
+export function vrijgevenBevestigd(naam, prTekst) {
+  const regels = prTekst.split(/\r?\n/).map((r) => r.trim());
+  return regels.some((regel) => {
+    const m = /^Bevestigd:\s*klantportaal vrijgegeven:\s*(\S+)\s*$/i.exec(regel);
+    return m !== null && voluit(m[1] ?? "") === voluit(naam);
+  });
 }

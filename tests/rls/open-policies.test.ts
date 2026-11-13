@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { vraagDatabase } from "./lib/database";
-import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
+import {
+  leesSchakelaar,
+  problemenKlantportaalInDatabase,
+  vrijgegeven,
+} from "./lib/klantportaal-poort";
 
 /**
  * De beveiligingsregels zoals ze echt in de database staan, na alle migraties. Nauwkeuriger
@@ -13,14 +17,10 @@ import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
  * `klantportaal_poorten`, `klantportaal_vrije_functies` en `klantportaal_openbaar`), niet hier.
  */
 
-/** De uitzonderingen uit stack.config.json; guard-rls.mjs controleert de vorm al. */
+/** open_tabellen en leesrollen uit stack.config.json; guard-rls.mjs controleert de vorm al. */
 const config = JSON.parse(readFileSync("stack.config.json", "utf8")) as {
   open_tabellen?: Record<string, string>;
   leesrollen?: string[];
-  klantportaal?: boolean;
-  klantportaal_poorten?: Record<string, string>;
-  klantportaal_vrije_functies?: Record<string, string>;
-  klantportaal_openbaar?: Record<string, string>;
 };
 
 type OpenPolicy = {
@@ -89,19 +89,29 @@ describe("leesrollen", () => {
 });
 
 describe("klantportaal", () => {
-  // Alleen met `"klantportaal": true` in stack.config.json: dit is de sluitende controle van
-  // de app zelf. De regels staan in scripts/lib/klantportaal-database.mjs en in
-  // docs/WERKWIJZE.md. Dat de controle zelf werkt, ook zonder de schakelaar, bewijst
-  // tests/rls/klantportaal-controle.test.ts.
-  it.skipIf(config.klantportaal !== true)(
+  // De schakelaar, streng gelezen zoals guard:rls dat doet: een onbekende sleutel, een afwijkende
+  // waarde ("true", 1) of een bestand dat geen JSON is, is hier een fout en geen overslaan.
+  // Met `"klantportaal": true` volgt de sluitende controle van de app zelf. De regels staan in
+  // scripts/lib/klantportaal-database.mjs en in docs/WERKWIJZE.md. Dat de controle zelf werkt,
+  // ook zonder de schakelaar, bewijst tests/rls/klantportaal-controle.test.ts.
+  const schakelaar = leesSchakelaar();
+
+  it("de schakelaar in stack.config.json is te lezen", () => {
+    expect(schakelaar.fout, "stack.config.json (zie de melding van guard:rls)").toBeUndefined();
+  });
+
+  it.skipIf(schakelaar.aan !== true)(
     "wie alleen een e-mailadres heeft, of geen account, mag niets: de database zoals hij na alle migraties is",
     () => {
-      const problemen = problemenKlantportaalInDatabase({
-        poorten: config.klantportaal_poorten ?? {},
-        vrijeFuncties: config.klantportaal_vrije_functies ?? {},
-        openbaar: config.klantportaal_openbaar ?? {},
-        openTabellen: config.open_tabellen ?? {},
-      });
+      const portaal = schakelaar.aan === true ? schakelaar.config : {};
+      // Bij elke run zichtbaar in het logboek: wat iemand zonder goedkeuring of zonder account mag.
+      const vrij = vrijgegeven(portaal);
+      console.log(
+        vrij.length === 0
+          ? "Klantportaal: er is niets vrijgegeven (klantportaal_poorten, klantportaal_vrije_functies en klantportaal_openbaar zijn leeg)."
+          : `Klantportaal: vrijgegeven, met de reden uit stack.config.json:\n${vrij.map((r) => `  - ${r}`).join("\n")}`,
+      );
+      const problemen = problemenKlantportaalInDatabase(portaal);
       expect(problemen, "zie docs/WERKWIJZE.md, het stuk over het klantportaal").toEqual([]);
     },
   );

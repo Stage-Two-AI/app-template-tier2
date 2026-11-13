@@ -294,6 +294,45 @@ describe("scripts/guard-rls-tests.mjs", () => {
       rmSync(map, { recursive: true, force: true });
     }
   });
+  function draaiTests(config: Record<string, unknown>) {
+    const map = mkdtempSync(join(tmpdir(), "rls-tests-"));
+    try {
+      mkdirSync(join(map, "supabase/migrations"), { recursive: true });
+      mkdirSync(join(map, "tests/rls"), { recursive: true });
+      writeFileSync(join(map, "stack.config.json"), JSON.stringify({ database: true, ...config }));
+      writeFileSync(
+        join(map, "supabase/migrations/1_x.sql"),
+        "create table public.notities (id int); create table public.dossiers (id int);",
+      );
+      writeFileSync(
+        join(map, "tests/rls/notities.test.ts"),
+        'await controleerAfscherming({ tabel: "notities", maakRijAlsA });',
+      );
+      return spawnSync("node", [resolve(__dirname, "../../scripts/guard-rls-tests.mjs")], {
+        cwd: map,
+        encoding: "utf8",
+        maxBuffer: RUIME_BUFFER,
+      });
+    } finally {
+      rmSync(map, { recursive: true, force: true });
+    }
+  }
+
+  it("bij een klantportaal is een tabel zonder A/B-test rood, ook met open_tabellen", () => {
+    // Zonder de schakelaar: een waarschuwing, zoals altijd.
+    const gewoon = draaiTests({});
+    expect(gewoon.status).toBe(0);
+    expect(gewoon.stdout).toContain("1 tabel(len) zonder A/B-test: dossiers");
+    const aan = draaiTests({ klantportaal: true });
+    expect(aan.status).toBe(1);
+    expect(aan.stderr).toContain("Tabellen zonder A/B-test");
+    expect(aan.stderr).toContain("- dossiers");
+    expect(aan.stderr).toContain("de A/B-test bewijst dat klanten elkaars rijen niet zien");
+    // open_tabellen is bij een klantportaal geen uitweg.
+    const open = draaiTests({ klantportaal: true, open_tabellen: { dossiers: "voor iedereen" } });
+    expect(open.status).toBe(1);
+    expect(open.stderr).toContain("- dossiers");
+  });
 });
 
 describe("klantportaal: de poort als harde eis (poortIsHardeEis)", () => {
@@ -1063,5 +1102,263 @@ describe("scripts/guard-rls.mjs: de schakelaar klantportaal", () => {
     const uitkomst = draai(GEVALLEN["eigen rijen"] as Geval, { klantportaal: "ja" });
     expect(uitkomst.status).not.toBe(0);
     expect(uitkomst.fout).toContain("kies true of false");
+  });
+});
+
+describe("klantportaal: voor iedereen waar (isVoorIedereenWaar)", () => {
+  const waar = (voorwaarde: string) => roep<boolean>("isVoorIedereenWaar", voorwaarde);
+
+  it("vangt true en de eenvoudige varianten, zoals de database ze teruggeeft", () => {
+    for (const v of [
+      "true",
+      "(true)",
+      "(id IS NOT NULL)",
+      "(1 = 1)",
+      "(klant = klant)",
+      "((klant)::text = (klant)::text)",
+      "(jaar >= jaar)",
+      "COALESCE((owner_id = auth.uid()), true)",
+      "((owner_id = auth.uid()) OR true)",
+      "(true AND (1 = 1))",
+      "('a'::text = 'b'::text)",
+    ]) {
+      expect(waar(v), v).toBe(true);
+    }
+  });
+
+  it("laat een smalle voorwaarde en de poort met rust", () => {
+    for (const v of [
+      "(owner_id = auth.uid())",
+      "public.is_medewerker()",
+      "(( SELECT public.is_medewerker() AS is_medewerker) OR ( SELECT public.is_goedgekeurde_klant() AS is_goedgekeurde_klant))",
+      "((id IS NOT NULL) AND (owner_id = auth.uid()))",
+      "COALESCE((owner_id = auth.uid()), false)",
+      "(klant = naam)",
+    ]) {
+      expect(waar(v), v).toBe(false);
+    }
+  });
+});
+
+describe("klantportaal: een vrije functie die klanten of auth raakt, heeft de poort", () => {
+  const poort = (taal: string, bron: string) =>
+    roep<boolean>("vrijeFunctieHeeftPoort", { taal, bron });
+  const raakt = (bron: string) => roep<boolean>("raaktAdministratie", bron);
+
+  it("ziet een verwijzing naar public.klanten of een tabel in auth, niet auth.uid()", () => {
+    expect(raakt("select e_mail from public.klanten")).toBe(true);
+    expect(raakt('select * from "public"."klanten"')).toBe(true);
+    expect(raakt("select id from auth.users")).toBe(true);
+    expect(raakt("execute 'select * from auth.identities'")).toBe(true);
+    expect(raakt("select auth.uid()")).toBe(false);
+    expect(raakt("insert into public.storingen (door) values (auth.uid())")).toBe(false);
+    expect(raakt("-- niet public.klanten\nselect 1")).toBe(false);
+  });
+
+  it("language sql: één select met de poort als harde eis in de where", () => {
+    expect(poort("sql", "select e_mail from public.klanten k where public.is_medewerker()")).toBe(
+      true,
+    );
+    expect(
+      poort(
+        "sql",
+        "SELECT k.e_mail FROM public.klanten k WHERE (( SELECT public.is_medewerker() AS is_medewerker) AND k.goedgekeurd) ORDER BY 1",
+      ),
+    ).toBe(true);
+    for (const bron of [
+      "select e_mail from public.klanten",
+      "select e_mail from public.klanten where public.is_medewerker() or true",
+      "select e_mail from public.klanten where goedgekeurd",
+      "select 1 where public.is_medewerker() union select 2",
+      "with x as (update public.klanten set goedgekeurd = true returning 1) select 1 where public.is_medewerker()",
+      "update public.klanten set goedgekeurd = true where public.is_medewerker(); select 1",
+      "select (select e_mail from public.klanten where public.is_medewerker() limit 1)",
+    ]) {
+      expect(poort("sql", bron), bron).toBe(false);
+    }
+  });
+
+  it("plpgsql: begint met if not (poort) then raise", () => {
+    expect(
+      poort(
+        "plpgsql",
+        "begin if not (public.is_medewerker()) then raise exception 'nee'; end if; return query select id from auth.users; end",
+      ),
+    ).toBe(true);
+    expect(
+      poort(
+        "plpgsql",
+        "begin if not public.is_medewerker() then raise exception 'nee'; end if; end",
+      ),
+    ).toBe(true);
+    for (const bron of [
+      "begin perform public.is_medewerker(); return query select id from auth.users; end",
+      "begin if not public.is_medewerker() and true then raise exception 'nee'; end if; end",
+      "begin if not (public.is_medewerker() or true) then raise exception 'nee'; end if; end",
+      "declare x int := (select count(*) from auth.users); begin if not (public.is_medewerker()) then raise exception 'nee'; end if; end",
+    ]) {
+      expect(poort("plpgsql", bron), bron).toBe(false);
+    }
+  });
+});
+
+describe("stack.config.json: vrijgeven bij een klantportaal", () => {
+  const CONFIG = resolve(__dirname, "../../scripts/lib/stack-config.mjs");
+  function config<T>(functie: string, ...args: unknown[]): T {
+    const code = `import(${JSON.stringify(pathToFileURL(CONFIG).href)}).then((m) => { const a = JSON.parse(process.argv.at(-1)); process.stdout.write(JSON.stringify(m[a.f](...a.args))); })`;
+    return JSON.parse(
+      execFileSync(
+        "node",
+        ["--input-type=module", "-e", code, "--", JSON.stringify({ f: functie, args })],
+        { encoding: "utf8" },
+      ),
+    ) as T;
+  }
+
+  it("de reden: leeg, te kort, en een naam die op iets anders past dan bedoeld", () => {
+    const problemen = (lijst: unknown, soort = "naam") =>
+      config<string[]>("problemenMetNamenMetReden", "klantportaal_vrije_functies", lijst, soort);
+    expect(problemen({ meld_storing: "mag iedereen met een account" })).toEqual([]);
+    expect(problemen({ f: " " })[0]).toContain("hoort een reden");
+    expect(problemen({ f: "ok" })[0]).toContain("is te kort");
+    for (const naam of ["meld_*", "Meld_storing", '"meld_storing"', "meld storing", "f()"]) {
+      expect(problemen({ [naam]: "mag iedereen met een account" })[0], naam).toContain(
+        "is geen naam die de poort kent",
+      );
+    }
+    expect(problemen({ "bucket:logo": "het logo van de app" }, "openbaar")).toEqual([]);
+    expect(problemen([])[0]).toContain("hoort een object te zijn");
+  });
+
+  it("nieuw vrijgegeven: vergeleken met de basis; schakelaar daar uit = alles nieuw; hier uit = niets", () => {
+    const nu = {
+      klantportaal: true,
+      klantportaal_vrije_functies: { meld_storing: "mag iedereen met een account" },
+      klantportaal_openbaar: { "public.producten": "de catalogus is openbaar" },
+    };
+    const namen = (basis: unknown, huidig: unknown = nu) =>
+      config<Array<{ naam: string }>>("nieuwVrijgegeven", huidig, basis).map((n) => n.naam);
+    expect(namen({})).toEqual(["meld_storing", "public.producten"]);
+    expect(namen({ ...nu, klantportaal: false })).toEqual(["meld_storing", "public.producten"]);
+    expect(
+      namen({
+        klantportaal: true,
+        klantportaal_vrije_functies: { "public.meld_storing": "oude reden, zelfde naam" },
+      }),
+    ).toEqual(["public.producten"]);
+    expect(namen(nu)).toEqual([]);
+    expect(namen({}, { ...nu, klantportaal: false })).toEqual([]);
+  });
+
+  it("de bevestiging per naam, exact de regel", () => {
+    const bevestigd = (naam: string, tekst: string) =>
+      config<boolean>("vrijgevenBevestigd", naam, tekst);
+    expect(config<string>("bevestigingVrijgeven", "meld_storing")).toBe(
+      "Bevestigd: klantportaal vrijgegeven: meld_storing",
+    );
+    expect(
+      bevestigd("meld_storing", "Iets\nBevestigd: klantportaal vrijgegeven: meld_storing\n"),
+    ).toBe(true);
+    expect(
+      bevestigd("meld_storing", "Bevestigd: klantportaal vrijgegeven: public.meld_storing"),
+    ).toBe(true);
+    expect(bevestigd("meld_storing", "Bevestigd: klantportaal vrijgegeven: meld")).toBe(false);
+    expect(
+      bevestigd("meld_storing", "Bevestigd: klantportaal vrijgegeven: meld_storing_twee"),
+    ).toBe(false);
+    expect(bevestigd("meld_storing", "Bevestigd: destructieve migratie")).toBe(false);
+  });
+
+  it("de RLS-tests lezen de schakelaar streng: een fout, geen stil overslaan", () => {
+    const map = mkdtempSync(join(tmpdir(), "streng-"));
+    const lees = (inhoud: string | null) => {
+      const pad = join(map, "stack.config.json");
+      rmSync(pad, { force: true });
+      if (inhoud !== null) writeFileSync(pad, inhoud);
+      const code = `import(${JSON.stringify(pathToFileURL(CONFIG).href)}).then((m) => { try { process.stdout.write(JSON.stringify(m.klantportaalStreng())); } catch (f) { process.stdout.write(JSON.stringify({ fout: f.message })); } })`;
+      return JSON.parse(
+        execFileSync("node", ["--input-type=module", "-e", code], { cwd: map, encoding: "utf8" }),
+      ) as { aan?: boolean; fout?: string };
+    };
+    try {
+      // Een gewone app: precies zoals voorheen, uit.
+      expect(lees(null)).toEqual({ aan: false });
+      expect(lees('{ "database": true }')).toEqual({ aan: false });
+      expect(lees('{ "database": true, "klantportaal": false }')).toEqual({ aan: false });
+      expect(lees('{ "database": true, "klantportaal": true }').aan).toBe(true);
+      for (const [inhoud, melding] of [
+        ['{ "database": true, "klantportaal": "true" }', "kies true of false"],
+        ['{ "database": true, "klantportaal": 1 }', "kies true of false"],
+        ['{ "database": true, "klantPortaal": true }', 'bedoel je "klantportaal"?'],
+        ['{ "database": true, ', "geen geldige JSON"],
+        [
+          '{ "database": true, "klantportaal": true, "klantportaal_openbaar": { "x": " " } }',
+          "hoort een reden",
+        ],
+      ] as const) {
+        expect(lees(inhoud).fout, inhoud).toContain(melding);
+      }
+    } finally {
+      rmSync(map, { recursive: true, force: true });
+    }
+  });
+
+  /** guard-rls.mjs in een git-repo met main als basis en een tak met de wijziging. */
+  function draaiMetBasis(
+    basis: Record<string, unknown>,
+    nu: Record<string, unknown>,
+    prTekst = "",
+  ) {
+    const map = mkdtempSync(join(tmpdir(), "guard-rls-vrij-"));
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: map, encoding: "utf8" });
+    const SQL = `
+      create function public.sessie_via_cloudflare() returns boolean language sql security definer as $$ select true $$;
+      create function public.is_medewerker() returns boolean language sql security definer as $$ select public.sessie_via_cloudflare() $$;
+      create function public.is_goedgekeurde_klant() returns boolean language sql security definer as $$ select true $$;`;
+    try {
+      git("init", "-q", "-b", "main");
+      git("config", "user.email", "test@example.invalid");
+      git("config", "user.name", "Proef");
+      git("config", "commit.gpgsign", "false");
+      mkdirSync(join(map, "supabase/migrations"), { recursive: true });
+      writeFileSync(join(map, "supabase/migrations/1_x.sql"), SQL);
+      writeFileSync(join(map, "stack.config.json"), JSON.stringify({ database: true, ...basis }));
+      git("add", "-A");
+      git("commit", "-q", "-m", "basis");
+      git("checkout", "-q", "-b", "tak");
+      writeFileSync(join(map, "stack.config.json"), JSON.stringify({ database: true, ...nu }));
+      git("commit", "-q", "--allow-empty", "-am", "wijziging");
+      const env: NodeJS.ProcessEnv = { ...process.env, PR_BODY: prTekst };
+      delete env.GITHUB_BASE_REF;
+      return spawnSync("node", [resolve(__dirname, "../../scripts/guard-rls.mjs")], {
+        cwd: map,
+        encoding: "utf8",
+        env,
+      });
+    } finally {
+      rmSync(map, { recursive: true, force: true });
+    }
+  }
+
+  it("guard:rls is rood als een pull request iets vrijgeeft zonder de regel in de PR-tekst", () => {
+    const basis = { klantportaal: true };
+    const nu = {
+      klantportaal: true,
+      klantportaal_vrije_functies: { meld_storing: "mag iedereen met een account" },
+    };
+    const rood = draaiMetBasis(basis, nu);
+    expect(rood.status).toBe(1);
+    expect(rood.stderr).toContain("Klantportaal: deze pull request geeft iets vrij");
+    expect(rood.stderr).toContain("Controleer dat ze niets teruggeeft of wijzigt");
+    expect(rood.stderr).toContain("Bevestigd: klantportaal vrijgegeven: meld_storing");
+    const groen = draaiMetBasis(basis, nu, "Bevestigd: klantportaal vrijgegeven: meld_storing");
+    expect(groen.status, groen.stderr).toBe(0);
+    expect(groen.stdout).toContain("expliciet bevestigd in de PR-tekst");
+    // Dezelfde naam stond er al: niets te bevestigen.
+    expect(draaiMetBasis(nu, nu).status).toBe(0);
+    // Eerst de naam, later de schakelaar aan: dan alsnog bevestigen.
+    expect(
+      draaiMetBasis({ klantportaal_vrije_functies: nu.klantportaal_vrije_functies }, nu).status,
+    ).toBe(1);
   });
 });

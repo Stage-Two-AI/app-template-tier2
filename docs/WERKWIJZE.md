@@ -216,16 +216,27 @@ niets, tenzij het met een reden is vrijgegeven.** Concreet:
 3. Een `security definer`-functie of een view zonder `security_invoker = true` leest met de
    rechten van zijn eigenaar en gaat dus langs de policies heen. Mag een ingelogde gebruiker
    hem gebruiken, dan staat hij met een reden in `klantportaal_vrije_functies`. "Hij roept een
-   poort aan" is geen bewijs: de poort kan in een `or` staan of het antwoord weggooien.
+   poort aan" is geen bewijs: de poort kan in een `or` staan of het antwoord weggooien. Wat een
+   vrije functie doet, kan geen controle zien; daarom bevestigt de pull request die een naam
+   vrijgeeft dat met de regel `Bevestigd: klantportaal vrijgegeven: <naam>` (anders is
+   `guard:rls` rood), en drukt de databasecontrole bij elke run de vrijgegeven namen met hun
+   reden af. Een vrije definer-functie die `public.klanten` of een tabel in `auth` leest of
+   schrijft, heeft de poort als harde eis.
 4. Wat een bezoeker zonder account mag (een policy `to anon`, een functie die `anon` mag
    uitvoeren, een bucket met `public = true`), staat met een reden in `klantportaal_openbaar`.
    Standaard is die lijst leeg. Supabase geeft `anon` het recht op elke nieuwe functie in
    `public`; trek dat in met `revoke execute on function public.<naam>() from public, anon`.
 5. De basisfuncties van de template (`sessie_via_cloudflare`, `is_medewerker`,
    `is_goedgekeurde_klant`, `klant_aanmelden`, de trigger op `auth.users`) en de tabel
-   `klanten` blijven precies zoals de template ze maakt. Wil de app iets anders, dan maakt ze
+   `klanten` blijven precies zoals de template ze maakt, en er komt geen tweede functie met
+   hun naam bij (geen overload, niet in een ander schema). Wil de app iets anders, dan maakt ze
    een eigen poort (zie hieronder).
 6. `open_tabellen` is leeg: "iedereen binnen" is hier iedereen met een e-mailadres.
+7. **De poort zegt of iemand binnen mag; de A/B-test bewijst dat klanten elkaars rijen niet
+   zien; bij een klantportaal is die test verplicht.** Een policy die voor elke rij waar is
+   (`true`, `id is not null`, `1 = 1`, `coalesce(..., true)`) is rood, ook achter een
+   `restrictive` poort; elke andere ruime vorm vangt alleen de A/B-test per tabel, en
+   `guard:rls-tests` is bij een klantportaal rood voor een tabel zonder die test.
 
 ```json
 "klantportaal": true,

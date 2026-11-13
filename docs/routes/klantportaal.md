@@ -173,6 +173,17 @@ ingelogde gebruikers. Verder:
    blijven en mag elke ingelogde gebruiker hem gebruiken: de poort erin en met een reden in
    `"klantportaal_vrije_functies"`, alleen als de bouwer het zegt. Anders `revoke all on function
    ... from public, anon, authenticated`. Een view krijgt `security_invoker = true`.
+   **Vrijgeven** (een naam erbij in `klantportaal_vrije_functies`, `klantportaal_openbaar` of
+   `klantportaal_poorten`) betekent: wie niet is goedgekeurd, of geen account heeft, mag hem
+   aanroepen. Geef een functie alleen vrij als ze iets doet wat zo iemand echt mag (zich aanmelden,
+   een storing melden) en niets teruggeeft of wijzigt van een ander; niet "omdat de test rood is".
+   Geen controle ziet wat een functie doet, dus is het een bewuste keuze: `guard:rls` is rood tot
+   in de PR-tekst per nieuwe naam de regel `Bevestigd: klantportaal vrijgegeven: <naam>` staat
+   (leg de bouwer uit wat hij bevestigt). De databasecontrole drukt bij elke run alles af wat is
+   vrijgegeven, met de reden. Leest of schrijft een vrije definer-functie `public.klanten` of een
+   tabel in `auth`, dan moet de poort er als harde eis in (`language sql`: één `select` met
+   `where public.is_medewerker() and ...`; plpgsql: begin met `if not (public.is_medewerker())
+   then raise exception ...`); anders is ze rood. Een reden is een paar woorden, geen lege tekst.
 4. Wat een bezoeker zonder account mag, staat met een reden in `"klantportaal_openbaar"`: een
    tabel of view (`"producten"`), functie (`"zoek_product"`) of openbare bucket (`"bucket:logo"`).
    Standaard niets.
@@ -180,7 +191,13 @@ ingelogde gebruikers. Verder:
    in een vaste vorm: `language sql`, één uitdrukking `select public.is_medewerker() and ...`
    (of `is_goedgekeurde_klant()`). Een policy uit `open_tabellen` krijgt de poort in plaats van `true`.
 6. Altijd rood: een eigen trigger op `auth.users`, `auth.identities`, `auth.sessions` of
-   `public.klanten`, en elke wijziging aan de basisfuncties of de tabel `klanten`.
+   `public.klanten`, elke wijziging aan de basisfuncties of de tabel `klanten`, en een tweede
+   functie met de naam van een basisfunctie (een overload als `is_medewerker(uuid)`, of dezelfde
+   naam in een ander schema).
+7. **De poort zegt of iemand binnen mag; de A/B-test bewijst dat klanten elkaars rijen niet
+   zien.** Een policy die voor elke rij waar is (`true`, `id is not null`, `1 = 1`, `klant =
+   klant`, `coalesce(..., true)`) is rood, ook achter de poort. Andere ruime vormen ziet alleen de
+   A/B-test per tabel, en die is bij een klantportaal verplicht (stap 6).
 
 Voorbeeld, met `"klantportaal_poorten": { "is_beheerder": "medewerker die klanten goedkeurt" }`:
 
@@ -277,6 +294,10 @@ testgebruiker, een klant; de schermen voor medewerkers zie je in de Cloudflare-p
 
 Met de schakelaar aan is elke testgebruiker van `maakActor` (dus ook A en B in
 `controleerAfscherming`) vanzelf een goedgekeurde klant; de bestaande A/B-tests blijven werken.
+De poort zegt of iemand binnen mag; de A/B-test bewijst dat klanten elkaars rijen niet zien. Bij
+een klantportaal is die test **verplicht**: `guard:rls-tests` is rood voor elke tabel in `public`
+zonder `controleerAfscherming({ tabel: "<naam>", ... })` in `tests/rls/` (geen uitzondering via
+`open_tabellen`). Schrijf eerst de ontbrekende tests.
 
 1. Eigen hulpen die zelf gebruikers maken (`grep -rln "auth.admin.createUser\|signInWithPassword"
    tests/rls`, buiten de bestanden van de template) roepen daarna `keurGoedAlsKlant({ id, email })` aan.

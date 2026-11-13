@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fail, pass, skip } from "./lib/changed-files.mjs";
 import { gedekteTabellen, leesMigraties, tabellenInPublic } from "./lib/rls-regels.mjs";
-import { bezitDatabase, openTabellen } from "./lib/stack-config.mjs";
+import { bezitDatabase, klantportaal, openTabellen } from "./lib/stack-config.mjs";
 
 /**
  * Per tabel een A/B-test: gebruiker B ziet, wijzigt en verwijdert de rij van gebruiker A
@@ -18,10 +18,23 @@ import { bezitDatabase, openTabellen } from "./lib/stack-config.mjs";
  * ontbrekende tabellen (in GitHub als waarschuwing bij de run). In een latere uitgave zet de
  * werkplaats VERPLICHT op true en is hij rood; welke dat is, staat nog niet vast, en de tekst
  * hieronder belooft daarom geen versie.
+ *
+ * Bij een klantportaal (`"klantportaal": true`) is hij nu al verplicht, zonder uitzondering
+ * (`open_tabellen` mag daar niet). De poort zegt of iemand binnen mag; de A/B-test bewijst dat
+ * klanten elkaars rijen niet zien. Een ruime policy achter de poort (`using (id is not null)`)
+ * ziet alleen deze test. Zonder de schakelaar verandert er niets.
  */
-const VERPLICHT = false;
-
 if (!bezitDatabase()) skip("deze app bezit geen database, dus ook geen tabellen om te testen");
+
+let portaal = null;
+try {
+  portaal = klantportaal();
+} catch (fout) {
+  fail("De schakelaar klantportaal in stack.config.json klopt niet (zie ook guard:rls).", [
+    ...String(fout instanceof Error ? fout.message : fout).split("\n"),
+  ]);
+}
+const VERPLICHT = portaal !== null;
 
 const sql = leesMigraties();
 if (sql === null) pass("nog geen migraties");
@@ -46,11 +59,16 @@ function leesTests(map) {
 }
 
 const gedekt = gedekteTabellen(leesTests("tests/rls"));
-const open = openTabellen();
+// Bij een klantportaal telt open_tabellen niet als uitzondering: daar is het altijd fout.
+const open = portaal !== null ? {} : openTabellen();
 const zonder = [...tabellen].filter((t) => !gedekt.has(t) && !(t in open)).sort();
 
 if (zonder.length === 0) {
-  pass(`${tabellen.size} tabel(len): elk een A/B-test of een regel in open_tabellen`);
+  pass(
+    portaal !== null
+      ? `${tabellen.size} tabel(len): elk een A/B-test (verplicht bij een klantportaal)`
+      : `${tabellen.size} tabel(len): elk een A/B-test of een regel in open_tabellen`,
+  );
 }
 
 const uitleg = [
@@ -73,8 +91,17 @@ const uitleg = [
   "    });",
   "  });",
   "",
-  "Mag iedereen die binnen is deze tabel zien? Zet hem dan met een reden in",
-  'stack.config.json: "open_tabellen": { "<tabel>": "<waarom>" }.',
+  ...(portaal !== null
+    ? [
+        "Dit is een klantportaal: de test is hier verplicht, voor elke tabel. De poort zegt of",
+        "iemand binnen mag; de A/B-test bewijst dat klanten elkaars rijen niet zien. Een tabel",
+        "alleen voor medewerkers: laat maakRijAlsA de rij maken met admin (docs/routes/klantportaal.md,",
+        "stap 6). open_tabellen mag bij een klantportaal niet.",
+      ]
+    : [
+        "Mag iedereen die binnen is deze tabel zien? Zet hem dan met een reden in",
+        'stack.config.json: "open_tabellen": { "<tabel>": "<waarom>" }.',
+      ]),
 ];
 
 if (VERPLICHT) fail("Tabellen zonder A/B-test (gebruiker B ziet de rij van A niet):", uitleg);

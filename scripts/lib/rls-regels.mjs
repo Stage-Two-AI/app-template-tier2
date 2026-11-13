@@ -325,6 +325,119 @@ export function poortIsHardeEis(voorwaarde, poorten = BASISPOORTEN) {
   );
 }
 
+/**
+ * Is deze voorwaarde voor iedereen waar, op het bekende lek na: letterlijk `true`, en de
+ * eenvoudige varianten die een aanvaller gebruikte. Een korte, eerlijke lijst, geen poging tot
+ * volledigheid: `true`, `not false`, `<kolom> is not null`, een vergelijking van iets met zichzelf
+ * (`1 = 1`, `klant = klant`, ook met `>=`, `<=` of `is not distinct from`), `coalesce(..., true)`,
+ * en een `or` met zo'n tak of een `and` van alleen zulke delen. Of klanten elkaars rijen niet
+ * zien, bewijst de A/B-test per tabel; dit vangt alleen de vormen die nooit iets scheiden.
+ */
+export function isVoorIedereenWaar(voorwaarde) {
+  if (voorwaarde === null || voorwaarde === undefined) return false;
+  const tekst = zonderBuitensteHaakjes(genormaliseerd(voorwaarde));
+  if (tekst === "") return false;
+  const takken = splitsOp(tekst, "or");
+  if (takken.length > 1) return takken.some((t) => isVoorIedereenWaar(t));
+  const delen = splitsOp(tekst, "and");
+  if (delen.length > 1) return delen.every((d) => isVoorIedereenWaar(d));
+  if (tekst === "true" || tekst === "not false") return true;
+  if (/^[a-z_][a-z0-9_.]* is not null$/.test(tekst)) return true;
+  if (
+    /^coalesce ?\(.*, ?(?:true|\(true\))\)$/.test(tekst) &&
+    sluitHaakje(tekst, tekst.indexOf("(")) === tekst.length - 1
+  ) {
+    return true;
+  }
+  for (const teken of [" = ", " >= ", " <= ", " is not distinct from "]) {
+    const plek = tekst.indexOf(teken);
+    if (plek > 0 && tekst.indexOf(teken, plek + 1) < 0) {
+      const links = zonderBuitensteHaakjes(tekst.slice(0, plek));
+      const rechts = zonderBuitensteHaakjes(tekst.slice(plek + teken.length));
+      if (links !== "" && links === rechts) return true;
+    }
+  }
+  return false;
+}
+
+/** Vervangt alles tussen haakjes door spaties: dezelfde lengte, alleen het hoogste niveau. */
+function masker(tekst) {
+  let uit = "";
+  let diepte = 0;
+  for (const teken of tekst) {
+    if (teken === "(") diepte++;
+    uit += diepte > 0 ? " " : teken;
+    if (teken === ")") diepte--;
+  }
+  return uit;
+}
+
+/** Een voorwaarde die in zijn geheel tussen haakjes staat, of één aanroep van een poort. */
+function losseVoorwaarde(tekst, poorten) {
+  const t = tekst.trim();
+  if (t.startsWith("(") && sluitHaakje(t, 0) === t.length - 1) return true;
+  return isPoort(t, poorten);
+}
+
+/**
+ * Heeft een vrijgegeven `security definer`-functie de poort als harde eis? Bescheiden en na te
+ * lopen, twee vormen; al het andere is nee:
+ *
+ *   - `language sql`: één `select` (geen `with`, geen `union`), met op het hoogste niveau een
+ *     `where` waarin een poort een harde eis is: `select ... from public.klanten k where
+ *     public.is_medewerker() and ...`. Zonder poort geeft hij dan geen rij.
+ *   - `language plpgsql`: het lijf begint met `begin if not (<poort als harde eis>) then raise`,
+ *     zonder declare-blok ervoor.
+ *
+ * `functie`: { taal, bron }.
+ */
+export function vrijeFunctieHeeftPoort(functie, poorten = BASISPOORTEN) {
+  const tekst = genormaliseerd(functie.bron ?? "");
+  if (functie.taal === "sql") {
+    const lijf = tekst
+      .replace(/^begin atomic (.*?);? end$/, "$1")
+      .replace(/;$/, "")
+      .trim();
+    if (lijf.includes(";") || !/^select\b/.test(lijf)) return false;
+    const hoog = masker(lijf);
+    if (/\b(?:union|intersect|except)\b/.test(hoog)) return false;
+    const waar = [...hoog.matchAll(/\bwhere\b/g)];
+    if (waar.length !== 1) return false;
+    const begin = (waar[0]?.index ?? 0) + "where".length;
+    const rest = hoog.slice(begin);
+    const einde =
+      /\b(?:group by|having|window|order by|limit|offset|fetch|for update|for share|for no key|for key)\b/.exec(
+        rest,
+      );
+    const voorwaarde = lijf.slice(begin, einde ? begin + einde.index : lijf.length);
+    return poortIsHardeEis(voorwaarde, poorten);
+  }
+  if (functie.taal === "plpgsql") {
+    const m = /^begin if not (.+?) then raise\b/.exec(tekst);
+    if (!m) return false;
+    const voorwaarde = m[1] ?? "";
+    return losseVoorwaarde(voorwaarde, poorten) && poortIsHardeEis(voorwaarde, poorten);
+  }
+  return false;
+}
+
+/**
+ * Leest of schrijft deze functie `public.klanten` of een tabel in het schema `auth`? Op de
+ * opgeslagen brontekst, zonder commentaar, met tekst erin (dus ook een naam in dynamische SQL
+ * als hij er voluit staat). `auth.uid()` en andere functies in `auth` tellen niet.
+ */
+export function raaktAdministratie(bron) {
+  const tekst = zonderCommentaar(bron ?? "")
+    .replaceAll('"', "")
+    .toLowerCase();
+  if (/\bpublic\s*\.\s*klanten\b/.test(tekst)) return true;
+  for (const m of tekst.matchAll(/\bauth\s*\.\s*([a-z_][a-z0-9_]*)/g)) {
+    const na = tekst.slice((m.index ?? 0) + m[0].length).trimStart();
+    if (!na.startsWith("(")) return true;
+  }
+  return false;
+}
+
 /** Haalt alles tussen haakjes weg, zodat alleen het hoogste niveau overblijft. */
 function hoogsteNiveau(tekst) {
   let uit = "";

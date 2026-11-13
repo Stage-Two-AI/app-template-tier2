@@ -1,5 +1,13 @@
 import { readFileSync } from "node:fs";
-import { BASISPOORTEN, eigenPoortKlopt, poortIsHardeEis } from "./rls-regels.mjs";
+import {
+  BASISPOORTEN,
+  eigenPoortKlopt,
+  isVoorIedereenWaar,
+  poortIsHardeEis,
+  raaktAdministratie,
+  vrijeFunctieHeeftPoort,
+} from "./rls-regels.mjs";
+import { problemenMetNamenMetReden } from "./stack-config.mjs";
 
 /**
  * De sluitende controle van een klantportaal: wat er na alle migraties ECHT in de database
@@ -151,6 +159,7 @@ select json_build_object(
     'functies', (
       select coalesce(json_agg(json_build_object(
                'naam', p.proname,
+               'schema', n.nspname,
                'args', pg_get_function_identity_arguments(p.oid),
                'hash', encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'),
                'definer', p.prosecdef,
@@ -161,11 +170,12 @@ select json_build_object(
                'volatiel', p.provolatile,
                'anon', has_function_privilege('anon', p.oid, 'execute'),
                'ingelogd', has_function_privilege('authenticated', p.oid, 'execute')
-             ) order by p.proname, 2), '[]')
+             ) order by n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)), '[]')
         from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
         join pg_language l on l.oid = p.prolang
-       where p.pronamespace = 'public'::regnamespace
-         and p.proname in (${lijst(BASISFUNCTIES)})
+       where p.proname in (${lijst(BASISFUNCTIES)})
+         and (n.oid = 'public'::regnamespace or n.oid in (select oid from schemas))
     ),
     'triggers', (
       select coalesce(json_agg(json_build_object(
@@ -221,6 +231,40 @@ export function verwachteBasis() {
   return JSON.parse(readFileSync(new URL("./klantportaal-basis.json", import.meta.url), "utf8"));
 }
 
+/** De lijsten van het klantportaal: veld in `config`, sleutel in stack.config.json, soort naam. */
+const LIJSTEN = [
+  ["poorten", "klantportaal_poorten", "naam"],
+  ["vrijeFuncties", "klantportaal_vrije_functies", "naam"],
+  ["openbaar", "klantportaal_openbaar", "openbaar"],
+];
+
+/** Alleen de namen uit een lijst die de toets doorstaan; een foute regel geeft niets vrij. */
+function geldigeNamen(sleutel, lijst, soort) {
+  if (typeof lijst !== "object" || lijst === null || Array.isArray(lijst)) return {};
+  return Object.fromEntries(
+    Object.entries(lijst).filter(
+      ([naam, reden]) => problemenMetNamenMetReden(sleutel, { [naam]: reden }, soort).length === 0,
+    ),
+  );
+}
+
+/**
+ * Wat een klantportaal vrijgeeft, met de reden, om bij elke run af te drukken (in het logboek
+ * van de Kwaliteitspoort). Zo ziet wie de run leest wat iemand zonder goedkeuring of zonder
+ * account mag, ook als niemand de pull request las.
+ */
+export function vrijgegevenOverzicht(config = {}) {
+  const regels = [];
+  for (const [veld, sleutel] of LIJSTEN) {
+    for (const [naam, reden] of Object.entries(config[veld] ?? {})) {
+      regels.push(
+        `${sleutel}: ${naam} (${typeof reden === "string" ? reden.trim() : "geen reden"})`,
+      );
+    }
+  }
+  return regels;
+}
+
 /** Staat `naam` (schema.object) op een lijst met namen? Een naam zonder schema is public. */
 function opLijst(lijst, naam) {
   return Object.keys(lijst ?? {}).some((sleutel) =>
@@ -247,10 +291,21 @@ function voorwaardenVoor(policy, cmd) {
  */
 export function beoordeelDatabase(model, config = {}, basis = verwachteBasis()) {
   const problemen = [];
-  const eigenPoorten = Object.keys(config.poorten ?? {});
+  // Dezelfde toets als guard:rls (scripts/lib/stack-config.mjs): een lege of te korte reden,
+  // of een naam die op iets anders past dan bedoeld, is ook hier rood, en telt niet mee.
+  const lijsten = {};
+  for (const [veld, sleutel, soort] of LIJSTEN) {
+    problemen.push(
+      ...problemenMetNamenMetReden(sleutel, config[veld], soort).map(
+        (p) => `stack.config.json: ${p}`,
+      ),
+    );
+    lijsten[veld] = geldigeNamen(sleutel, config[veld], soort);
+  }
+  const eigenPoorten = Object.keys(lijsten.poorten);
   const poorten = [...BASISPOORTEN, ...eigenPoorten.map((p) => p.split(".").at(-1))];
-  const openbaar = config.openbaar ?? {};
-  const vrij = config.vrijeFuncties ?? {};
+  const openbaar = lijsten.openbaar;
+  const vrij = lijsten.vrijeFuncties;
   const isOpenbaar = (naam) => opLijst(openbaar, naam);
 
   for (const tabel of Object.keys(config.openTabellen ?? {})) {
@@ -326,6 +381,17 @@ export function beoordeelDatabase(model, config = {}, basis = verwachteBasis()) 
     );
   for (const p of policies) {
     if (!p.permissief || !p.ingelogd) continue;
+    // Ook achter een poort: de poort zegt of iemand binnen mag, niet welke rijen van hem zijn.
+    for (const [soort, voorwaarde] of [
+      ["using", p.using],
+      ["with check", p.check],
+    ]) {
+      if (isVoorIedereenWaar(voorwaarde)) {
+        problemen.push(
+          `${p.tabel} (policy "${p.naam}"): de ${soort} (${voorwaarde}) is voor elke rij waar, dus ziet elke goedgekeurde klant ook de rijen van een andere klant. De poort zegt alleen of iemand binnen mag; maak de policy smal (auth.uid() = owner_id). Dat klanten elkaars rijen niet zien, bewijst de A/B-test per tabel (controleerAfscherming)`,
+        );
+      }
+    }
     const opdrachten = p.cmd === "all" ? OPDRACHTEN : [p.cmd];
     if (opdrachten.every((cmd) => gedekt(p.tabel, cmd))) continue;
     for (const [soort, voorwaarde] of [
@@ -344,8 +410,8 @@ export function beoordeelDatabase(model, config = {}, basis = verwachteBasis()) 
   const functies = model.functies ?? [];
   for (const f of functies) {
     if (f.supabase || !(f.anon || f.ingelogd)) continue;
-    const [schema, naam] = f.naam.split(".");
-    if (schema === "public" && BASISFUNCTIES.includes(naam)) continue;
+    // Een basisfunctie, of een functie met haar naam: vergelijkBasis kijkt die na.
+    if (BASISFUNCTIES.includes(f.naam.split(".").at(-1) ?? "")) continue;
     const handtekening = `${f.naam}(${f.args})`;
     if (f.anon && !isOpenbaar(f.naam)) {
       problemen.push(
@@ -358,7 +424,18 @@ export function beoordeelDatabase(model, config = {}, basis = verwachteBasis()) 
         `${handtekening}: security definer zonder vast zoekpad; zet \`set search_path = ''\``,
       );
     }
-    if (opLijst(config.poorten, f.naam) || opLijst(vrij, f.naam)) continue;
+    if (opLijst(lijsten.poorten, f.naam)) continue;
+    const vrijgegeven = opLijst(vrij, f.naam);
+    if (
+      (vrijgegeven || isOpenbaar(f.naam)) &&
+      raaktAdministratie(f.bron) &&
+      !vrijeFunctieHeeftPoort(f, poorten)
+    ) {
+      problemen.push(
+        `${handtekening}: een vrijgegeven security definer-functie die public.klanten of een tabel in auth leest of schrijft, heeft de poort als harde eis nodig, ook op de vrije lijst. language sql: één select met \`where public.is_medewerker() and ...\` (of is_goedgekeurde_klant()); plpgsql: begin met \`if not (public.is_medewerker()) then raise exception ...\`. Of geef hem niet vrij`,
+      );
+    }
+    if (vrijgegeven) continue;
     problemen.push(
       `${handtekening}: security definer (hij leest met de rechten van zijn eigenaar), en iedereen met een e-mailadres mag hem uitvoeren`,
     );
@@ -412,8 +489,16 @@ export function vergelijkBasis(gevonden, verwacht) {
   const problemen = [];
   const herstel =
     "Neem de migratie van het klantportaal ongewijzigd over uit de template; wil de app iets anders, maak dan een eigen functie en zet die in klantportaal_poorten";
+  const exact = (g, naam) =>
+    g.naam === naam && g.args === "" && (g.schema ?? "public") === "public";
+  for (const f of gevonden.functies ?? []) {
+    if (exact(f, f.naam) && f.naam in (verwacht.functies ?? {})) continue;
+    problemen.push(
+      `${f.schema ?? "public"}.${f.naam}(${f.args}): een tweede functie met de naam van een basisfunctie mag niet. Alleen public.${f.naam}() wordt met de template vergeleken; een overload of een gelijknamige functie in een ander schema valt daarbuiten en kan als security definer de poort omzeilen (bijvoorbeeld een account zichzelf laten goedkeuren). Geef hem een eigen naam`,
+    );
+  }
   for (const [naam, eis] of Object.entries(verwacht.functies ?? {})) {
-    const f = (gevonden.functies ?? []).find((g) => g.naam === naam && g.args === "");
+    const f = (gevonden.functies ?? []).find((g) => exact(g, naam));
     if (!f) {
       problemen.push(`de basisfunctie public.${naam}() ontbreekt. ${herstel}`);
       continue;

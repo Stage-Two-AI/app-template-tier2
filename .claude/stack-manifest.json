@@ -117,6 +117,7 @@
       "tests/rls/lib/database.ts",
       "tests/rls/lib/klantportaal-poort.ts",
       "tests/rls/klantportaal-controle.test.ts",
+      "tests/rls/klantportaal-ab.test.ts",
       "scripts/lib/klantportaal-database.mjs",
       "scripts/lib/klantportaal-basis.json",
       "tests/unit/klantportaal-database.test.ts",

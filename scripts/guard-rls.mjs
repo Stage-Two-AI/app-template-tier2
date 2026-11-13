@@ -1,4 +1,12 @@
-import { fail, pass, skip } from "./lib/changed-files.mjs";
+import { execFileSync } from "node:child_process";
+import {
+  fail,
+  herstartNaPrTekst,
+  pass,
+  pullRequestBody,
+  resolveBase,
+  skip,
+} from "./lib/changed-files.mjs";
 import {
   heeftDynamischeSql,
   leesMigraties,
@@ -8,11 +16,15 @@ import {
   tabellenInPublic,
 } from "./lib/rls-regels.mjs";
 import {
+  bevestigingVrijgeven,
   bezitDatabase,
   klantportaal,
   leesRollen,
+  nieuwVrijgegeven,
   onbekendeSleutels,
   openTabellen,
+  stackConfig,
+  vrijgevenBevestigd,
 } from "./lib/stack-config.mjs";
 
 /**
@@ -37,6 +49,12 @@ import {
  *
  * Een onbekende sleutel in stack.config.json is altijd rood: een tikfout in een schakelaar
  * (`klantPortaal`) zou hem anders stil uitzetten.
+ *
+ * Bij een klantportaal: zet een pull request een naam erbij in `klantportaal_poorten`,
+ * `klantportaal_vrije_functies` of `klantportaal_openbaar` (vergeleken met stack.config.json op
+ * de basisbranch), dan staat per naam de regel `Bevestigd: klantportaal vrijgegeven: <naam>` in
+ * de PR-tekst. Wat een vrije functie doet, kan geen controle zien; zo is het vrijgeven een
+ * bewuste, zichtbare keuze, net als een destructieve migratie (guard-migrations.mjs).
  *
  * Dit is de snelle controle op de tekst van de migraties, al bij een concept-PR. De echte
  * poort voor 2 en 3 is tests/rls/open-policies.test.ts: die leest de policies en rechten uit
@@ -142,6 +160,61 @@ if (portaal !== null) {
       "Let op: een migratie maakt iets met dynamische SQL (`do ... execute`). Wat dat maakt, ziet deze controle niet; de databasecontrole wel.",
     );
   }
+  controleerVrijgeven();
+}
+
+/** stack.config.json op de basisbranch, of null als er geen basis is om mee te vergelijken. */
+function configOpDeBasis() {
+  try {
+    execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { stdio: "ignore" });
+  } catch {
+    return null;
+  }
+  const basis = resolveBase();
+  if (!basis) return null;
+  try {
+    return JSON.parse(
+      execFileSync("git", ["show", `${basis}:stack.config.json`], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }),
+    );
+  } catch {
+    // Het bestand stond er op de basis nog niet (of was geen JSON): dan is alles nieuw.
+    return {};
+  }
+}
+
+function controleerVrijgeven() {
+  const basis = configOpDeBasis();
+  if (basis === null) {
+    console.log(
+      "Let op: geen basisbranch om mee te vergelijken, dus niet nagekeken welke namen deze wijziging vrijgeeft.",
+    );
+    return;
+  }
+  const nieuw = nieuwVrijgegeven(stackConfig(), basis);
+  if (nieuw.length === 0) return;
+  const tekst = pullRequestBody();
+  const open = nieuw.filter((n) => !vrijgevenBevestigd(n.naam, tekst));
+  if (open.length === 0) {
+    console.log("✓ klantportaal: vrijgegeven, expliciet bevestigd in de PR-tekst:");
+    for (const n of nieuw) console.log(`  - ${n.lijst}: ${n.naam} (${n.reden})`);
+    return;
+  }
+  fail("Klantportaal: deze pull request geeft iets vrij, en dat is niet bevestigd.", [
+    ...open.map((n) => `- ${n.lijst}: ${n.naam} (reden: ${n.reden})`),
+    "",
+    "Vrijgeven betekent: iemand die niet is goedgekeurd (klantportaal_vrije_functies), of",
+    "iemand zonder account (klantportaal_openbaar), mag deze functie aanroepen of dit lezen; een",
+    "eigen poort (klantportaal_poorten) beslist wie binnen mag. Geen controle kan zien wat een",
+    "functie doet. Controleer dat ze niets teruggeeft of wijzigt wat zo iemand niet mag zien.",
+    "",
+    "Klopt het? Zet dan per naam deze regel exact zo in de PR-tekst:",
+    "",
+    ...open.map((n) => bevestigingVrijgeven(n.naam)),
+    ...herstartNaPrTekst,
+  ]);
 }
 
 if (tables.size === 0) pass("geen tabellen in het schema public");
