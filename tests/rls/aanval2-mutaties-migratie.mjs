@@ -80,7 +80,8 @@ try {
         regels.push(`| ${naam} | ${wat} | - | MUTATIE PAST NIET (zoektekst niet gevonden) |`);
         continue;
       }
-      sql = origineel.replace(zoek, vervang);
+      // Met een functie: in een gewone vervangtekst betekent `$$` één dollarteken.
+      sql = origineel.replace(zoek, () => vervang);
     }
     if (process.env.DROOG) {
       regels.push(`| ${naam} | ${wat} | - | past |`);
