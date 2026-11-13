@@ -82,4 +82,4 @@ jobs:
       - run: pnpm exec supabase start -x studio,imgproxy,logflare,vector,supavisor
       - run: pnpm env:local
       - name: Mutaties
-        run: node tests/rls/aanval2-mutaties-migratie.mjs
+        run: node tests/rls/aanval2-mutaties-migratie.mjs a0-geen a1-goedgekeurd-sessie-van-ander a3-zoekpad-weg

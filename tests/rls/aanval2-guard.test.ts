@@ -423,12 +423,13 @@ describe.skipIf(ZONDER_API)("AANVAL2 doel 1: buiten de tabellen om", () => {
     }
   });
 
-  it("1.14 GELUKT ALS: een policy op realtime.messages laat elke ingelogde meeluisteren op een besloten kanaal", async () => {
-    const sql = `create policy "aanval2_meeluisteren" on realtime.messages for select to authenticated using (true);`;
-    expect(guardRls(sql).code).toBe(0);
+  it("1.14 GELUKT ALS: een policy `to anon` op realtime.messages laat iedereen met de openbare sleutel meeluisteren op een besloten kanaal", async () => {
+    const sql = `create policy "aanval2_meeluisteren" on realtime.messages for select to anon using (realtime.topic() = 'aanval2-dossiers');`;
+    const guard = guardRls(sql);
+    expect(guard.code, guard.uit).toBe(0);
     const luister = async (): Promise<unknown> => {
-      await vreemde.client.realtime.setAuth(vreemde.token);
-      const kanaal = vreemde.client.channel("aanval2-dossiers", { config: { private: true } });
+      const client = zonderAccount();
+      const kanaal = client.channel("aanval2-dossiers", { config: { private: true } });
       try {
         const ontvangen = new Promise<unknown>((klaar) => {
           kanaal.on("broadcast", { event: "nieuw" }, (bericht) => klaar(bericht.payload));
@@ -449,10 +450,10 @@ describe.skipIf(ZONDER_API)("AANVAL2 doel 1: buiten de tabellen om", () => {
         }
         return null;
       } finally {
-        await vreemde.client.removeChannel(kanaal);
+        await client.removeChannel(kanaal);
       }
     };
-    // Zonder de policy komt de vreemde het besloten kanaal niet in.
+    // Zonder de policy komt een bezoeker het besloten kanaal niet in.
     expect(await luister()).toBeNull();
     try {
       alsMigratie(sql);

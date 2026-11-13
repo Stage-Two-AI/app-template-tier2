@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { admin } from "./lib/afscherming";
+import { type NepInlogdienst, startNepInlogdienst } from "./lib/inlogdienst-nep";
 import {
   accountsVan,
   inloggenMetMailcode,
@@ -19,16 +20,23 @@ import {
  * AANVAL ronde 2, doel 3 (medewerkerrechten zonder verse Cloudflare-sessie) en doel 4 (een
  * klant die meer kan dan mag).
  *
- * Elke test beschrijft een aanval en verwacht dat hij LUKT. Een test met `it.fails` is een
- * aanval die op deze stand NIET lukte: hij wordt rood zodra de aanval wel gaat werken.
+ * Een test met "GELUKT ALS" slaagt als de aanval lukt. Een test met "MISLUKT" is een aanval die
+ * op deze stand niet lukte: hij legt vast wat er is geprobeerd en wordt rood zodra de aanval
+ * wel gaat werken.
  */
 
 const url = String(import.meta.env.SUPABASE_URL);
 const anonKey = String(import.meta.env.SUPABASE_ANON_KEY);
 const opruimen = new Set<string>();
+let dienst: NepInlogdienst;
+
+beforeAll(async () => {
+  dienst = await startNepInlogdienst();
+});
 
 afterAll(async () => {
   for (const id of opruimen) await verwijderAccount(id);
+  await dienst?.stop();
 });
 
 /** Een medewerker met een verse sessie via de (nagebootste) Cloudflare. */
@@ -61,7 +69,7 @@ const isMedewerker = async (token: string, headers: Record<string, string> = {})
 };
 
 describe("AANVAL2 doel 3: medewerkerrechten zonder verse Cloudflare-sessie", () => {
-  it.fails("3.1 race: tijdens en na uitloggen (overal) geeft het oude token nog medewerkerrechten, of het oude verversingstoken een nieuw token", async () => {
+  it("3.1 MISLUKT: race: tijdens en na uitloggen (overal) geeft het oude token nog medewerkerrechten, of het oude verversingstoken een nieuw token", async () => {
     const { sessie } = await medewerker("race");
     const { data: huidige } = await sessie.client.auth.getSession();
     const verversing = huidige.session?.refresh_token ?? "";
@@ -74,10 +82,10 @@ describe("AANVAL2 doel 3: medewerkerrechten zonder verse Cloudflare-sessie", () 
       headers: { apikey: anonKey, "content-type": "application/json" },
       body: JSON.stringify({ refresh_token: verversing }),
     });
-    expect(na.some(Boolean) || ververst.ok).toBe(true);
+    expect(na.some(Boolean) || ververst.ok).toBe(false);
   });
 
-  it.fails("3.2 klok en tijdzone: na twaalf uur komt het recht terug door de tijdzone van het verzoek te kiezen of parallel te verversen", async () => {
+  it("3.2 MISLUKT: klok en tijdzone: na twaalf uur komt het recht terug door de tijdzone van het verzoek te kiezen of parallel te verversen", async () => {
     const { sessie } = await medewerker("tijdzone");
     zetSessieBegin(sessie.sessieId, 12.5);
     const pogingen = await Promise.all([
@@ -90,10 +98,11 @@ describe("AANVAL2 doel 3: medewerkerrechten zonder verse Cloudflare-sessie", () 
     );
     const tokens = ververst.flatMap((v) => v.data.session?.access_token ?? []);
     const naVerversen = await Promise.all(tokens.map((token) => isMedewerker(token)));
-    expect([...pogingen, ...naVerversen].some(Boolean)).toBe(true);
+    expect(tokens.length).toBeGreaterThan(0);
+    expect([...pogingen, ...naVerversen].some(Boolean)).toBe(false);
   });
 
-  it.fails("3.3 omdopen: een mailsessie op het account van een medewerker zet zelf `amr`, de inlogdienst of een koppeling via de API van Supabase", async () => {
+  it("3.3 MISLUKT: omdopen: een mailsessie op het account van een medewerker zet zelf `amr`, de inlogdienst of een koppeling via de API van Supabase", async () => {
     const { persoon } = await medewerker("omdopen");
     const perMail = await inloggenMetMailcode(persoon.email);
     const auth = { apikey: anonKey, Authorization: `Bearer ${perMail.token}` };
@@ -119,7 +128,8 @@ describe("AANVAL2 doel 3: medewerkerrechten zonder verse Cloudflare-sessie", () 
     const { data: ververst } = await perMail.client.auth.refreshSession();
     const tokens = [perMail.token, ververst.session?.access_token ?? perMail.token];
     const rechten = await Promise.all(tokens.map((token) => isMedewerker(token)));
-    expect(rechten.some(Boolean) || koppelen.ok || idToken.ok).toBe(true);
+    expect(perMail.userId).toBe((await accountsVan(persoon))[0]);
+    expect(rechten.some(Boolean) || koppelen.ok || idToken.ok).toBe(false);
   });
 
   it("3.4 GELUKT ALS: een medewerker die in Supabase is geblokkeerd (ban) houdt met zijn lopende token medewerkerrechten", async () => {
@@ -136,7 +146,7 @@ describe("AANVAL2 doel 3: medewerkerrechten zonder verse Cloudflare-sessie", () 
 });
 
 describe("AANVAL2 doel 4: een klant die meer kan dan mag", () => {
-  it("4.1 GELUKT ALS: een adres dat op dat van een bekende klant lijkt (aanhalingstekens of een Cyrillische letter) komt zo op de lijst van de medewerker", async () => {
+  it("4.1 MISLUKT: een adres dat op dat van een bekende klant lijkt (aanhalingstekens of een Cyrillische letter) komt zo op de lijst van de medewerker", async () => {
     const staart = Math.random().toString(36).slice(2, 8);
     const adressen = [
       `"directie@groteklant.nl"@a2${staart}.voorbeeld.nl`,
@@ -144,6 +154,7 @@ describe("AANVAL2 doel 4: een klant die meer kan dan mag", () => {
       `dirеctie-${staart}@voorbeeld.nl`,
     ];
     const opDeLijst: string[] = [];
+    const geweigerd: string[] = [];
     for (const adres of adressen) {
       try {
         const sessie = await inloggenMetMailcode(adres);
@@ -151,11 +162,13 @@ describe("AANVAL2 doel 4: een klant die meer kan dan mag", () => {
         await sessie.client.rpc("klant_aanmelden");
         const { data } = await admin.from("klanten").select("e_mail").eq("user_id", sessie.userId);
         if (data?.[0]) opDeLijst.push(data[0].e_mail);
-      } catch {
+      } catch (fout) {
         // Supabase of de mail weigerde dit adres.
+        geweigerd.push(String(fout).slice(0, 120));
       }
     }
-    expect(opDeLijst.length).toBeGreaterThan(0);
+    expect(geweigerd).toHaveLength(adressen.length);
+    expect(opDeLijst).toEqual([]);
   }, 90_000);
 
   it("4.2 GELUKT ALS: massaal aanmelden: zes verse adressen zijn zes regels op de lijst van de medewerker, zonder rem in de app", async () => {
@@ -168,7 +181,7 @@ describe("AANVAL2 doel 4: een klant die meer kan dan mag", () => {
     expect(data).toHaveLength(6);
   }, 90_000);
 
-  it.fails("4.3 de trigger misbruiken: een vreemde laat een goedgekeurde klant zijn goedkeuring of zijn sessie verliezen", async () => {
+  it("4.3 MISLUKT: de trigger misbruiken: een vreemde laat een goedgekeurde klant zijn goedkeuring of zijn sessie verliezen", async () => {
     const slachtoffer = await klant("slachtoffer", { goedgekeurd: true });
     const { data: account } = await admin.auth.admin.getUserById(slachtoffer.userId);
     const adres = account.user?.email ?? "";
@@ -184,7 +197,7 @@ describe("AANVAL2 doel 4: een klant die meer kan dan mag", () => {
       .select("goedgekeurd, e_mail")
       .eq("user_id", slachtoffer.userId);
     const { data: nog } = await metToken(slachtoffer.token).rpc("is_goedgekeurde_klant");
-    expect(regel?.[0]?.goedgekeurd !== true || nog !== true).toBe(true);
+    expect(regel?.[0]?.goedgekeurd !== true || nog !== true).toBe(false);
   });
 
   it("4.4 GELUKT ALS: een klant die in Supabase is geblokkeerd (ban) blijft met zijn lopende token goedgekeurd", async () => {

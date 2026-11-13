@@ -87,7 +87,14 @@ try {
       continue;
     }
     writeFileSync(MIGRATIE, sql);
-    const reset = spawnSync("pnpm", ["exec", "supabase", "db", "reset"], { encoding: "utf8" });
+    let reset = spawnSync("pnpm", ["exec", "supabase", "db", "reset"], { encoding: "utf8" });
+    if (reset.status !== 0) {
+      // Het opnieuw opbouwen hapert soms zonder dat het aan de migratie ligt: één herhaling.
+      console.log(
+        `=== ${naam}: reset mislukt\n${String(reset.stderr).trim().split("\n").slice(-12).join("\n")}`,
+      );
+      reset = spawnSync("pnpm", ["exec", "supabase", "db", "reset"], { encoding: "utf8" });
+    }
     if (reset.status !== 0) {
       regels.push(
         `| ${naam} | ${wat} | - | database bouwt niet: ${String(reset.stderr).trim().split("\n").pop()} |`,
