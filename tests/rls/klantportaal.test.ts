@@ -7,17 +7,23 @@ import {
   maakActor,
   verwijderActor,
 } from "./lib/afscherming";
+import { type NepInlogdienst, type Persoon, startNepInlogdienst } from "./lib/inlogdienst-nep";
 import {
-  geefAndereIdentiteit,
-  geefCloudflareIdentiteit,
+  accountsVan,
+  inloggenMetCode,
   inloggenMetMailcode,
+  inloggenViaInlogdienst,
+  LOKALE_DIENST,
   leesToken,
-  maakAccount,
-  maakCloudflareSessie,
   metToken,
   nieuwAdres,
+  nieuwPersoon,
+  noemIdentiteitCloudflare,
   type Sessie,
+  sessieViaInlogdienst,
+  type ViaInlogdienst,
   verwijderAccount,
+  wachtOpMail,
 } from "./lib/sessies";
 
 /**
@@ -28,35 +34,50 @@ import {
  * mail inlogt op het adres van een medewerker, komt op hetzelfde account uit (Supabase kent
  * één account per adres) en is toch gewoon klant.
  *
- * Alles hier logt echt in bij de lokale Supabase, met de code uit de lokale mailvanger. Hoe
- * de sessie "via Cloudflare" lokaal ontstaat, staat in tests/rls/lib/sessies.ts.
+ * Alles hier logt echt in bij de lokale Supabase Auth: per mail met de code uit de lokale
+ * mailvanger, en via een inlogdienst tegen een nagebootste dienst die de test zelf start.
+ * Elk token is door Supabase gemaakt en ondertekend. Wat lokaal niet echt kan (de naam
+ * `custom:cloudflare`) en wat dat betekent, staat in tests/rls/lib/sessies.ts.
  */
-let medewerker: { id: string; email: string };
+let dienst: NepInlogdienst;
+/** Een medewerker zoals Cloudflare hem doorgeeft: zonder "dit adres is gecontroleerd". */
+let medewerker: Persoon;
+let eersteKeer: ViaInlogdienst;
+let naBevestigen: Sessie;
 let viaCloudflare: Sessie;
 let perMail: Sessie;
 let klant: Sessie;
-const opruimen: string[] = [];
+const opruimen = new Set<string>();
 
 beforeAll(async () => {
-  // Een medewerker die ooit via Cloudflare is binnengekomen: een account zonder wachtwoord,
-  // met een Cloudflare-identiteit.
-  medewerker = await maakAccount("medewerker");
-  opruimen.push(medewerker.id);
-  geefCloudflareIdentiteit(medewerker.id, medewerker.email);
+  dienst = await startNepInlogdienst();
 
-  viaCloudflare = await maakCloudflareSessie(await inloggenMetMailcode(medewerker.email));
+  // Een nieuwe medewerker logt voor het eerst in via de inlogdienst. Supabase kent het adres
+  // nog niet en de dienst zegt er niet bij dat het gecontroleerd is (net als Cloudflare):
+  // Supabase maakt het account, weigert de inlog en stuurt een mail om het adres te bevestigen.
+  medewerker = nieuwPersoon("medewerker", { adresBevestigd: false });
+  const leesMail = await wachtOpMail(medewerker.email);
+  eersteKeer = await inloggenViaInlogdienst(medewerker);
+  for (const id of await accountsVan(medewerker)) opruimen.add(id);
+  // De medewerker bevestigt zijn adres met de code uit die mail. Dat is inloggen per mail.
+  naBevestigen = await inloggenMetCode(medewerker.email, (await leesMail()).code);
+  // Daarna werkt de inlogdienst: dit is de sessie "via Cloudflare".
+  viaCloudflare = await sessieViaInlogdienst(medewerker);
+  noemIdentiteitCloudflare(viaCloudflare.userId);
+
   // Iemand met toegang tot de mailbox van de medewerker vraagt een code aan op dat adres.
   perMail = await inloggenMetMailcode(medewerker.email);
 
   // Een nieuwe klant: het adres bestaat nog niet, inloggen per mail maakt het account.
   klant = await inloggenMetMailcode(nieuwAdres("klant"));
-  opruimen.push(klant.userId);
+  opruimen.add(klant.userId);
   const { error } = await klant.client.rpc("klant_aanmelden");
   if (error) throw new Error(`De klant kon zich niet aanmelden: ${error.message}`);
-});
+}, 60_000);
 
 afterAll(async () => {
   for (const id of opruimen) await verwijderAccount(id);
+  await dienst?.stop();
 });
 
 async function isMedewerker(sessie: Pick<Sessie, "client">): Promise<boolean | null> {
@@ -65,24 +86,49 @@ async function isMedewerker(sessie: Pick<Sessie, "client">): Promise<boolean | n
   return data;
 }
 
+/** Een persoon met een eigen account, ingelogd via de inlogdienst; ruimt zichzelf op. */
+async function metAccountViaDienst(
+  label: string,
+  doe: (sessie: Sessie, persoon: Persoon) => Promise<void>,
+): Promise<void> {
+  const persoon = nieuwPersoon(label, { adresBevestigd: true });
+  try {
+    await doe(await sessieViaInlogdienst(persoon), persoon);
+  } finally {
+    for (const id of await accountsVan(persoon)) await verwijderAccount(id);
+  }
+}
+
 describe("waar de controle op vertrouwt: wat Supabase in het token zet", () => {
+  it("een nieuwe medewerker moet zijn adres eerst bevestigen, en dat is inloggen per mail", () => {
+    // Zo gaat het in productie ook; de inlogpagina vertaalt deze weigering (mailcode.ts).
+    expect(eersteKeer).toMatchObject({ ok: false, code: "provider_email_needs_verification" });
+    expect(eersteKeer.ok ? "" : eersteKeer.tekst).toContain("Unverified email");
+    expect(naBevestigen.methodes).toEqual(["otp"]);
+  });
+
   it("een mailsessie op het adres van een medewerker is hetzelfde account", () => {
     // Dit is de valkuil: wie op auth.uid() of het e-mailadres vertrouwt, ziet geen verschil.
-    expect(perMail.userId).toBe(medewerker.id);
-    expect(viaCloudflare.userId).toBe(medewerker.id);
+    expect(perMail.userId).toBe(viaCloudflare.userId);
+    expect(naBevestigen.userId).toBe(viaCloudflare.userId);
     expect(leesToken(perMail.token).email).toBe(medewerker.email);
+    expect(leesToken(viaCloudflare.token).email).toBe(medewerker.email);
     expect(perMail.sessieId).not.toBe(viaCloudflare.sessieId);
   });
 
-  it("het token zegt hoe de sessie begon: per mail is nooit oauth", () => {
+  it("het token zegt hoe de sessie begon: per mail is nooit oauth, via de dienst altijd", () => {
+    // Supabase schrijft dit zelf, bij het begin van de sessie. De test heeft er niets aan gedaan.
     expect(perMail.methodes).toEqual(["otp"]);
+    expect(naBevestigen.methodes).not.toContain("oauth");
     expect(klant.methodes).not.toContain("oauth");
     expect(viaCloudflare.methodes).toEqual(["oauth"]);
   });
 
-  it("app_metadata zegt het niet: daar staat Cloudflare ook bij een mailsessie", async () => {
+  it("app_metadata zegt het niet: daar staat de inlogdienst ook bij een mailsessie", async () => {
     // providers is de lijst van alles wat aan het account hangt, niet hoe deze sessie begon.
-    const { data } = await admin.auth.admin.getUserById(medewerker.id);
+    const inToken = leesToken(perMail.token).app_metadata as { providers?: string[] };
+    expect(inToken.providers).toContain(LOKALE_DIENST);
+    const { data } = await admin.auth.admin.getUserById(viaCloudflare.userId);
     const aanHetAccount = data.user?.identities?.map((i) => i.provider) ?? [];
     expect(aanHetAccount).toContain("custom:cloudflare");
     expect(await isMedewerker(perMail)).toBe(false);
@@ -102,6 +148,10 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
     expect(data).toBe(false);
   });
 
+  it("ook de mailsessie waarmee de medewerker zijn adres bevestigde is geen medewerker", async () => {
+    expect(await isMedewerker(naBevestigen)).toBe(false);
+  });
+
   it("een klant is geen medewerker, en een bezoeker zonder inlog mag het niet eens vragen", async () => {
     expect(await isMedewerker(klant)).toBe(false);
     const { data, error } = await anoniem().rpc("is_medewerker");
@@ -109,10 +159,20 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
     expect(error).not.toBeNull();
   });
 
-  it("blijft nee na verversen van het token", async () => {
-    const { error } = await perMail.client.auth.refreshSession();
-    expect(error).toBeNull();
+  it("blijft na verversen van het token: per mail nee, via Cloudflare ja", async () => {
+    const mail = await perMail.client.auth.refreshSession();
+    expect(mail.error).toBeNull();
+    expect(leesToken(mail.data.session?.access_token ?? "").amr).toEqual([
+      expect.objectContaining({ method: "otp" }),
+    ]);
     expect(await isMedewerker(perMail)).toBe(false);
+
+    const cloudflare = await viaCloudflare.client.auth.refreshSession();
+    expect(cloudflare.error).toBeNull();
+    expect(leesToken(cloudflare.data.session?.access_token ?? "").amr).toEqual([
+      expect.objectContaining({ method: "oauth" }),
+    ]);
+    expect(await isMedewerker(viaCloudflare)).toBe(true);
   });
 
   it("zelf iets in user_metadata zetten helpt niet", async () => {
@@ -139,7 +199,16 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
     let actor: Actor | undefined;
     try {
       actor = await maakActor("wachtwoord");
-      geefCloudflareIdentiteit(actor.id, actor.email);
+      // De dienst zegt hier wel dat het adres gecontroleerd is; Supabase hangt de inlog dan
+      // aan het bestaande account met dat adres.
+      const viaDienst = await sessieViaInlogdienst({
+        sub: `dienst-${actor.id}`,
+        email: actor.email,
+        email_verified: true,
+      });
+      expect(viaDienst.userId).toBe(actor.id);
+      noemIdentiteitCloudflare(actor.id);
+      expect(await isMedewerker(viaDienst)).toBe(true);
       expect(await isMedewerker(actor)).toBe(false);
     } finally {
       await verwijderActor(actor);
@@ -148,42 +217,35 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
 
   it("hangt er een tweede inlogdienst aan het account, dan zegt de functie nee", async () => {
     // amr zegt "via een inlogdienst", niet welke. Met twee diensten is niet meer te zeggen
-    // dat het Cloudflare was, en dan is het antwoord nee.
-    const account = await maakAccount("twee-diensten");
-    try {
-      geefCloudflareIdentiteit(account.id, account.email);
-      const sessie = await maakCloudflareSessie(await inloggenMetMailcode(account.email));
-      expect(await isMedewerker(sessie)).toBe(true);
-      geefAndereIdentiteit(account.id, "google");
-      expect(await isMedewerker(sessie)).toBe(false);
-    } finally {
-      await verwijderAccount(account.id);
-    }
+    // dat het Cloudflare was, en dan is het antwoord nee, ook in de sessie die al liep.
+    await metAccountViaDienst("twee-diensten", async (eerste, persoon) => {
+      noemIdentiteitCloudflare(eerste.userId);
+      expect(await isMedewerker(eerste)).toBe(true);
+      // Dezelfde persoon logt nu in via een dienst die bij Supabase anders heet: de lokale
+      // dienst onder zijn eigen naam. Supabase hangt hem aan hetzelfde account.
+      const tweede = await sessieViaInlogdienst(persoon);
+      expect(tweede.userId).toBe(eerste.userId);
+      expect(tweede.methodes).toEqual(["oauth"]);
+      expect(await isMedewerker(tweede)).toBe(false);
+      expect(await isMedewerker(eerste)).toBe(false);
+    });
   });
 
-  it("zonder Cloudflare-identiteit is ook een oauth-sessie geen medewerker", async () => {
-    const account = await maakAccount("zonder-cloudflare");
-    try {
-      const sessie = await maakCloudflareSessie(await inloggenMetMailcode(account.email));
+  it("via een andere inlogdienst dan Cloudflare is ook een oauth-sessie geen medewerker", async () => {
+    await metAccountViaDienst("zonder-cloudflare", async (sessie) => {
       expect(sessie.methodes).toEqual(["oauth"]);
       expect(await isMedewerker(sessie)).toBe(false);
-    } finally {
-      await verwijderAccount(account.id);
-    }
+    });
   });
 
   it("na uitloggen is het recht meteen weg, ook met het oude token", async () => {
-    const account = await maakAccount("uitgelogd");
-    try {
-      geefCloudflareIdentiteit(account.id, account.email);
-      const sessie = await maakCloudflareSessie(await inloggenMetMailcode(account.email));
+    await metAccountViaDienst("uitgelogd", async (sessie) => {
+      noemIdentiteitCloudflare(sessie.userId);
       const oudToken = sessie.token;
       expect(await isMedewerker({ client: metToken(oudToken) })).toBe(true);
       await sessie.client.auth.signOut({ scope: "local" });
       expect(await isMedewerker({ client: metToken(oudToken) })).toBe(false);
-    } finally {
-      await verwijderAccount(account.id);
-    }
+    });
   });
 });
 

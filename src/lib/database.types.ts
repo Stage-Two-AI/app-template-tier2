@@ -76,10 +76,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      is_goedgekeurde_klant: { Args: never; Returns: boolean };
-      is_medewerker: { Args: never; Returns: boolean };
-      klant_aanmelden: { Args: never; Returns: undefined };
-      sessie_via_cloudflare: { Args: never; Returns: boolean };
+      is_goedgekeurde_klant: { Args: Record<PropertyKey, never>; Returns: boolean };
+      is_medewerker: { Args: Record<PropertyKey, never>; Returns: boolean };
+      klant_aanmelden: { Args: Record<PropertyKey, never>; Returns: undefined };
+      sessie_via_cloudflare: { Args: Record<PropertyKey, never>; Returns: boolean };
     };
     Enums: {
       [_ in never]: never;

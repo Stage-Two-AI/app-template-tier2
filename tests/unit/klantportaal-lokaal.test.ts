@@ -54,6 +54,16 @@ describe("supabase/config.toml: de mailcode lokaal", () => {
   });
 });
 
+describe("supabase/config.toml: de nagebootste inlogdienst van de RLS-test", () => {
+  it("wijst naar de poort waarop de test de dienst start, en nergens anders heen", () => {
+    const dienst = blok(lees("supabase/config.toml"), "auth.external.keycloak");
+    const poort = /POORT_INLOGDIENST = (\d+);/.exec(lees("tests/rls/lib/inlogdienst-nep.ts"))?.[1];
+    expect(poort).toBeDefined();
+    expect(dienst).toMatch(/^enabled = true$/m);
+    expect(dienst).toContain(`url = "http://host.docker.internal:${poort}/`);
+  });
+});
+
 describe("CI: de mailvanger draait mee", () => {
   it("supabase start sluit de mailvanger niet uit", () => {
     const start = /supabase start -x (\S+)/.exec(lees(".github/workflows/ci.yml"))?.[1] ?? "";
