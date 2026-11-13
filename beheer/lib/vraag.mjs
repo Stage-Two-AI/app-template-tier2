@@ -7,6 +7,11 @@
  * Een `FormData`-body (multipart, zoals het uploaden van een Worker-script) gaat
  * ongewijzigd mee en zonder Content-Type: fetch zet dan zelf multipart/form-data met de
  * boundary. Elke andere body gaat als JSON.
+ *
+ * Een antwoord dat geen JSON is (een foutpagina van een proxy bijvoorbeeld) komt niet in de
+ * melding, alleen zijn lengte. Zo'n antwoord kan de body van het verzoek terugkaatsen, en
+ * daarin kan een geheim staan (het SMTP-wachtwoord in de auth-config). Een afgekapt stuk van
+ * een geheim herkent geen enkele maskering meer; daarom gaat de ruwe tekst er helemaal uit.
  */
 export async function vraag(fetchFn, url, { methode = "GET", token, body } = {}) {
   const multipart = body instanceof FormData;
@@ -22,7 +27,7 @@ export async function vraag(fetchFn, url, { methode = "GET", token, body } = {})
   try {
     data = tekst ? JSON.parse(tekst) : null;
   } catch {
-    data = { ruw: tekst.slice(0, 200) };
+    data = { geenJson: `het antwoord was geen JSON (${tekst.length} tekens, niet getoond)` };
   }
   if (!antwoord.ok) {
     const cloudflare = Array.isArray(data?.errors)
@@ -36,8 +41,7 @@ export async function vraag(fetchFn, url, { methode = "GET", token, body } = {})
       data?.message ||
       data?.msg ||
       data?.error?.message ||
-      data?.ruw ||
-      antwoord.statusText;
+      [antwoord.statusText, data?.geenJson].filter(Boolean).join("; ");
     const fout = new Error(
       `${methode} ${new URL(url).pathname} gaf ${antwoord.status}: ${melding}`,
     );
