@@ -233,8 +233,14 @@ try {
     const test = spawnSync("pnpm", ["exec", "vitest", "run", "--config", "vitest.rls.config.ts"], {
       encoding: "utf8",
     });
-    const uit = `${test.stdout}\n${test.stderr}`;
-    const gefaald = [...uit.matchAll(/^\s*(?:×|✗)\s+(.*)$/gm)].map((t) => t[1].trim());
+    // Zonder de kleurcodes van de terminal, anders zijn de namen van de rode tests niet te lezen.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: kleurcodes beginnen met ESC
+    const uit = `${test.stdout}\n${test.stderr}`.replace(/\u001b\[[0-9;]*m/g, "");
+    const gefaald = [
+      ...new Set(
+        [...uit.matchAll(/^\s*(?:×|✗)\s+(.*?)(?:\s+\d+\s*ms)?$/gm)].map((t) => t[1].trim()),
+      ),
+    ];
     const groen = test.status === 0;
     console.log(`=== ${naam}: ${groen ? "GROEN" : "ROOD"}\n${gefaald.slice(0, 12).join("\n")}`);
     if (zoek === null ? !groen : groen) kapot = true;
