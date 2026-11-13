@@ -172,17 +172,17 @@ export function leesRollen() {
 }
 
 /** Een lijst namen met per naam een reden, zoals `open_tabellen`. */
-function namenMetReden(sleutel, voorbeeld) {
+function namenMetReden(sleutel, voorbeeld, patroon = NAAM) {
   const lijst = stackConfig()[sleutel] ?? {};
   if (typeof lijst !== "object" || Array.isArray(lijst) || lijst === null) {
     throw new Error(
-      `stack.config.json: \`${sleutel}\` hoort een object te zijn met per functie een reden.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
+      `stack.config.json: \`${sleutel}\` hoort een object te zijn met per naam een reden.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
     );
   }
   for (const [naam, reden] of Object.entries(lijst)) {
-    if (!/^[a-z_][a-z0-9_]*$/.test(naam)) {
+    if (!patroon.test(naam)) {
       throw new Error(
-        `stack.config.json: ${sleutel}.${naam} is geen naam van een functie in het schema public (kleine letters, zonder schema en zonder haakjes).`,
+        `stack.config.json: ${sleutel}.${naam} is geen naam die de poort kent. Schrijf de naam van een functie, view of tabel in kleine letters, zonder haakjes, met het schema ervoor als het niet public is (bijvoorbeeld api.zoek_product).`,
       );
     }
     if (typeof reden !== "string" || reden.trim() === "") {
@@ -192,24 +192,88 @@ function namenMetReden(sleutel, voorbeeld) {
   return lijst;
 }
 
+/** Een naam in de database: `naam` (in public) of `schema.naam`. */
+const NAAM = /^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/;
+/** Als NAAM, of `bucket:<id>` voor een openbare bucket in Supabase Storage. */
+const OPENBARE_NAAM = /^(?:bucket:[A-Za-z0-9_.-]+|(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*)$/;
+
+/**
+ * De sleutels die stack.config.json kent: die van de template en die de plugin schrijft. Een
+ * sleutel die met `$` begint, is uitleg. Een andere sleutel is een tikfout, en een tikfout in een
+ * schakelaar (`klantPortaal`) zet hem anders stil uit.
+ */
+export const BEKENDE_SLEUTELS = [
+  "database",
+  "gedeelde_database",
+  "testdatabase",
+  "testmail",
+  "open_tabellen",
+  "leesrollen",
+  "klantportaal",
+  "klantportaal_poorten",
+  "klantportaal_vrije_functies",
+  "klantportaal_openbaar",
+];
+
+/** Hoeveel letters `a` en `b` verschillen (toevoegen, weghalen of vervangen). */
+function afstand(a, b) {
+  const rij = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let vorige = rij[0];
+    rij[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const bewaard = rij[j];
+      rij[j] = Math.min(rij[j] + 1, rij[j - 1] + 1, vorige + (a[i - 1] === b[j - 1] ? 0 : 1));
+      vorige = bewaard;
+    }
+  }
+  return rij[b.length];
+}
+
+/**
+ * De sleutels in stack.config.json die de stack niet kent, elk met de dichtstbijzijnde bekende.
+ * Leeg als alles klopt.
+ */
+export function onbekendeSleutels(config = stackConfig()) {
+  const uit = [];
+  for (const sleutel of Object.keys(config)) {
+    if (sleutel.startsWith("$") || BEKENDE_SLEUTELS.includes(sleutel)) continue;
+    const kaal = sleutel
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z]/g, "");
+    const dichtst = [...BEKENDE_SLEUTELS].sort(
+      (a, b) => afstand(kaal, a.replace(/_/g, "")) - afstand(kaal, b.replace(/_/g, "")),
+    )[0];
+    uit.push({ sleutel, dichtst });
+  }
+  return uit;
+}
+
 /**
  * Is deze app een klantportaal: een app zonder deur van Cloudflare, waar klanten met een code
- * per mail inloggen? Dan is "ingelogd" iedereen op internet met een e-mailadres, en eist
- * `guard:rls` dat elke regel in de database langs een poort gaat (`public.is_medewerker()` of
- * `public.is_goedgekeurde_klant()`); zie scripts/lib/rls-regels.mjs en docs/WERKWIJZE.md.
+ * per mail inloggen? Dan is "ingelogd" iedereen op internet met een e-mailadres, en mag wie
+ * alleen een e-mailadres heeft niets, tenzij het met een reden is vrijgegeven. De sluitende
+ * controle staat in scripts/lib/klantportaal-database.mjs (op de database, in de
+ * Kwaliteitspoort); guard-rls.mjs controleert de tekst van de migraties al eerder.
  *
  *   "klantportaal": true
  *
- * Standaard uit: dan verandert er niets. Twee lijsten horen erbij, allebei optioneel en
- * allebei met per functie een reden die de reviewer in de pull request ziet:
+ * Standaard uit: dan verandert er niets. Drie lijsten horen erbij, alle drie optioneel en
+ * alle drie met per naam een reden die de reviewer in de pull request ziet:
  *
  *   "klantportaal_poorten": { "is_inkoper": "medewerker van de afdeling inkoop" }
- *       eigen functies in `public` die als poort tellen. Zo'n functie roept zelf een poort
- *       van de template aan.
+ *       eigen poorten: functies die in een policy als poort tellen. Zo'n functie is
+ *       `language sql` en geeft één uitdrukking terug met public.is_medewerker() of
+ *       public.is_goedgekeurde_klant() als harde eis; wat hij verder doet, is de zorg van de app.
  *   "klantportaal_vrije_functies": { "meld_storing": "mag iedereen met een account" }
- *       `security definer`-functies die iemand zonder goedkeuring mag aanroepen.
+ *       `security definer`-functies en views zonder security_invoker die iemand zonder
+ *       goedkeuring mag gebruiken.
+ *   "klantportaal_openbaar": { "producten": "de catalogus is openbaar", "bucket:logo": "het logo" }
+ *       wat bezoekers ZONDER account mogen: een tabel of view (dan mag een policy `to anon`),
+ *       een functie (dan mag anon hem uitvoeren), of een bucket in Storage met public = true.
  *
- * Geeft null als de app geen klantportaal is.
+ * Geeft null als de app geen klantportaal is. Een klantportaal moet een eigen database hebben.
  */
 export function klantportaal() {
   const waarde = stackConfig().klantportaal;
@@ -219,11 +283,23 @@ export function klantportaal() {
       `stack.config.json: "klantportaal" is ${JSON.stringify(waarde)}; kies true of false.`,
     );
   }
+  const modus = databaseModus();
+  if (modus !== "eigen") {
+    throw new Error(
+      `stack.config.json: "klantportaal": true hoort bij een eigen database ("database": true), maar hier staat "database": ${JSON.stringify(stackConfig().database)}.\n` +
+        "Een klantportaal leunt op de regels in zijn eigen database; zonder eigen database is er niets dat de poort bewaakt.",
+    );
+  }
   return {
     poorten: namenMetReden("klantportaal_poorten", '{ "is_inkoper": "medewerker van inkoop" }'),
     vrijeFuncties: namenMetReden(
       "klantportaal_vrije_functies",
       '{ "meld_storing": "mag iedereen met een account" }',
+    ),
+    openbaar: namenMetReden(
+      "klantportaal_openbaar",
+      '{ "producten": "de catalogus is voor iedereen", "bucket:logo": "het logo" }',
+      OPENBARE_NAAM,
     ),
     openTabellen: openTabellen(),
   };

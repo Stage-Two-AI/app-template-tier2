@@ -10,6 +10,7 @@ import {
   maakActor,
   verwijderActor,
 } from "./lib/afscherming";
+import { vraagDatabase } from "./lib/database";
 import { type NepInlogdienst, type Persoon, startNepInlogdienst } from "./lib/inlogdienst-nep";
 import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
 import {
@@ -30,8 +31,10 @@ import {
   sessieViaInlogdienst,
   type ViaInlogdienst,
   verwijderAccount,
+  voegKoppelingToe,
   wachtOpElkeMail,
   wachtOpMail,
+  zetAdresLeeg,
   zetSessieBegin,
 } from "./lib/sessies";
 
@@ -342,7 +345,7 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
       zetSessieBegin(sessie.sessieId, 11.5);
       expect(await isMedewerker(sessie)).toBe(true);
 
-      zetSessieBegin(sessie.sessieId, 12.5);
+      zetSessieBegin(sessie.sessieId, 12.1);
       expect(await isMedewerker(sessie)).toBe(false);
       // De sessie zelf leeft nog en het token is te verversen, maar het recht komt niet terug.
       const ververst = await sessie.client.auth.refreshSession();
@@ -766,6 +769,115 @@ describe("een klant wijzigt zijn e-mailadres niet zelf", () => {
     const { error } = await admin.auth.admin.updateUserById(vers.userId, { email: nieuw });
     expect(error).toBeNull();
     expect(await regelVan(vers.userId)).toEqual({ e_mail: nieuw, goedgekeurd: false });
+    expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(false);
+  });
+});
+
+describe("elke regel van de migratie heeft een test (de mutaties van de aanvaller)", () => {
+  it("is_goedgekeurde_klant: de sessie van het token moet van dit account zijn", async () => {
+    const goed = await nieuweKlant("sessie-eigen");
+    await goed.client.rpc("klant_aanmelden");
+    await keurGoed(goed.userId);
+    const ander = await nieuweKlant("sessie-ontvanger");
+    expect(await isGoedgekeurd({ client: metToken(goed.token) })).toBe(true);
+    hangSessieAanAccount(goed.sessieId, ander.userId);
+    expect(await isGoedgekeurd({ client: metToken(goed.token) })).toBe(false);
+  });
+
+  it("klant_aanmelden: de sessie van het token moet van dit account zijn", async () => {
+    const vers = await nieuweKlant("aanmelden-eigen");
+    const ander = await nieuweKlant("aanmelden-ontvanger");
+    hangSessieAanAccount(vers.sessieId, ander.userId);
+    await metToken(vers.token).rpc("klant_aanmelden");
+    expect(await regelVan(vers.userId)).toBeUndefined();
+  });
+
+  it("elke security definer-functie van het klantportaal heeft een leeg, vast zoekpad", () => {
+    const functies = vraagDatabase<{ naam: string; zoekpad: string[] | null }>(`
+      select p.proname as naam, p.proconfig as zoekpad
+        from pg_proc p
+       where p.pronamespace = 'public'::regnamespace and p.prosecdef
+       order by 1`);
+    expect(functies.map((f) => f.naam)).toEqual(
+      expect.arrayContaining([
+        "is_goedgekeurde_klant",
+        "is_medewerker",
+        "klant_aanmelden",
+        "klant_adres_gewijzigd",
+        "sessie_via_cloudflare",
+      ]),
+    );
+    for (const f of functies) expect(f.zoekpad, f.naam).toEqual(['search_path=""']);
+  });
+
+  it("de functie achter de trigger mag niemand aanroepen, en de tabel klanten heeft alleen de smalle rechten", () => {
+    const [rechten] = vraagDatabase<{ trigger: string[]; klanten: string[] }>(`
+      select
+        array(select rol from unnest(array['public', 'anon', 'authenticated']) rol
+               where rol <> 'public'
+                 and has_function_privilege(rol, 'public.klant_adres_gewijzigd()', 'execute')) as trigger,
+        array(select r.rol || ': ' || s.soort
+                from unnest(array['anon', 'authenticated']) r(rol),
+                     unnest(array['select', 'insert', 'update', 'delete', 'truncate']) s(soort)
+               where has_table_privilege(r.rol, 'public.klanten', s.soort)
+                  or (s.soort = 'update' and has_column_privilege(r.rol, 'public.klanten', 'goedgekeurd', 'update'))
+               order by 1) as klanten`);
+    expect(rechten?.trigger).toEqual([]);
+    expect(rechten?.klanten).toEqual(["authenticated: select", "authenticated: update"]);
+    const [kolommen] = vraagDatabase<{ e_mail: boolean; user_id: boolean }>(`
+      select has_column_privilege('authenticated', 'public.klanten', 'e_mail', 'update') as e_mail,
+             has_column_privilege('authenticated', 'public.klanten', 'user_id', 'update') as user_id`);
+    expect(kolommen).toEqual({ e_mail: false, user_id: false });
+  });
+
+  it("na een adreswijziging eindigen de sessies, ook van een account dat zich nooit aanmeldde", async () => {
+    const vers = await nieuweKlant("niet-aangemeld");
+    expect(await regelVan(vers.userId)).toBeUndefined();
+    const { error } = await admin.auth.admin.updateUserById(vers.userId, {
+      email: nieuwAdres("niet-aangemeld-nieuw"),
+    });
+    expect(error).toBeNull();
+    const verversen = await vers.client.auth.refreshSession();
+    expect(verversen.error).not.toBeNull();
+  });
+
+  it("ook als het adres leeg wordt, vervalt de goedkeuring en eindigen de sessies", async () => {
+    const vers = await nieuweKlant("adres-leeg");
+    await vers.client.rpc("klant_aanmelden");
+    await keurGoed(vers.userId);
+    expect(await isGoedgekeurd(vers)).toBe(true);
+    zetAdresLeeg(vers.userId);
+    expect(await regelVan(vers.userId)).toEqual({ e_mail: "", goedgekeurd: false });
+    expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(false);
+  });
+
+  it("een koppeling met een telefoonnummer telt als tweede inlogmanier: geen medewerker", async () => {
+    await metAccountViaDienst("telefoon", async (sessie) => {
+      noemIdentiteitCloudflare(sessie.userId);
+      expect(await isMedewerker(sessie)).toBe(true);
+      voegKoppelingToe(sessie.userId, "phone");
+      expect(await isMedewerker(sessie)).toBe(false);
+    });
+  });
+
+  it("een geblokkeerd account (ban) heeft met zijn lopende token geen rechten meer", async () => {
+    await metAccountViaDienst("geblokkeerd", async (sessie) => {
+      noemIdentiteitCloudflare(sessie.userId);
+      expect(await isMedewerker(sessie)).toBe(true);
+      const { error } = await admin.auth.admin.updateUserById(sessie.userId, {
+        ban_duration: "24h",
+      });
+      expect(error).toBeNull();
+      expect(await isMedewerker({ client: metToken(sessie.token) })).toBe(false);
+      const { data } = await metToken(sessie.token).rpc("sessie_via_cloudflare");
+      expect(data).toBe(false);
+    });
+    const vers = await nieuweKlant("klant-geblokkeerd");
+    await vers.client.rpc("klant_aanmelden");
+    await keurGoed(vers.userId);
+    expect(await isGoedgekeurd(vers)).toBe(true);
+    const { error } = await admin.auth.admin.updateUserById(vers.userId, { ban_duration: "24h" });
+    expect(error).toBeNull();
     expect(await isGoedgekeurd({ client: metToken(vers.token) })).toBe(false);
   });
 });

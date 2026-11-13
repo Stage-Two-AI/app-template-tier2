@@ -199,26 +199,34 @@ export function gedekteTabellen(testtekst) {
 //
 // Bij een klantportaal (`"klantportaal": true` in stack.config.json) is er geen deur van
 // Cloudflare: iedereen op internet kan per mail een account maken. `to authenticated` betekent
-// dan "iedereen met een e-mailadres". De regel, in twee zinnen:
+// dan "iedereen met een e-mailadres". De regel: wie alleen een e-mailadres heeft (of geen
+// account), mag niets, tenzij het met een reden is vrijgegeven in stack.config.json.
 //
-//   1. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in
+// Dit is de snelle controle op de TEKST van de migraties. Tekst is te misleiden (dynamische SQL,
+// een ander schema); de sluitende controle leest de database zelf, na alle migraties
+// (scripts/lib/klantportaal-database.mjs, in tests/rls/open-policies.test.ts). Beide volgen
+// dezelfde regels, hieronder per stuk:
+//
+//   1. Elke tabel in public heeft RLS aan en minstens één policy, ook na een `drop` en een
+//      nieuwe `create`, en zonder `disable` later. Geen materialized view of foreign table.
+//   2. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in
 //      elke `using` en `with check` een poort als harde eis: `public.is_medewerker()` of
-//      `public.is_goedgekeurde_klant()`, met `and` eraan vast in elke tak van een `or`. Eén
-//      policy `as restrictive for all` met alleen die eis dekt de hele tabel.
-//   2. Elke `security definer`-functie en elke view in `public` waar een ingelogde gebruiker
-//      bij kan, roept zelf een poort aan of staat met een reden in
-//      `klantportaal_vrije_functies`; `open_tabellen` is leeg.
-//
-// De tekst van de migraties (guard-rls.mjs) en de database zelf (tests/rls/open-policies.test.ts)
-// gaan door dezelfde beoordeling: `beoordeelKlantportaal`.
+//      `public.is_goedgekeurde_klant()`, met `and` eraan vast in elke tak van een `or`. Een
+//      policy `as restrictive` met die eis dekt de opdrachten en rollen waarvoor hij geldt.
+//      Een policy die bezoekers zonder account iets geeft (`to anon`, of zonder `to`), mag
+//      alleen op een tabel in `klantportaal_openbaar`.
+//   3. Een `security definer`-functie of een view zonder security_invoker waar een bezoeker
+//      bij kan, staat met een reden in `klantportaal_vrije_functies` (of is een basisfunctie
+//      van de template). "Hij roept een poort aan" is geen bewijs. Een functie die bezoekers
+//      zonder account mogen uitvoeren, staat in `klantportaal_openbaar`.
+//   4. Een eigen poort (`klantportaal_poorten`) is `language sql` en geeft één uitdrukking
+//      terug met een poort van de template als harde eis. `open_tabellen` is leeg.
 
 /** De poorten van de template. Een app kan er in `klantportaal_poorten` eigen bij zetten. */
 export const BASISPOORTEN = ["is_medewerker", "is_goedgekeurde_klant", "sessie_via_cloudflare"];
 
-/** Functies van de template die een ingelogde gebruiker zonder poort mag aanroepen. */
-const VRIJ_VAN_DE_TEMPLATE = {
-  klant_aanmelden: "zet alleen het eigen account op de lijst, niet goedgekeurd",
-};
+/** De functies van het klantportaal uit de template. De databasecontrole vergelijkt hun tekst. */
+const BASISFUNCTIES = [...BASISPOORTEN, "klant_aanmelden", "klant_adres_gewijzigd"];
 
 /** Vervangt tekst tussen enkele aanhalingstekens door `''`: wat in een tekst staat, telt niet. */
 export function zonderTekst(sql) {
@@ -317,12 +325,40 @@ export function poortIsHardeEis(voorwaarde, poorten = BASISPOORTEN) {
   );
 }
 
-/** Roept deze tekst (de inhoud van een functie of view) een poort aan? */
-function roeptPoortAan(inhoud, poorten, behalve = "") {
-  const tekst = genormaliseerd(inhoud);
-  return poorten
-    .filter((p) => p !== behalve)
-    .some((p) => new RegExp(String.raw`(?<![\w.])public ?\. ?${p} ?\( ?\)`).test(tekst));
+/** Haalt alles tussen haakjes weg, zodat alleen het hoogste niveau overblijft. */
+function hoogsteNiveau(tekst) {
+  let uit = "";
+  let diepte = 0;
+  for (const teken of tekst) {
+    if (teken === "(") diepte++;
+    else if (teken === ")") diepte--;
+    else if (diepte === 0) uit += teken;
+  }
+  return uit;
+}
+
+/**
+ * Is deze eigen poort na te lopen? Alleen een functie in `language sql` die één uitdrukking
+ * teruggeeft (`select <uitdrukking>`), waarin een poort van de template een harde eis is. Al het
+ * andere (plpgsql, `from`, `union`) kan geen controle lezen. `functie`: { taal, bron }.
+ */
+export function eigenPoortKlopt(functie) {
+  if (functie.taal !== "sql") return false;
+  const tekst = genormaliseerd(functie.bron ?? "")
+    .replace(/^begin atomic (.*?);? end$/, "$1")
+    .replace(/;$/, "")
+    .trim();
+  const m = /^select (.+)$/.exec(tekst);
+  if (!m) return false;
+  const uitdrukking = m[1] ?? "";
+  if (
+    /\b(?:from|where|union|intersect|except|limit|offset|group|having|order|into)\b/.test(
+      hoogsteNiveau(uitdrukking),
+    )
+  ) {
+    return false;
+  }
+  return poortIsHardeEis(uitdrukking, BASISPOORTEN);
 }
 
 /**
@@ -368,21 +404,116 @@ function rollenUit(rest) {
   );
 }
 
+/** Een of meer namen na `drop table`, zonder `if exists` en `cascade`. */
+function namenNa(tekst) {
+  return tekst
+    .replace(/\s+(?:cascade|restrict)\s*$/i, "")
+    .split(",")
+    .map((n) => volledig(n.trim()))
+    .filter((n) => !n.endsWith("."));
+}
+
 /**
- * Wat de migraties over policies, functies en views zeggen, in volgorde gelezen (een `drop`
- * of `alter` later telt). Dit is het model dat `beoordeelKlantportaal` beoordeelt.
+ * Wat de migraties over tabellen, policies, functies en views zeggen, in volgorde gelezen (een
+ * `drop`, `alter` of nieuwe `create` later telt). Dit is het model dat `beoordeelKlantportaal`
+ * beoordeelt.
  */
 export function modelUitMigraties(sql) {
   const { opdrachten, inhoud } = opdrachtenMetInhoud(sql);
+  const tabellen = new Map();
   const policies = new Map();
   const functies = new Map();
   const views = new Map();
   let nieuweFunctiesVoorIedereen = true;
+  let nieuweFunctiesVoorAnon = true;
+  let dynamisch = false;
   const lijf = (tekst) =>
     [...tekst.matchAll(/§(\d+)§/g)].map((m) => inhoud[Number(m[1])] ?? "").join("\n");
+  const naam1 = String.raw`((?:"?\w+"?\.)?"?\w+"?)`;
+  const verplaatsTabel = (van, naar) => {
+    const tabel = tabellen.get(van);
+    tabellen.delete(van);
+    if (tabel) tabellen.set(naar, { ...tabel, naam: naar });
+    for (const [sleutel, policy] of [...policies.entries()]) {
+      if (policy.tabel !== van) continue;
+      policies.delete(sleutel);
+      policy.tabel = naar;
+      policies.set(`${naar}/${policy.naam}`, policy);
+    }
+  };
 
   for (const opdracht of opdrachten) {
+    // --- Tabellen ---------------------------------------------------------------------
     let m = new RegExp(
+      String.raw`^create\s+(?:(?:global|local)\s+)?(temp|temporary|unlogged|foreign)?\s*table\s+(?:if\s+not\s+exists\s+)?${naam1}`,
+      "i",
+    ).exec(opdracht);
+    if (m) {
+      const soort = (m[1] ?? "").toLowerCase();
+      if (soort !== "temp" && soort !== "temporary") {
+        const naam = volledig(m[2] ?? "");
+        verplaatsTabel(naam, naam);
+        for (const [sleutel, policy] of [...policies.entries()]) {
+          if (policy.tabel === naam) policies.delete(sleutel);
+        }
+        tabellen.set(naam, { naam, soort: soort === "foreign" ? "foreign" : "tabel", rls: false });
+      }
+      continue;
+    }
+    m = new RegExp(
+      String.raw`^create\s+materialized\s+view\s+(?:if\s+not\s+exists\s+)?${naam1}`,
+      "i",
+    ).exec(opdracht);
+    if (m) {
+      const naam = volledig(m[1] ?? "");
+      tabellen.set(naam, { naam, soort: "mview", rls: false });
+      continue;
+    }
+    m = new RegExp(
+      String.raw`^select\b.*?\binto\s+(?:(?:unlogged|temp|temporary)\s+)?(?:table\s+)?${naam1}`,
+      "i",
+    ).exec(opdracht);
+    if (m && !/\binto\s+(?:temp|temporary)\b/i.test(opdracht)) {
+      const naam = volledig(m[1] ?? "");
+      tabellen.set(naam, { naam, soort: "tabel", rls: false });
+      continue;
+    }
+    m = new RegExp(
+      String.raw`^alter\s+(?:foreign\s+)?table\s+(?:if\s+exists\s+)?(?:only\s+)?${naam1}\s+(.*)$`,
+      "i",
+    ).exec(opdracht);
+    if (m) {
+      const naam = volledig(m[1] ?? "");
+      const rest = m[2] ?? "";
+      const tabel = tabellen.get(naam);
+      if (tabel && /\benable\s+row\s+level\s+security\b/i.test(rest)) tabel.rls = true;
+      if (tabel && /\bdisable\s+row\s+level\s+security\b/i.test(rest)) tabel.rls = false;
+      const schema = /^set\s+schema\s+"?(\w+)"?/i.exec(rest);
+      if (schema) verplaatsTabel(naam, `${(schema[1] ?? "").toLowerCase()}.${naam.split(".")[1]}`);
+      const hernoemd = /^rename\s+to\s+"?(\w+)"?/i.exec(rest);
+      if (hernoemd)
+        verplaatsTabel(naam, `${naam.split(".")[0]}.${(hernoemd[1] ?? "").toLowerCase()}`);
+      continue;
+    }
+    m = /^drop\s+(?:foreign\s+)?table\s+(?:if\s+exists\s+)?(.+)$/i.exec(opdracht);
+    if (m) {
+      for (const naam of namenNa(m[1] ?? "")) {
+        tabellen.delete(naam);
+        for (const [sleutel, policy] of [...policies.entries()]) {
+          if (policy.tabel === naam) policies.delete(sleutel);
+        }
+      }
+      continue;
+    }
+    m = /^drop\s+materialized\s+view\s+(?:if\s+exists\s+)?(.+)$/i.exec(opdracht);
+    if (m) {
+      for (const naam of namenNa(m[1] ?? "")) tabellen.delete(naam);
+      continue;
+    }
+    if (/^do\b/i.test(opdracht) && /\bexecute\b/i.test(lijf(opdracht))) dynamisch = true;
+
+    // --- Policies -----------------------------------------------------------------------
+    m = new RegExp(
       String.raw`^create\s+policy\s+${POLICY_NAAM}\s+on\s+${TABEL_NAAM}(.*)$`,
       "i",
     ).exec(opdracht);
@@ -432,6 +563,7 @@ export function modelUitMigraties(sql) {
       continue;
     }
 
+    // --- Functies -----------------------------------------------------------------------
     m =
       /^create\s+(or\s+replace\s+)?(?:function|procedure)\s+((?:"?\w+"?\.)?"?\w+"?)\s*\((.*)$/i.exec(
         opdracht,
@@ -445,8 +577,11 @@ export function modelUitMigraties(sql) {
         naam,
         definer: /\bsecurity\s+definer\b/i.test(rest) || (!m[1] && (vorige?.definer ?? false)),
         trigger: /\breturns\s+(?:event_)?trigger\b/i.test(rest),
-        // Rechten blijven bij `create or replace` staan; een nieuwe functie mag iedereen uitvoeren.
+        taal: /\blanguage\s+"?(\w+)"?/i.exec(rest)?.[1]?.toLowerCase() ?? vorige?.taal ?? null,
+        // Rechten blijven bij `create or replace` staan. Een nieuwe functie mag iedereen
+        // uitvoeren; in Supabase krijgen anon en authenticated dat recht ook nog rechtstreeks.
         viaPublic: vorige?.viaPublic ?? nieuweFunctiesVoorIedereen,
+        viaAnon: vorige?.viaAnon ?? nieuweFunctiesVoorAnon,
         viaAuthenticated: vorige?.viaAuthenticated ?? true,
         // Zonder $$ staat de inhoud in de opdracht zelf (`return ...`, `begin atomic`). Met
         // `or replace` vervangt de nieuwe inhoud de oude; anders is het een variant ernaast.
@@ -480,11 +615,15 @@ export function modelUitMigraties(sql) {
       const wie = (m[5] ?? "").split(",").map((r) => r.replaceAll('"', "").trim().toLowerCase());
       const zet = (functie) => {
         if (wie.includes("public")) functie.viaPublic = geven;
+        if (wie.includes("anon")) functie.viaAnon = geven;
         if (wie.includes("authenticated")) functie.viaAuthenticated = geven;
       };
       if (m[1]) {
         if (/^(?:functions|routines)$/i.test(object) && wie.includes("public")) {
           nieuweFunctiesVoorIedereen = geven;
+        }
+        if (/^(?:functions|routines)$/i.test(object) && wie.includes("anon")) {
+          nieuweFunctiesVoorAnon = geven;
         }
       } else if (/^all\s+(?:functions|routines|procedures)\s+in\s+schema\b/i.test(object)) {
         const schemas = object
@@ -507,6 +646,7 @@ export function modelUitMigraties(sql) {
       continue;
     }
 
+    // --- Views ----------------------------------------------------------------------------
     m =
       /^create\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:recursive\s+)?view\s+((?:"?\w+"?\.)?"?\w+"?)(.*)$/i.exec(
         opdracht,
@@ -537,31 +677,51 @@ export function modelUitMigraties(sql) {
   }
 
   return {
+    tabellen: [...tabellen.values()],
     policies: [...policies.values()],
     functies: [...functies.values()]
       .filter((f) => !f.trigger)
       .map((f) => ({
         naam: f.naam,
         definer: f.definer,
-        uitvoerbaar: f.viaPublic || f.viaAuthenticated,
+        taal: f.taal,
+        uitvoerbaar: f.viaPublic || f.viaAuthenticated || f.viaAnon,
+        anon: f.viaPublic || f.viaAnon,
         inhoud: f.inhoud,
       })),
     views: [...views.values()],
+    dynamisch,
   };
 }
 
-const VOOR_INGELOGDEN = ["authenticated", "public"];
-const SCHEMAS = ["public", "api"];
+const ANON = ["anon", "public"];
+const INGELOGD = ["authenticated", "public"];
+const OPDRACHTEN = ["select", "insert", "update", "delete"];
+
+/** Staat `naam` (schema.object) op een lijst met namen? Een naam zonder schema is public. */
+function opLijst(lijst, naam) {
+  return Object.keys(lijst ?? {}).some((sleutel) =>
+    sleutel.includes(".") ? sleutel === naam : `public.${sleutel}` === naam,
+  );
+}
+
+/** De voorwaarden van een policy die voor deze opdracht gelden. */
+function voorwaardenVoor(policy, cmd) {
+  const check = policy.check ?? policy.using;
+  if (cmd === "select" || cmd === "delete") return [policy.using];
+  if (cmd === "insert") return [check];
+  return [policy.using, check];
+}
 
 /**
- * Wat er bij een klantportaal mis is. `model` komt uit de migraties (`modelUitMigraties`) of
- * uit de database zelf (tests/rls/lib/klantportaal-poort.ts); `config` is wat
- * `klantportaal()` uit stack.config.json leest, met `open_tabellen` erbij.
+ * Wat er volgens de tekst van de migraties mis is bij een klantportaal. `model` komt uit
+ * `modelUitMigraties`; `config` is wat `klantportaal()` uit stack.config.json leest.
  */
 export function beoordeelKlantportaal(model, config = {}) {
   const eigenPoorten = Object.keys(config.poorten ?? {});
-  const poorten = [...BASISPOORTEN, ...eigenPoorten];
-  const vrij = { ...VRIJ_VAN_DE_TEMPLATE, ...(config.vrijeFuncties ?? {}) };
+  const poorten = [...BASISPOORTEN, ...eigenPoorten.map((p) => p.split(".").at(-1))];
+  const vrij = config.vrijeFuncties ?? {};
+  const openbaar = config.openbaar ?? {};
   const problemen = [];
 
   for (const tabel of Object.keys(config.openTabellen ?? {})) {
@@ -570,23 +730,47 @@ export function beoordeelKlantportaal(model, config = {}) {
     );
   }
 
-  const voorIngelogden = model.policies.filter((p) =>
-    p.rollen.some((rol) => VOOR_INGELOGDEN.includes(rol)),
+  const policies = model.policies ?? [];
+  for (const t of model.tabellen ?? []) {
+    if (t.naam.split(".")[0] !== "public") continue;
+    if (t.soort === "mview") {
+      problemen.push(`${t.naam}: een materialized view kent geen row level security`);
+    } else if (t.soort === "foreign") {
+      problemen.push(`${t.naam}: een foreign table kent geen row level security`);
+    } else if (!t.rls) {
+      problemen.push(
+        `${t.naam}: row level security staat niet aan (na de laatste create of disable)`,
+      );
+    } else if (!policies.some((p) => p.tabel === t.naam)) {
+      problemen.push(`${t.naam}: row level security staat aan, maar er is geen enkele policy`);
+    }
+  }
+
+  for (const p of policies) {
+    if (
+      !p.restrictief &&
+      p.rollen.some((rol) => ANON.includes(rol)) &&
+      !opLijst(openbaar, p.tabel)
+    ) {
+      problemen.push(
+        `${p.tabel} (policy "${p.naam}"): geeft bezoekers zonder account (anon of public) toegang, en ${p.tabel} staat niet in klantportaal_openbaar`,
+      );
+    }
+  }
+  const dekkend = policies.filter(
+    (p) => p.restrictief && p.rollen.some((rol) => INGELOGD.includes(rol)),
   );
-  const gedekt = new Set(
-    voorIngelogden
-      .filter(
-        (p) =>
-          p.restrictief &&
-          p.cmd === "all" &&
-          p.using !== null &&
-          poortIsHardeEis(p.using, poorten) &&
-          (p.check === null || poortIsHardeEis(p.check, poorten)),
-      )
-      .map((p) => p.tabel),
-  );
-  for (const p of voorIngelogden) {
-    if (p.restrictief || gedekt.has(p.tabel)) continue;
+  const gedekt = (tabel, cmd) =>
+    dekkend.some(
+      (r) =>
+        r.tabel === tabel &&
+        (r.cmd === "all" || r.cmd === cmd) &&
+        voorwaardenVoor(r, cmd).every((v) => v !== null && poortIsHardeEis(v, poorten)),
+    );
+  for (const p of policies) {
+    if (p.restrictief || !p.rollen.some((rol) => INGELOGD.includes(rol))) continue;
+    const opdrachten = p.cmd === "all" ? OPDRACHTEN : [p.cmd];
+    if (opdrachten.every((cmd) => gedekt(p.tabel, cmd))) continue;
     for (const [soort, voorwaarde] of [
       ["using", p.using],
       ["with check", p.check],
@@ -600,22 +784,20 @@ export function beoordeelKlantportaal(model, config = {}) {
   }
 
   const functies = new Map();
-  for (const f of model.functies) {
+  for (const f of model.functies ?? []) {
     const [schema, naam] = f.naam.split(".");
-    if (!SCHEMAS.includes(schema)) continue;
     if (schema === "public") functies.set(naam, f);
-    const basis = schema === "public" && BASISPOORTEN.includes(naam);
-    if (basis || !f.definer || !f.uitvoerbaar) continue;
-    if (schema === "public" && naam in vrij) continue;
-    const eigenPoort = schema === "public" && eigenPoorten.includes(naam);
-    const eis = eigenPoort ? BASISPOORTEN : poorten;
-    if (!f.inhoud.every((inhoud) => roeptPoortAan(inhoud, eis, naam))) {
+    if (schema === "public" && BASISFUNCTIES.includes(naam)) continue;
+    if (f.anon && !opLijst(openbaar, f.naam)) {
       problemen.push(
-        eigenPoort
-          ? `${f.naam}: staat in klantportaal_poorten maar roept zelf geen poort van de template aan`
-          : `${f.naam}: security definer, aan te roepen door iedereen met een e-mailadres, en roept geen poort aan`,
+        `${f.naam}: bezoekers zonder account (anon) mogen hem uitvoeren; trek dat in (revoke execute ... from public, anon) of zet hem in klantportaal_openbaar`,
       );
     }
+    if (!f.definer || !f.uitvoerbaar) continue;
+    if (opLijst(config.poorten, f.naam) || opLijst(vrij, f.naam)) continue;
+    problemen.push(
+      `${f.naam}: security definer (hij leest met de rechten van zijn eigenaar), en iedereen met een e-mailadres mag hem uitvoeren`,
+    );
   }
   for (const naam of ["is_medewerker", "is_goedgekeurde_klant"]) {
     if (!functies.has(naam)) {
@@ -627,23 +809,30 @@ export function beoordeelKlantportaal(model, config = {}) {
   const isMedewerker = functies.get("is_medewerker");
   if (
     isMedewerker &&
-    !isMedewerker.inhoud.every((inhoud) => roeptPoortAan(inhoud, ["sessie_via_cloudflare"]))
+    !isMedewerker.inhoud.every((inhoud) =>
+      /(?<![\w.])public ?\. ?sessie_via_cloudflare ?\( ?\)/.test(genormaliseerd(inhoud)),
+    )
   ) {
     problemen.push(
       "public.is_medewerker(): moet public.sessie_via_cloudflare() aanroepen, anders is een mailsessie ook medewerker",
     );
   }
-  for (const naam of eigenPoorten) {
-    if (!functies.has(naam)) {
-      problemen.push(`klantportaal_poorten.${naam}: er is geen functie public.${naam}()`);
+  for (const sleutel of eigenPoorten) {
+    const naam = sleutel.includes(".") ? sleutel : `public.${sleutel}`;
+    const f = (model.functies ?? []).find((g) => g.naam === naam);
+    if (!f) {
+      problemen.push(`klantportaal_poorten.${sleutel}: er is geen functie ${naam}()`);
+    } else if (!f.inhoud.every((bron) => eigenPoortKlopt({ taal: f.taal, bron }))) {
+      problemen.push(
+        `${naam}: een eigen poort moet een functie in language sql zijn die één uitdrukking teruggeeft, met public.is_medewerker() of public.is_goedgekeurde_klant() als harde eis (select public.is_medewerker() and ...). Wat de poort verder doet, is de zorg van de app`,
+      );
     }
   }
 
-  for (const v of model.views) {
-    if (!SCHEMAS.includes(v.naam.split(".")[0])) continue;
-    if (v.invoker || roeptPoortAan(v.inhoud, poorten)) continue;
+  for (const v of model.views ?? []) {
+    if (v.invoker || opLijst(vrij, v.naam)) continue;
     problemen.push(
-      `${v.naam}: een view zonder security_invoker gaat langs de policies heen en roept geen poort aan`,
+      `${v.naam}: een view zonder security_invoker gaat langs de policies heen (hij leest met de rechten van zijn eigenaar)`,
     );
   }
   return problemen;
@@ -652,4 +841,9 @@ export function beoordeelKlantportaal(model, config = {}) {
 /** De controle op de tekst van de migraties, voor guard-rls.mjs. */
 export function problemenKlantportaal(sql, config = {}) {
   return beoordeelKlantportaal(modelUitMigraties(sql), config);
+}
+
+/** Maakt een migratie iets met dynamische SQL (`do ... execute`)? Dat ziet de tekst niet. */
+export function heeftDynamischeSql(sql) {
+  return modelUitMigraties(sql).dynamisch;
 }

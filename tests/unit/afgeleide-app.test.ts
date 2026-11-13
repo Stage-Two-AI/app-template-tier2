@@ -186,6 +186,29 @@ function bouwAfgeleideApp(tag: string, manifest: Manifest): string {
     }
   }
   writeFileSync(join(map, "supabase/migrations/20990101000000_bestellingen.sql"), EIGEN_MIGRATIE);
+  // Elke sleutel die een app van de vorige uitgave in stack.config.json kan hebben: die van de
+  // template en wat de plugin erin zet. Sinds uitgave 43 is een onbekende sleutel rood; een
+  // bestaande app mag daar niet door rood worden.
+  const config = JSON.parse(readFileSync(join(map, "stack.config.json"), "utf8"));
+  writeFileSync(
+    join(map, "stack.config.json"),
+    `${JSON.stringify(
+      {
+        ...config,
+        $opmerking: "eigen uitleg van de app",
+        database: true,
+        testmail: "test@voorbeeld.nl",
+        open_tabellen: { bestellingen: "iedereen binnen ziet de bestellingen" },
+        leesrollen: [],
+        testdatabase: {
+          project_ref: "abcdefghijklmnopqrst",
+          anon_key: "sb_publishable_abcdefghijklm",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
 
   const inApp = (...args: string[]) => git(args, map);
   inApp("init", "-q", "-b", "main");

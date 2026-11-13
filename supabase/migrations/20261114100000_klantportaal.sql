@@ -33,6 +33,9 @@
 --      twaalf uur is de sessie nog gewoon ingelogd, maar zonder medewerkerrechten, tot de
 --      medewerker opnieuw via de knop voor medewerkers inlogt.
 --      De duur staat op één plek: `medewerkersessie_geldig` hieronder.
+--   5. Het account is niet geblokkeerd (`auth.users.banned_until`). Een geblokkeerd account
+--      kan geen nieuw token krijgen, maar een lopend token blijft tot een uur geldig; zo is
+--      het recht ook met dat token meteen weg.
 --
 -- Voorwaarde: zet in Supabase geen andere inlogdienst (Google, Microsoft) rechtstreeks aan
 -- naast Cloudflare. Wie dat toch wil, moet deze functie eerst herzien.
@@ -74,6 +77,12 @@ as $$
         from auth.identities i
        where i.user_id = auth.uid()
          and i.provider not in ('custom:cloudflare', 'email')
+    )
+    and not exists (
+      select 1
+        from auth.users u
+       where u.id = auth.uid()
+         and u.banned_until > now()
     )
 $$;
 
@@ -168,7 +177,13 @@ stable
 security definer
 set search_path = ''
 as $$
-  select exists (
+  select not exists (
+    select 1
+      from auth.users u
+     where u.id = auth.uid()
+       and u.banned_until > now()
+  )
+  and exists (
     select 1
       from public.klanten k
      where k.user_id = auth.uid()
@@ -183,7 +198,7 @@ as $$
 $$;
 
 comment on function public.is_goedgekeurde_klant() is
-  'Heeft een medewerker dit account als klant goedgekeurd, en bestaat de sessie nog? Gebruik deze functie in policies voor wat alleen een goedgekeurde klant mag.';
+  'Heeft een medewerker dit account als klant goedgekeurd, is het niet geblokkeerd, en bestaat de sessie nog? Gebruik deze functie in policies voor wat alleen een goedgekeurde klant mag.';
 
 -- Een klant wijzigt zijn e-mailadres niet zelf: dat loopt via een medewerker, en de inrichting
 -- zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past het adres

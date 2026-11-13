@@ -4,9 +4,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const LIB = resolve(__dirname, "../../scripts/lib/rls-regels.mjs");
+
+// Elke test start een of meer processen (node, de guard). Onder belasting (alle tests tegelijk,
+// of de mutaties) duurt dat langer dan de standaard vijf seconden.
+vi.setConfig({ testTimeout: 60_000 });
 
 /**
  * Ruim: de standaardbuffer van een proces is 1 MB, en de migraties van een grote app zijn meer
@@ -356,12 +360,13 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
   type Config = {
     poorten?: Record<string, string>;
     vrijeFuncties?: Record<string, string>;
+    openbaar?: Record<string, string>;
     openTabellen?: Record<string, string>;
   };
   const problemen = (sql: string, config: Config = {}) =>
     roep<string[]>("problemenKlantportaal", lees(sql), config);
 
-  /** De functies van de template, kort; zonder deze twee is elk klantportaal rood. */
+  /** De functies van de template, kort; zonder is_medewerker en is_goedgekeurde_klant is elk klantportaal rood. */
   const TEMPLATE = `
     create function public.sessie_via_cloudflare() returns boolean language sql security definer as $$ select true $$;
     create function public.is_medewerker() returns boolean language sql security definer as $$ select public.sessie_via_cloudflare() $$;
@@ -370,6 +375,9 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
   `;
   const POORT = `create policy "orders_poort" on public.orders as restrictive for all to authenticated
     using (public.is_medewerker() or public.is_goedgekeurde_klant());`;
+  /** Een functie die bezoekers zonder account niet mogen uitvoeren. */
+  const zonderAnon = (naam: string) =>
+    `revoke all on function ${naam} from public, anon; grant execute on function ${naam} to authenticated;`;
 
   it("de functies van de template alleen: niets mis", () => {
     expect(problemen(TEMPLATE)).toEqual([]);
@@ -379,13 +387,37 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
     const sql = `${TEMPLATE}
       create policy "eigen" on public.orders for select to authenticated using (auth.uid() = owner_id);
       create policy "iedereen" on public.orders for insert with check (auth.uid() = owner_id);
-      create policy "bezoeker" on public.orders for select to anon using (zichtbaar);
       create policy "eigen rol" on public.orders for select to verkoper using (auth.uid() = owner_id);
     `;
     expect(problemen(sql)).toEqual([
+      'public.orders (policy "iedereen"): geeft bezoekers zonder account (anon of public) toegang, en public.orders staat niet in klantportaal_openbaar',
       'public.orders (policy "eigen"): de using geldt voor iedereen met een e-mailadres, want de poort is er geen harde eis',
       'public.orders (policy "iedereen"): de with check geldt voor iedereen met een e-mailadres, want de poort is er geen harde eis',
     ]);
+  });
+
+  it("een policy voor bezoekers zonder account mag alleen op een tabel in klantportaal_openbaar", () => {
+    const sql = `${TEMPLATE}
+      create policy "bezoeker" on public.producten for select to anon using (zichtbaar);`;
+    expect(problemen(sql)).toEqual([
+      'public.producten (policy "bezoeker"): geeft bezoekers zonder account (anon of public) toegang, en public.producten staat niet in klantportaal_openbaar',
+    ]);
+    expect(problemen(sql, { openbaar: { producten: "de catalogus" } })).toEqual([]);
+    expect(problemen(sql, { openbaar: { "public.producten": "de catalogus" } })).toEqual([]);
+    expect(problemen(sql, { openbaar: { "api.producten": "een andere" } })).toHaveLength(1);
+    // Een poort `to authenticated` dekt anon niet; een policy zonder `to` geldt ook voor anon.
+    expect(
+      problemen(`${TEMPLATE}
+        create policy "p" on public.orders as restrictive for all to authenticated using (public.is_medewerker());
+        create policy "met naam" on public.orders for select using (klant <> '');`),
+    ).toEqual([
+      'public.orders (policy "met naam"): geeft bezoekers zonder account (anon of public) toegang, en public.orders staat niet in klantportaal_openbaar',
+    ]);
+    // Een restrictive policy voor anon geeft niets, en is dus geen probleem.
+    expect(
+      problemen(`${TEMPLATE}
+        create policy "dicht" on public.orders as restrictive for all to anon using (false);`),
+    ).toEqual([]);
   });
 
   it("elke voorwaarde telt: een goede using met een with check zonder poort is fout", () => {
@@ -409,6 +441,7 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
       const sql = `${TEMPLATE}
         create schema anders;
         create function anders.is_medewerker() returns boolean language sql as $$ select true $$;
+        ${zonderAnon("anders.is_medewerker()")}
         create policy "truc" on public.orders for select to authenticated using (${voorwaarde});`;
       expect(problemen(sql), voorwaarde).toHaveLength(1);
     }
@@ -421,6 +454,17 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
     // Een andere tabel is er niet mee gedekt.
     const andere = `create policy "eigen" on public.klachten for select to authenticated using (auth.uid() = owner_id);`;
     expect(problemen(`${TEMPLATE}${andere}${POORT}`)).toHaveLength(1);
+    // Een poort per opdracht dekt alleen die opdracht.
+    const lezen = `create policy "p" on public.orders as restrictive for select to authenticated using (public.is_medewerker());`;
+    const leest = `create policy "leest" on public.orders for select to authenticated using (auth.uid() = owner_id);`;
+    expect(problemen(`${TEMPLATE}${leest}${lezen}`)).toEqual([]);
+    // Een poort voor insert gebruikt de with check, en zonder with check de using.
+    const schrijft = `create policy "schrijft" on public.orders for insert to authenticated with check (auth.uid() = owner_id);`;
+    expect(
+      problemen(
+        `${TEMPLATE}${schrijft} create policy "p" on public.orders as restrictive for insert to authenticated with check (public.is_medewerker());`,
+      ),
+    ).toEqual([]);
   });
 
   it("een poort op de tabel die geen poort is, dekt niets", () => {
@@ -433,16 +477,18 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
       // Alleen voor een andere rol.
       `create policy "p" on public.orders as restrictive for all to verkoper using (public.is_medewerker());`,
       `create policy "p" on public.orders as restrictive for all to authenticated using (public.is_medewerker() or true);`,
+      `create policy "p" on public.orders as restrictive for all to authenticated using (true) with check (public.is_medewerker());`,
       `create policy "p" on public.orders as restrictive for all to authenticated using (public.is_medewerker()) with check (true);`,
-      // Later weer weggehaald of opengezet.
+      // Later weer weggehaald, opengezet of naar een andere rol gezet.
       `${POORT} drop policy "orders_poort" on public.orders;`,
       `${POORT} alter policy "orders_poort" on public.orders using (true);`,
+      `${POORT} alter policy "orders_poort" on public.orders to verkoper;`,
     ]) {
       expect(problemen(`${TEMPLATE}${eigen}${nep}`).length, nep).toBeGreaterThan(0);
     }
   });
 
-  it("een policy die later goed wordt gemaakt of weggaat, is geen probleem meer", () => {
+  it("een policy die later goed wordt gemaakt, weggaat of met zijn tabel verdwijnt, is geen probleem meer", () => {
     const fout = `create policy "eigen" on public.orders for select to authenticated using (auth.uid() = owner_id);`;
     expect(
       problemen(
@@ -452,6 +498,72 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
     expect(problemen(`${TEMPLATE}${fout} drop policy if exists "eigen" on public.orders;`)).toEqual(
       [],
     );
+    expect(problemen(`${TEMPLATE}${fout} drop table if exists public.orders cascade;`)).toEqual([]);
+    // Een policy die naar authenticated gaat, telt weer.
+    const andereRol = `create policy "eigen" on public.orders for select to verkoper using (auth.uid() = owner_id);`;
+    expect(
+      problemen(`${TEMPLATE}${andereRol} alter policy "eigen" on public.orders to authenticated;`),
+    ).toHaveLength(1);
+  });
+
+  it("tabellen: RLS aan en een policy, na de laatste create, drop of disable", () => {
+    const tabel = (rest: string) => `${TEMPLATE} create table public.orders (id int); ${rest}`;
+    const rls = "alter table public.orders enable row level security;";
+    const policy = `create policy "p" on public.orders for select to authenticated using (public.is_medewerker());`;
+    expect(problemen(tabel(`${rls}${policy}`))).toEqual([]);
+    expect(problemen(tabel(policy))).toEqual([
+      "public.orders: row level security staat niet aan (na de laatste create of disable)",
+    ]);
+    expect(problemen(tabel(rls))).toEqual([
+      "public.orders: row level security staat aan, maar er is geen enkele policy",
+    ]);
+    for (const later of [
+      "alter table public.orders disable row level security;",
+      "alter table only public.orders disable row level security;",
+      "drop table public.orders; create table public.orders (id int);",
+      `drop table public.orders; create table public.orders (id int); ${rls}`,
+    ]) {
+      expect(problemen(tabel(`${rls}${policy}${later}`)).length, later).toBe(1);
+    }
+    for (const nieuw of [
+      "create unlogged table public.wachtrij (id int);",
+      "create table if not exists public.wachtrij (id int);",
+      "select * into public.wachtrij from public.orders;",
+      "select * into unlogged table public.wachtrij from public.orders;",
+      "create table public.wachtrij as select * from public.orders;",
+      "create schema intern; create table intern.wachtrij (id int); alter table intern.wachtrij set schema public;",
+      "create table public.oud (id int); alter table public.oud rename to wachtrij;",
+    ]) {
+      expect(problemen(`${TEMPLATE}${nieuw}`), nieuw).toEqual([
+        "public.wachtrij: row level security staat niet aan (na de laatste create of disable)",
+      ]);
+    }
+    // Een tijdelijke tabel bestaat alleen tijdens de migratie; een tabel in een ander schema
+    // ziet de tekst niet (de databasecontrole wel).
+    expect(problemen(`${TEMPLATE} create temp table x (id int); select 1 into temp y;`)).toEqual(
+      [],
+    );
+    expect(problemen(`${TEMPLATE} create foreign table public.extern (id int) server s;`)).toEqual([
+      "public.extern: een foreign table kent geen row level security",
+    ]);
+    expect(problemen(`${TEMPLATE} create materialized view public.telling as select 1;`)).toEqual([
+      "public.telling: een materialized view kent geen row level security",
+    ]);
+    expect(
+      problemen(
+        `${TEMPLATE} create materialized view public.telling as select 1; drop materialized view public.telling;`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("dynamische SQL ziet de tekst niet, en zegt dat", () => {
+    expect(
+      roep<boolean>(
+        "heeftDynamischeSql",
+        "do $$ begin execute format('create table %I (id int)', 'x'); end $$;",
+      ),
+    ).toBe(true);
+    expect(roep<boolean>("heeftDynamischeSql", "do $$ begin perform 1; end $$;")).toBe(false);
   });
 
   it("open_tabellen moet leeg zijn", () => {
@@ -460,61 +572,134 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
     ]);
   });
 
-  it("een security definer-functie die iedereen mag aanroepen, moet een poort aanroepen", () => {
-    const functie = (inhoud: string, extra = "") => `${TEMPLATE}
-      create function public.alle_orders() returns int language sql security definer as $$ ${inhoud} $$; ${extra}`;
-    expect(problemen(functie("select count(*) from public.orders"))).toEqual([
-      "public.alle_orders: security definer, aan te roepen door iedereen met een e-mailadres, en roept geen poort aan",
-    ]);
-    // Ook als alleen `public` en `anon` het recht kwijt zijn: Supabase geeft `authenticated`
-    // het recht vaak rechtstreeks.
+  it("een security definer-functie die iemand mag aanroepen, staat op de vrije lijst: een poort erin is geen bewijs", () => {
+    const naam = "public.alle_orders()";
+    const functie = (inhoud: string, extra = zonderAnon(naam), soort = "function") => `${TEMPLATE}
+      create ${soort} public.alle_orders() returns int language sql security definer as $$ ${inhoud} $$; ${extra}`;
+    const fout =
+      "public.alle_orders: security definer (hij leest met de rechten van zijn eigenaar), en iedereen met een e-mailadres mag hem uitvoeren";
+    expect(problemen(functie("select count(*) from public.orders"))).toEqual([fout]);
+    for (const inhoud of [
+      "select count(*) from public.orders where public.is_medewerker()",
+      "perform public.is_medewerker(); return 1",
+      "select 1 where public.is_medewerker() or true",
+    ]) {
+      expect(problemen(functie(inhoud)), inhoud).toEqual([fout]);
+    }
+    expect(problemen(functie("select 1", zonderAnon(naam), "procedure"))).toEqual([fout]);
+    // Een recht dat alleen voor anon overblijft, telt ook.
     expect(
       problemen(
         functie(
           "select 1",
-          "revoke all on function public.alle_orders() from public, anon; grant execute on function public.alle_orders() to authenticated;",
+          `revoke all on function ${naam} from public, authenticated; grant execute on function ${naam} to anon;`,
         ),
       ),
-    ).toHaveLength(1);
-    // De poort in commentaar, in een tekst of uit een ander schema telt niet.
-    expect(problemen(functie("select 1 -- public.is_medewerker()\n"))).toHaveLength(1);
-    expect(problemen(functie("select 'public.is_medewerker()'"))).toHaveLength(1);
-    expect(problemen(functie("select anders.is_medewerker()"))).toHaveLength(1);
-
-    expect(
-      problemen(functie("select count(*) from public.orders where public.is_medewerker()")),
-    ).toEqual([]);
+    ).toEqual([
+      "public.alle_orders: bezoekers zonder account (anon) mogen hem uitvoeren; trek dat in (revoke execute ... from public, anon) of zet hem in klantportaal_openbaar",
+      fout,
+    ]);
     expect(
       problemen(
-        functie(
-          "select 1",
-          "revoke all on function public.alle_orders() from public, anon, authenticated;",
-        ),
+        functie("select 1", `revoke all on function ${naam} from public, anon, authenticated;`),
       ),
     ).toEqual([]);
     expect(
       problemen(functie("select 1"), { vrijeFuncties: { alle_orders: "telt alleen" } }),
+    ).toEqual([]);
+    // Een basisfunctie in een ander schema is geen basisfunctie.
+    expect(
+      problemen(
+        `${TEMPLATE} create function api.klant_aanmelden() returns void language sql security definer as $$ select 1 $$; ${zonderAnon("api.klant_aanmelden()")}`,
+      ),
+    ).toHaveLength(1);
+    // security definer later aangezet, of geërfd door een variant ernaast.
+    expect(
+      problemen(
+        `${TEMPLATE} create function public.f() returns int language sql as $$ select 1 $$; ${zonderAnon("public.f()")} alter function public.f() security definer;`,
+      ),
+    ).toHaveLength(1);
+    expect(
+      problemen(
+        `${TEMPLATE} create function public.f() returns int language sql security definer as $$ select 1 $$; create function public.f(x int) returns int language sql as $$ select x $$; ${zonderAnon("public.f()")} ${zonderAnon("public.f(int)")}`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("een functie die bezoekers zonder account mogen uitvoeren, staat in klantportaal_openbaar", () => {
+    const sql = `${TEMPLATE} create function public.tel() returns int language sql as $$ select 1 $$;`;
+    const fout =
+      "public.tel: bezoekers zonder account (anon) mogen hem uitvoeren; trek dat in (revoke execute ... from public, anon) of zet hem in klantportaal_openbaar";
+    expect(problemen(sql)).toEqual([fout]);
+    expect(problemen(sql, { openbaar: { tel: "telt alleen" } })).toEqual([]);
+    // Alleen `public` intrekken is niet genoeg: Supabase geeft anon het recht ook rechtstreeks.
+    expect(problemen(`${sql} revoke execute on function public.tel() from public;`)).toEqual([
+      fout,
+    ]);
+    expect(problemen(`${sql} revoke execute on function public.tel() from public, anon;`)).toEqual(
+      [],
+    );
+    // De standaardrechten voor nieuwe functies tellen ook, voor public en voor anon apart.
+    const zonderStandaard =
+      "alter default privileges in schema public revoke execute on functions from public, anon;";
+    expect(
+      problemen(
+        `${TEMPLATE}${zonderStandaard} create function public.tel() returns int language sql as $$ select 1 $$;`,
+      ),
+    ).toEqual([]);
+    expect(
+      problemen(
+        `${TEMPLATE} alter default privileges revoke execute on functions from public; create function public.tel() returns int language sql as $$ select 1 $$;`,
+      ),
+    ).toEqual([fout]);
+    expect(
+      problemen(
+        `${TEMPLATE}${zonderStandaard} alter default privileges grant execute on functions to public; create function public.tel() returns int language sql as $$ select 1 $$;`,
+      ),
+    ).toEqual([fout]);
+    // Rechten op alle functies in een schema.
+    expect(
+      problemen(`${sql} revoke execute on all functions in schema public from public, anon;`),
     ).toEqual([]);
   });
 
   it("een gewone functie (security invoker) en een functie achter een trigger hoeven geen poort", () => {
     const sql = `${TEMPLATE}
       create function public.tel() returns int language sql as $$ select count(*) from public.orders $$;
+      ${zonderAnon("public.tel()")}
       create function public.bij_wijziging() returns trigger language plpgsql security definer as $$ begin return new; end $$;
     `;
     expect(problemen(sql)).toEqual([]);
   });
 
-  it("een eigen poort moet bestaan en zelf een poort van de template aanroepen", () => {
+  it("een eigen poort moet bestaan, in language sql, met een poort van de template als harde eis", () => {
     const poorten = { is_inkoper: "medewerker van inkoop" };
     const policy = `create policy "inkoop" on public.orders for select to authenticated using (public.is_inkoper());`;
-    const goed = `create function public.is_inkoper() returns boolean language sql security definer as $$ select public.is_medewerker() and exists (select 1 from public.inkopers) $$;`;
-    const nep = `create function public.is_inkoper() returns boolean language sql security definer as $$ select true $$;`;
+    const functie = (inhoud: string, taal = "sql") =>
+      `create function public.is_inkoper() returns boolean language ${taal} security definer as $$ ${inhoud} $$; ${zonderAnon("public.is_inkoper()")}`;
+    const goed = functie(
+      "select public.is_medewerker() and exists (select 1 from public.inkopers where id = auth.uid())",
+    );
     expect(problemen(`${TEMPLATE}${goed}${policy}`, { poorten })).toEqual([]);
-    expect(problemen(`${TEMPLATE}${goed}${policy}`)).toHaveLength(1);
-    expect(problemen(`${TEMPLATE}${nep}${policy}`, { poorten })).toEqual([
-      "public.is_inkoper: staat in klantportaal_poorten maar roept zelf geen poort van de template aan",
-    ]);
+    expect(problemen(`${TEMPLATE}${goed}${policy}`)).toHaveLength(2);
+    const fout =
+      "public.is_inkoper: een eigen poort moet een functie in language sql zijn die één uitdrukking teruggeeft, met public.is_medewerker() of public.is_goedgekeurde_klant() als harde eis (select public.is_medewerker() and ...). Wat de poort verder doet, is de zorg van de app";
+    for (const [inhoud, taal] of [
+      ["select true", "sql"],
+      ["select public.is_goedgekeurde_klant() or exists (select 1 from public.klanten)", "sql"],
+      ["select public.is_inkoper()", "sql"],
+      ["select public.is_verkoper() and true", "sql"],
+      ["select true from public.x where public.is_medewerker()", "sql"],
+      ["begin return public.is_medewerker(); end", "plpgsql"],
+      ["select 1; select public.is_medewerker()", "sql"],
+    ]) {
+      expect(
+        problemen(`${TEMPLATE}${functie(inhoud ?? "", taal)}${policy}`, {
+          poorten: { ...poorten, is_verkoper: "verkoop" },
+        }).filter((p) => !p.startsWith("klantportaal_poorten.is_verkoper")),
+        inhoud,
+      ).toEqual([fout]);
+    }
     expect(problemen(`${TEMPLATE}${policy}`, { poorten })).toEqual([
       "klantportaal_poorten.is_inkoper: er is geen functie public.is_inkoper()",
     ]);
@@ -529,27 +714,40 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
   });
 
   it("zonder de migratie van het klantportaal is de schakelaar rood", () => {
-    expect(problemen("create table public.orders (id int);")).toEqual([
+    expect(
+      problemen("create policy x on public.orders for select to verkoper using (true);"),
+    ).toEqual([
       "public.is_medewerker() ontbreekt: neem de migratie van het klantportaal over uit de template",
       "public.is_goedgekeurde_klant() ontbreekt: neem de migratie van het klantportaal over uit de template",
     ]);
   });
 
-  it("een view gaat langs de policies heen, tenzij hij security_invoker heeft of een poort aanroept", () => {
-    const view = (rest: string) => `${TEMPLATE} create view public.overzicht ${rest};`;
-    expect(problemen(view("as select * from public.orders"))).toEqual([
-      "public.overzicht: een view zonder security_invoker gaat langs de policies heen en roept geen poort aan",
-    ]);
+  it("een view gaat langs de policies heen, tenzij hij security_invoker heeft of op de vrije lijst staat", () => {
+    const view = (rest: string, of = "create") =>
+      `${TEMPLATE} ${of} view public.overzicht ${rest};`;
+    const fout =
+      "public.overzicht: een view zonder security_invoker gaat langs de policies heen (hij leest met de rechten van zijn eigenaar)";
+    expect(problemen(view("as select * from public.orders"))).toEqual([fout]);
+    expect(problemen(view("as select * from public.orders", "create or replace"))).toEqual([fout]);
     expect(problemen(view("with (security_invoker = false) as select 1"))).toHaveLength(1);
+    // Een poort in de vraag is geen bewijs.
+    expect(
+      problemen(view("as select *, public.is_medewerker() as mag from public.orders")),
+    ).toEqual([fout]);
     expect(
       problemen(view("with (security_invoker = true) as select * from public.orders")),
     ).toEqual([]);
     expect(
-      problemen(view("as select * from public.orders where public.is_goedgekeurde_klant()")),
+      problemen(view("as select 1"), { vrijeFuncties: { overzicht: "alleen tellingen" } }),
     ).toEqual([]);
     expect(
       problemen(`${view("as select 1")} alter view public.overzicht set (security_invoker = on);`),
     ).toEqual([]);
+    expect(
+      problemen(
+        `${view("with (security_invoker = true) as select 1")} alter view public.overzicht reset (security_invoker);`,
+      ),
+    ).toEqual([fout]);
   });
 });
 
@@ -694,6 +892,71 @@ describe("scripts/guard-rls.mjs: de schakelaar klantportaal", () => {
       create policy a_poort on public.a as restrictive for all to authenticated
         using (public.is_medewerker() or public.is_goedgekeurde_klant());`;
     expect(draai({ config: { database: true }, sql }, { klantportaal: true }).status).toBe(0);
+  });
+
+  it("een tikfout in een sleutel is rood, met de bedoelde sleutel erbij", () => {
+    for (const sleutel of ["klantPortaal", "klant_portaal", "klantportaal ", "Klantportaal"]) {
+      const uitkomst = draai(GEVALLEN["eigen rijen"] as Geval, { [sleutel]: true });
+      expect(uitkomst.status, sleutel).toBe(1);
+      expect(uitkomst.fout).toContain(`"${sleutel}": bedoel je "klantportaal"?`);
+    }
+    const ander = draai(GEVALLEN["geen database"] as Geval, { open_tabelen: {} });
+    expect(ander.status).toBe(1);
+    expect(ander.fout).toContain('"open_tabelen": bedoel je "open_tabellen"?');
+  });
+
+  it("alle sleutels die apps nu kennen, en uitleg met $, zijn goed", () => {
+    const config = {
+      $beschrijving: ["uitleg"],
+      $opmerking: "eigen uitleg",
+      testmail: "test@voorbeeld.nl",
+      open_tabellen: {},
+      leesrollen: [],
+      testdatabase: { project_ref: "abcdefghijklmnopqrst", anon_key: "sb_publishable_abcdefghijk" },
+      klantportaal: false,
+      klantportaal_poorten: {},
+      klantportaal_vrije_functies: {},
+      klantportaal_openbaar: {},
+    };
+    expect(draai(GEVALLEN["eigen rijen"] as Geval, config).vingerafdruk).toBe(
+      ZOALS_VOORHEEN["eigen rijen"],
+    );
+    const gedeeld = draai(
+      { config: { database: "gedeeld" }, sql: null },
+      { gedeelde_database: { eigenaar: "Klant/erp", project_ref: "abcdefghijklmnopqrst" } },
+    );
+    expect(gedeeld.status).toBe(0);
+  });
+
+  it("de schakelaar zonder eigen database is rood", () => {
+    for (const database of ["gedeeld", false]) {
+      const uitkomst = draai({ config: { database }, sql: null }, { klantportaal: true });
+      expect(uitkomst.status, String(database)).toBe(1);
+      expect(uitkomst.fout).toContain('"klantportaal": true hoort bij een eigen database');
+    }
+  });
+
+  it("met de schakelaar zegt de guard dat de sluitende controle op de database draait", () => {
+    const rood = draai(GEVALLEN["eigen rijen"] as Geval, { klantportaal: true });
+    expect(rood.fout).toContain(
+      "Dit is een snelle controle op de tekst. De sluitende controle draait in de Kwaliteitspoort",
+    );
+  });
+
+  it("met de schakelaar en een namen-lijst met een fout is de guard rood", () => {
+    for (const [sleutel, waarde] of [
+      ["klantportaal_poorten", { "is_inkoper()": "x" }],
+      ["klantportaal_vrije_functies", { f: "" }],
+      ["klantportaal_openbaar", { "bucket:": "x" }],
+      ["klantportaal_openbaar", []],
+    ] as const) {
+      const uitkomst = draai(GEVALLEN["eigen rijen"] as Geval, {
+        klantportaal: true,
+        [sleutel]: waarde,
+      });
+      expect(uitkomst.status, sleutel).toBe(1);
+      expect(uitkomst.fout).toContain(sleutel);
+    }
   });
 
   it("zegt het als de schakelaar geen true of false is", () => {

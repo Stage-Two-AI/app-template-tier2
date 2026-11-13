@@ -1,0 +1,84 @@
+{
+  "$beschrijving": [
+    "De basis van het klantportaal zoals de template hem maakt (supabase/migrations/20261114100000_klantportaal.sql):",
+    "per functie de hash van de tekst, en wat er verder vast hoort te staan; de trigger op auth.users; de tabel klanten.",
+    "De databasecontrole (scripts/lib/klantportaal-database.mjs) vergelijkt de database hiermee: een app die een",
+    "basisfunctie verandert, is rood met de melding \"de basisfunctie X is gewijzigd\".",
+    "Dit bestand is van de template. tests/unit/klantportaal-basis.test.ts bewaakt dat het klopt met de migratie;",
+    "tests/rls/klantportaal-controle.test.ts dat het klopt met de echte database."
+  ],
+  "functies": {
+    "is_goedgekeurde_klant": {
+      "hash": "cb12f4338256f8885c9546e0d5c30400198490e22467fdccf2d586ac7d7c6281",
+      "definer": true,
+      "zoekpad": ["search_path=\"\""],
+      "eigenaar": "postgres",
+      "taal": "sql",
+      "terug": "boolean",
+      "volatiel": "s",
+      "anon": false,
+      "ingelogd": true
+    },
+    "is_medewerker": {
+      "hash": "8d89736589398cc89cb9de1a080adcca8b60095fa3ff76214b0c3ca5654608c0",
+      "definer": true,
+      "zoekpad": ["search_path=\"\""],
+      "eigenaar": "postgres",
+      "taal": "sql",
+      "terug": "boolean",
+      "volatiel": "s",
+      "anon": false,
+      "ingelogd": true
+    },
+    "klant_aanmelden": {
+      "hash": "38fba507ecbff98fca8509e28855b548fe2f7109b703c32ca306be81d8347f65",
+      "definer": true,
+      "zoekpad": ["search_path=\"\""],
+      "eigenaar": "postgres",
+      "taal": "sql",
+      "terug": "void",
+      "volatiel": "v",
+      "anon": false,
+      "ingelogd": true
+    },
+    "klant_adres_gewijzigd": {
+      "hash": "6cd9ce7811bd2772fcbbc096307395c5ff93e5d456fd691984ce481cbff62d2f",
+      "definer": true,
+      "zoekpad": ["search_path=\"\""],
+      "eigenaar": "postgres",
+      "taal": "plpgsql",
+      "terug": "trigger",
+      "volatiel": "v",
+      "anon": false,
+      "ingelogd": false
+    },
+    "sessie_via_cloudflare": {
+      "hash": "36fcc2841664dd840c8cc43595db1b953ba763cdd1fd7c880a197b6abf4035a8",
+      "definer": true,
+      "zoekpad": ["search_path=\"\""],
+      "eigenaar": "postgres",
+      "taal": "sql",
+      "terug": "boolean",
+      "volatiel": "s",
+      "anon": false,
+      "ingelogd": true
+    }
+  },
+  "triggers": [
+    {
+      "naam": "klant_adres_gewijzigd",
+      "tabel": "auth.users",
+      "definitie": "CREATE TRIGGER klant_adres_gewijzigd AFTER UPDATE ON auth.users FOR EACH ROW WHEN ((old.email IS DISTINCT FROM new.email)) EXECUTE FUNCTION public.klant_adres_gewijzigd()",
+      "aan": "O"
+    }
+  ],
+  "klanten": {
+    "kolommen": [
+      "user_id uuid not null",
+      "e_mail text not null",
+      "goedgekeurd boolean not null default false",
+      "aangemeld_op timestamp with time zone not null default now()"
+    ],
+    "rechten": ["authenticated: SELECT", "authenticated: UPDATE(goedgekeurd)"]
+  }
+}

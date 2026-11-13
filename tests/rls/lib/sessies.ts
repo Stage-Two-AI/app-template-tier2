@@ -279,6 +279,32 @@ export function maakKoppelingEmail(userId: string): void {
 }
 
 /**
+ * Haalt het e-mailadres van een account weg, zoals een beheerder dat in Supabase kan doen (een
+ * account met alleen een telefoonnummer heeft er ook geen). Alleen wie de database beheert.
+ */
+export function zetAdresLeeg(userId: string): void {
+  if (!UUID.test(userId)) throw new Error("Ongeldige testgegevens.");
+  const aantal = alsBeheerder(
+    `with gewijzigd as (update auth.users set email = null where id = '${userId}' returning 1)
+     select count(*) from gewijzigd`,
+  );
+  if (aantal !== "1") throw new Error(`Verwachtte één account, maar vond er ${aantal}.`);
+}
+
+/**
+ * Hangt een extra koppeling aan een account, zoals Supabase doet als iemand er ook met een
+ * telefoonnummer op inlogt. Alleen wie de database beheert.
+ */
+export function voegKoppelingToe(userId: string, provider: "phone"): void {
+  if (!UUID.test(userId)) throw new Error("Ongeldige testgegevens.");
+  alsBeheerder(
+    `insert into auth.identities (provider_id, user_id, identity_data, provider, created_at, updated_at)
+     values ('+3160000${Math.floor(Math.random() * 10000)}', '${userId}',
+             jsonb_build_object('sub', '${userId}'), '${provider}', now(), now())`,
+  );
+}
+
+/**
  * Zet tijdens één test de poort van een klantportaal op een tabel (docs/WERKWIJZE.md): één
  * policy die zegt dat alleen een medewerker of een goedgekeurde klant erbij mag. Zo is te
  * bewijzen wat die ene regel doet, zonder dat de template zelf een klantportaal is. De

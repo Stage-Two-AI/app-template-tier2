@@ -4,7 +4,9 @@
 // database opnieuw op en draait de RLS-tests. Blijven die groen, dan bewaakt geen test die
 // bescherming. Overgenomen van de aanvaller van ronde 1 (tests/aanval-mutaties.mjs op de
 // branch aanval/43-inlog), bijgewerkt voor de migratie zoals hij nu is, met mutaties erbij
-// voor wat er in ronde 3 bij kwam. Uitvoer: een tabel in de stapsamenvatting.
+// voor wat er in ronde 3 bij kwam, de negen van de aanvaller van ronde 2 (a1 tot a9, uit
+// tests/rls/aanval2-mutaties-migratie.mjs op aanval/43-inlog-2) en de blokkade (ronde 4).
+// Uitvoer: een tabel in de stapsamenvatting.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -200,6 +202,72 @@ const MUTATIES = [
     "create trigger klant_adres_gewijzigd\n  after update on auth.users\n  for each row\n  when (old.email is distinct from new.email)\n  execute function public.klant_adres_gewijzigd();",
     "",
   ],
+  [
+    "a1-goedgekeurd-sessie-van-ander",
+    "is_goedgekeurde_klant: de sessie hoeft niet van dit account te zijn",
+    "     where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid\n       and s.user_id = auth.uid()\n  )\n$$;",
+    "     where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid\n  )\n$$;",
+  ],
+  [
+    "a2-aanmelden-sessie-van-ander",
+    "klant_aanmelden: de sessie hoeft niet van dit account te zijn",
+    "        where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid\n          and s.user_id = auth.uid()\n     )\n  on conflict",
+    "        where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid\n     )\n  on conflict",
+  ],
+  [
+    "a3-zoekpad-weg",
+    "`set search_path = ''` op sessie_via_cloudflare (de eerste security definer-functie)",
+    "stable\nsecurity definer\nset search_path = ''\nas $$\n  -- Zo lang",
+    "stable\nsecurity definer\nas $$\n  -- Zo lang",
+  ],
+  [
+    "a4-triggerfunctie-voor-iedereen",
+    "de revoke op klant_adres_gewijzigd (de functie achter de trigger)",
+    "revoke all on function public.klant_adres_gewijzigd() from public, anon, authenticated;\n",
+    "",
+  ],
+  [
+    "a5-sessies-alleen-van-aangemelde-klanten",
+    "na een adreswijziging eindigen alleen de sessies van wie al op de lijst staat",
+    "delete from auth.sessions where user_id = new.id;",
+    "delete from auth.sessions where user_id = new.id and exists (select 1 from public.klanten k where k.user_id = new.id);",
+  ],
+  [
+    "a6-revoke-op-tabel-weg",
+    "de revoke op de tabel klanten: de standaardrechten van Supabase blijven staan (ook voor bezoekers)",
+    "revoke all on public.klanten from public, anon, authenticated;\n",
+    "",
+  ],
+  [
+    "a7-trigger-niet-bij-leeg-adres",
+    "de trigger vuurt niet als het adres leeg was of leeg wordt (`<>` in plaats van `is distinct from`)",
+    "when (old.email is distinct from new.email)",
+    "when (old.email <> new.email)",
+  ],
+  [
+    "a8-derde-inlogmanier-mag",
+    "een koppeling `phone` aan het account telt niet meer als tweede inlogdienst",
+    "and i.provider not in ('custom:cloudflare', 'email')",
+    "and i.provider not in ('custom:cloudflare', 'email', 'phone')",
+  ],
+  [
+    "a9-twaalf-uur-wordt-dertien",
+    "de constante: dertien uur in plaats van twaalf",
+    "interval '12 hours'",
+    "interval '13 hours'",
+  ],
+  [
+    "b1-blokkade-medewerker-weg",
+    "sessie_via_cloudflare kijkt niet of het account geblokkeerd is",
+    "    and not exists (\n      select 1\n        from auth.users u\n       where u.id = auth.uid()\n         and u.banned_until > now()\n    )\n$$;",
+    "$$;",
+  ],
+  [
+    "b2-blokkade-klant-weg",
+    "is_goedgekeurde_klant kijkt niet of het account geblokkeerd is",
+    "  select not exists (\n    select 1\n      from auth.users u\n     where u.id = auth.uid()\n       and u.banned_until > now()\n  )\n  and exists (",
+    "  select exists (",
+  ],
 ];
 
 const alleen = process.argv.slice(2);
@@ -215,7 +283,8 @@ try {
         kapot = true;
         continue;
       }
-      sql = origineel.replace(zoek, vervang);
+      // Met een functie: in een gewone vervangtekst betekent `$$` één dollarteken.
+      sql = origineel.replace(zoek, () => vervang);
     }
     if (process.env.DROOG) {
       regels.push(`| ${naam} | ${wat} | - | past |`);

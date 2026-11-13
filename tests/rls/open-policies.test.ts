@@ -10,7 +10,7 @@ import { problemenKlantportaalInDatabase } from "./lib/klantportaal-poort";
  *
  * Deze test is van de template en komt met elke versie mee. Uitzonderingen staan in
  * stack.config.json (`open_tabellen`, `leesrollen`, en bij een klantportaal
- * `klantportaal_poorten` en `klantportaal_vrije_functies`), niet hier.
+ * `klantportaal_poorten`, `klantportaal_vrije_functies` en `klantportaal_openbaar`), niet hier.
  */
 
 /** De uitzonderingen uit stack.config.json; guard-rls.mjs controleert de vorm al. */
@@ -20,6 +20,7 @@ const config = JSON.parse(readFileSync("stack.config.json", "utf8")) as {
   klantportaal?: boolean;
   klantportaal_poorten?: Record<string, string>;
   klantportaal_vrije_functies?: Record<string, string>;
+  klantportaal_openbaar?: Record<string, string>;
 };
 
 type OpenPolicy = {
@@ -88,14 +89,17 @@ describe("leesrollen", () => {
 });
 
 describe("klantportaal", () => {
-  // Alleen met `"klantportaal": true` in stack.config.json. De regel staat in
-  // scripts/lib/rls-regels.mjs en in docs/WERKWIJZE.md.
+  // Alleen met `"klantportaal": true` in stack.config.json: dit is de sluitende controle van
+  // de app zelf. De regels staan in scripts/lib/klantportaal-database.mjs en in
+  // docs/WERKWIJZE.md. Dat de controle zelf werkt, ook zonder de schakelaar, bewijst
+  // tests/rls/klantportaal-controle.test.ts.
   it.skipIf(config.klantportaal !== true)(
-    "wie alleen een e-mailadres heeft, mag niets: elke policy, functie en view gaat door de poort",
+    "wie alleen een e-mailadres heeft, of geen account, mag niets: de database zoals hij na alle migraties is",
     () => {
       const problemen = problemenKlantportaalInDatabase({
         poorten: config.klantportaal_poorten ?? {},
         vrijeFuncties: config.klantportaal_vrije_functies ?? {},
+        openbaar: config.klantportaal_openbaar ?? {},
         openTabellen: config.open_tabellen ?? {},
       });
       expect(problemen, "zie docs/WERKWIJZE.md, het stuk over het klantportaal").toEqual([]);
