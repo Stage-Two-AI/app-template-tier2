@@ -8,6 +8,31 @@ import { describe, expect, it } from "vitest";
 
 const LIB = resolve(__dirname, "../../scripts/lib/rls-regels.mjs");
 
+/**
+ * Ruim: de standaardbuffer van een proces is 1 MB, en de migraties van een grote app zijn meer
+ * (generale repetitie van uitgave 43: `spawnSync node ENOBUFS`).
+ */
+const RUIME_BUFFER = 256 * 1024 * 1024;
+
+/** De template zelf, of de kopie ervan bij een klant; herkend zoals guard-template dat doet. */
+function isDeTemplate(repo: string): boolean {
+  return /\/(?:app-template-tier[12]|stack-template(?:-cloudflare|-light)?)(?:\.git)?$/.test(repo);
+}
+
+const repo =
+  process.env.GITHUB_REPOSITORY ??
+  (() => {
+    try {
+      return execFileSync("git", ["remote", "get-url", "origin"], {
+        cwd: resolve(__dirname, "../.."),
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      return "";
+    }
+  })();
+const inDeTemplate = isDeTemplate(repo);
+
 /** Roept een functie uit scripts/lib/rls-regels.mjs aan, zoals guard-rls.mjs dat doet. */
 function roep<T>(functie: string, ...args: unknown[]): T {
   const code = `import(${JSON.stringify(pathToFileURL(LIB).href)}).then((m) => { const a = JSON.parse(process.argv.at(-1)); const r = m[a.f](...a.args); process.stdout.write(JSON.stringify(r instanceof Set ? [...r] : r)); })`;
@@ -15,7 +40,7 @@ function roep<T>(functie: string, ...args: unknown[]): T {
     execFileSync(
       "node",
       ["--input-type=module", "-e", code, "--", JSON.stringify({ f: functie, args })],
-      { encoding: "utf8" },
+      { encoding: "utf8", maxBuffer: RUIME_BUFFER },
     ),
   ) as T;
 }
@@ -30,6 +55,23 @@ const problemenMetOpenPolicies = (sql: string, open: Record<string, string>) =>
   roep<string[]>("problemenMetOpenPolicies", sql, open);
 const schrijfrechtenVoorLeesrollen = (sql: string, rollen: string[]) =>
   roep<string[]>("schrijfrechtenVoorLeesrollen", sql, rollen);
+
+describe("de migraties van een grote app", () => {
+  it("leest meer dan 1 MB aan migraties zonder dat de buffer volloopt", () => {
+    const map = mkdtempSync(join(tmpdir(), "grote-app-"));
+    try {
+      const regel = "insert into public.producten (naam) values ('een product met een naam');\n";
+      writeFileSync(
+        join(map, "1_veel.sql"),
+        regel.repeat(Math.ceil((2 * 1024 * 1024) / regel.length)),
+      );
+      const sql = roep<string>("leesMigraties", map);
+      expect(sql.length).toBeGreaterThan(2 * 1024 * 1024);
+    } finally {
+      rmSync(map, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("tabellenInPublic", () => {
   it("volgt create en drop in volgorde, alleen in public", () => {
@@ -173,6 +215,7 @@ describe("scripts/open-tabellen-opnemen.mjs", () => {
         {
           cwd: map,
           encoding: "utf8",
+          maxBuffer: RUIME_BUFFER,
         },
       );
       const config = JSON.parse(readFileSync(join(map, "stack.config.json"), "utf8"));
@@ -231,6 +274,7 @@ describe("scripts/guard-rls-tests.mjs", () => {
         {
           cwd: map,
           encoding: "utf8",
+          maxBuffer: RUIME_BUFFER,
           env: { ...process.env, GITHUB_ACTIONS: "true" },
         },
       );
@@ -238,6 +282,10 @@ describe("scripts/guard-rls-tests.mjs", () => {
         "::warning title=A/B-test per tabel::1 tabel(len) zonder A/B-test: orders",
       );
       expect(uitvoer).not.toContain("feestdagen");
+      // Geen belofte over een versie die niemand heeft vastgelegd (sinds versie 39 stond er
+      // "vanaf de volgende uitgave is dit rood", en dat klopte steeds niet).
+      expect(uitvoer).toContain("dit wordt in een latere uitgave verplicht");
+      expect(uitvoer).not.toMatch(/volgende uitgave/);
     } finally {
       rmSync(map, { recursive: true, force: true });
     }
@@ -505,7 +553,12 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
   });
 });
 
-describe("klantportaal: de template zelf", () => {
+/**
+ * Deze twee lezen de migraties en docs/WERKWIJZE.md van de template: de migratie van het
+ * klantportaal en het voorbeeld items. Een app heeft eigen tabellen (en vaak nog geen
+ * klantportaal), dus daar slaan ze over; anders was elke update-PR rood (uitgave 43).
+ */
+describe.runIf(inDeTemplate)("klantportaal: de template zelf", () => {
   const migraties = () =>
     roep<string>("leesMigraties", resolve(__dirname, "../../supabase/migrations"));
   const problemen = (sql: string) => roep<string[]>("problemenKlantportaal", sql, {});
@@ -592,6 +645,7 @@ describe("scripts/guard-rls.mjs: de schakelaar klantportaal", () => {
       const uitkomst = spawnSync("node", [resolve(__dirname, "../../scripts/guard-rls.mjs")], {
         cwd: map,
         encoding: "utf8",
+        maxBuffer: RUIME_BUFFER,
       });
       const alles = JSON.stringify([uitkomst.status, uitkomst.stdout, uitkomst.stderr]);
       return {

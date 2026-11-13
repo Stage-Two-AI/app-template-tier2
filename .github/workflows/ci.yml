@@ -165,7 +165,7 @@ jobs:
         run: pnpm guard:rls
 
       # Per tabel een A/B-test in tests/rls/ (gebruiker B ziet de rij van A niet), of een regel
-      # in open_tabellen. In deze uitgave nog een waarschuwing, daarna rood.
+      # in open_tabellen. Nu nog een waarschuwing; dit wordt in een latere uitgave verplicht.
       - name: Guard - A/B-test per tabel
         run: pnpm guard:rls-tests
 

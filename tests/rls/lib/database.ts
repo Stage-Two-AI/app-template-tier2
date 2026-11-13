@@ -38,6 +38,8 @@ export function vraagDatabase<T>(sql: string, opties: { zoekpad?: string } = {})
     ],
     {
       encoding: "utf8",
+      // Ruim: in een grote app zijn de policies en functies samen meer dan de standaard 1 MB.
+      maxBuffer: 256 * 1024 * 1024,
       env:
         opties.zoekpad === undefined
           ? process.env

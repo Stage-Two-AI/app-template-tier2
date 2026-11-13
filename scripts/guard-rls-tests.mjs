@@ -13,10 +13,11 @@ import { bezitDatabase, openTabellen } from "./lib/stack-config.mjs";
  * guard-rls.mjs kijkt of er policies zijn; deze guard kijkt of iemand heeft nagegaan dat ze
  * ook werken. Een policy die er staat maar niets afschermt, ziet alleen een test.
  *
- * Eerst een waarschuwing, daarna rood. Bestaande apps hebben soms veel tabellen zonder
- * A/B-test; meteen rood zou daar elke pull request stilzetten. In deze uitgave meldt de guard
- * de ontbrekende tabellen (in GitHub als waarschuwing bij de run); in de volgende uitgave
- * zet de werkplaats VERPLICHT op true en is hij rood.
+ * Eerst een waarschuwing, later rood. Bestaande apps hebben soms veel tabellen zonder
+ * A/B-test; meteen rood zou daar elke pull request stilzetten. Voorlopig meldt de guard de
+ * ontbrekende tabellen (in GitHub als waarschuwing bij de run). In een latere uitgave zet de
+ * werkplaats VERPLICHT op true en is hij rood; welke dat is, staat nog niet vast, en de tekst
+ * hieronder belooft daarom geen versie.
  */
 const VERPLICHT = false;
 
@@ -82,10 +83,10 @@ if (VERPLICHT) fail("Tabellen zonder A/B-test (gebruiker B ziet de rij van A nie
 const titel = `${zonder.length} tabel(len) zonder A/B-test: ${zonder.join(", ")}`;
 if (process.env.GITHUB_ACTIONS) {
   console.log(
-    `::warning title=A/B-test per tabel::${titel}. Vanaf de volgende uitgave van Stage Two is dit rood.`,
+    `::warning title=A/B-test per tabel::${titel}. Nu nog een waarschuwing; dit wordt in een latere uitgave verplicht.`,
   );
 }
 console.log(`! ${titel}`);
-console.log("  Nu nog een waarschuwing; vanaf de volgende uitgave van Stage Two is dit rood.");
+console.log("  Nu nog een waarschuwing; dit wordt in een latere uitgave verplicht.");
 for (const regel of uitleg) console.log(`  ${regel}`);
 process.exit(0);

@@ -86,6 +86,8 @@ export function problemenKlantportaalInDatabase(config: KlantportaalConfig = {})
   const code = `import(${JSON.stringify(pathToFileURL(REGELS).href)}).then((m) => { let invoer = ""; process.stdin.on("data", (stuk) => { invoer += stuk; }); process.stdin.on("end", () => { const a = JSON.parse(invoer); process.stdout.write(JSON.stringify(m.beoordeelKlantportaal(a.model, a.config))); }); })`;
   const uitvoer = execFileSync("node", ["--input-type=module", "-e", code], {
     encoding: "utf8",
+    // Ruim: de inhoud van alle functies van een grote app is meer dan de standaard 1 MB.
+    maxBuffer: 256 * 1024 * 1024,
     input: JSON.stringify({ model, config }),
   });
   return JSON.parse(uitvoer) as string[];
