@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { INLOGDIENSTEN } from "@/features/auth/inlogdienst";
+import { leesInlogdiensten } from "@/features/auth/inlogdienst";
 
 /**
  * Omgevingsvariabelen worden hier één keer gevalideerd, bij het opstarten van de app.
@@ -45,9 +45,12 @@ const velden = z
     /**
      * Hoe gebruikers inloggen; zie src/features/auth/inlogdienst.ts. Standaard
      * `wachtwoord`, zodat lokaal en in CI alles werkt zoals altijd. In productie zet de
-     * uitrol hem op `cloudflare`.
+     * uitrol hem op `cloudflare`. Een klantportaal noemt er twee, met een komma ertussen:
+     * `cloudflare,mailcode` (medewerkers via Cloudflare, klanten met een code per mail).
+     * De waarde blijft hier de tekst zoals hij is opgegeven; `inlogdiensten` hieronder is
+     * de lijst die de app gebruikt.
      */
-    VITE_INLOGDIENST: z.enum(INLOGDIENSTEN).default("wachtwoord"),
+    VITE_INLOGDIENST: z.string().default("wachtwoord"),
     /**
      * Waar fouten uit de app naartoe gaan (Sentry). Leeg of afwezig: Sentry staat uit.
      * Een DSN is publiek, hij staat toch in de bundel. Bewust geen URL-controle: een
@@ -66,6 +69,9 @@ const velden = z
     VITE_TESTLOGIN_WACHTWOORD: z.string().optional(),
   })
   .superRefine((waarden, ctx) => {
+    const diensten = leesInlogdiensten(waarden.VITE_INLOGDIENST);
+    if (!diensten.ok) ctx.addIssue({ code: "custom", message: diensten.fout });
+
     const url = Boolean(waarden.VITE_SUPABASE_URL);
     const sleutel = Boolean(waarden.VITE_SUPABASE_ANON_KEY);
     if (url !== sleutel) {
@@ -88,6 +94,14 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/**
+ * De inlogdiensten van deze build, in de volgorde van `VITE_INLOGDIENST`. Meestal één; bij
+ * een klantportaal meer. De controle hierboven heeft de waarde al goedgekeurd, dus een fout
+ * kan hier niet meer voorkomen; de terugval is er alleen voor de typecontrole.
+ */
+const gelezen = leesInlogdiensten(env.VITE_INLOGDIENST);
+export const inlogdiensten = gelezen.ok ? gelezen.diensten : ["wachtwoord" as const];
 
 /**
  * Heeft deze build een database? Zonder de Supabase-waarden niet, en dan toont de app

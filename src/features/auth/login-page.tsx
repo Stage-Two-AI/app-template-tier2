@@ -2,8 +2,9 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InlogMetCode } from "@/features/auth/inlog-met-code";
 import { type Inlogdienst, inlogVorm, startInloggen } from "@/features/auth/inlogdienst";
-import { env, testloginVoorDev } from "@/lib/env";
+import { inlogdiensten, testloginVoorDev } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { credentialsSchema, fieldErrors } from "@/lib/validation";
 
@@ -34,14 +35,24 @@ function foutUitAdres(): string | null {
   return params.get("error") ?? hash.get("error");
 }
 
+/**
+ * Eén dienst: de pagina van die dienst, zoals altijd. Meer diensten (een klantportaal,
+ * `VITE_INLOGDIENST=cloudflare,mailcode`): één pagina met het e-mailadres en de code voor
+ * klanten en een knop voor medewerkers; zie inlog-met-code.tsx.
+ */
 export function LoginPage({
-  dienst = env.VITE_INLOGDIENST,
+  dienst: opgegeven = inlogdiensten,
   testlogin = testloginVoorDev(),
 }: {
-  dienst?: Inlogdienst;
+  dienst?: Inlogdienst | readonly Inlogdienst[];
   /** Alleen lokaal in de dev-server: de testgebruiker van de testdatabase (`pnpm testlogin`). */
   testlogin?: { email: string; wachtwoord: string } | null;
 }) {
+  const diensten = typeof opgegeven === "string" ? [opgegeven] : opgegeven;
+  const [dienst = "wachtwoord"] = diensten;
+  if (diensten.length > 1) {
+    return <InlogMetCode diensten={diensten} auth={supabase.auth} terugNaar={terugNaar} />;
+  }
   const vorm = inlogVorm(dienst);
   if (vorm === "wachtwoord") return <WachtwoordFormulier testlogin={testlogin} />;
   if (vorm === "mailcode") return <MailcodeFormulier />;

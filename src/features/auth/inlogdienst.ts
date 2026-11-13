@@ -11,11 +11,51 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *               door de deur mag, krijgt ook geen Supabase-account.
  *   azure       Supabase logt zelf in bij Microsoft.
  *   google      Supabase logt zelf in bij Google.
- *   mailcode    Supabase stuurt een inloglink per mail.
+ *   mailcode    Supabase stuurt een mail met een code van zes cijfers en een link.
  *   wachtwoord  e-mail en wachtwoord; alleen lokaal en in CI, voor de tests.
+ *
+ * Een klantportaal zet er twee naast elkaar: `VITE_INLOGDIENST=cloudflare,mailcode`.
+ * Medewerkers loggen dan in via Cloudflare, klanten met een code per mail. Welke rechten
+ * iemand daarna heeft, bepaalt de database en nooit deze pagina: zie
+ * `sessie_via_cloudflare()` in supabase/migrations en docs/WERKWIJZE.md.
  */
 export const INLOGDIENSTEN = ["cloudflare", "azure", "google", "mailcode", "wachtwoord"] as const;
 export type Inlogdienst = (typeof INLOGDIENSTEN)[number];
+
+/**
+ * Leest `VITE_INLOGDIENST`: één dienst (`cloudflare`) of een lijst met komma's
+ * (`cloudflare,mailcode`). Geeft de diensten in de opgegeven volgorde, of een fout in
+ * gewone taal. Eén dienst geeft precies wat het altijd gaf: een lijst met die ene dienst.
+ *
+ * `wachtwoord` staat altijd alleen: het is er voor lokaal en de tests, en hoort nooit
+ * naast een echte dienst op een inlogpagina te staan.
+ */
+export function leesInlogdiensten(
+  tekst: string,
+): { ok: true; diensten: Inlogdienst[] } | { ok: false; fout: string } {
+  const namen = tekst.split(",").map((naam) => naam.trim());
+  const diensten: Inlogdienst[] = [];
+  for (const naam of namen) {
+    const dienst = INLOGDIENSTEN.find((bekend) => bekend === naam);
+    if (!dienst) {
+      return {
+        ok: false,
+        fout: `VITE_INLOGDIENST kent "${naam}" niet. Kies uit: ${INLOGDIENSTEN.join(", ")}; meer dan één mag, met een komma ertussen.`,
+      };
+    }
+    if (diensten.includes(dienst)) {
+      return { ok: false, fout: `VITE_INLOGDIENST noemt "${dienst}" twee keer.` };
+    }
+    diensten.push(dienst);
+  }
+  if (diensten.length > 1 && diensten.includes("wachtwoord")) {
+    return {
+      ok: false,
+      fout: "VITE_INLOGDIENST: `wachtwoord` is alleen voor lokaal en de tests en kan niet naast een andere dienst staan.",
+    };
+  }
+  return { ok: true, diensten };
+}
 
 /** Het deel van de Supabase-auth dat hier nodig is; zo is het los te testen. */
 export type InlogAuth = Pick<SupabaseClient["auth"], "signInWithOAuth" | "signInWithOtp">;
@@ -39,7 +79,9 @@ type Opties = { terugNaar: string; email?: string };
 
 /**
  * Start het inloggen bij de gekozen dienst. Bij een OAuth-dienst stuurt Supabase de
- * browser daarna door; bij mailcode komt er een mail met een link. Gooit bij een fout.
+ * browser daarna door; bij mailcode komt er een mail met een code en een link. Gooit bij
+ * een fout. De inlogpagina met de code gebruikt voor mailcode de stappen uit mailcode.ts,
+ * die ook de antwoorden van Supabase vertalen.
  */
 export async function startInloggen(
   dienst: Inlogdienst,

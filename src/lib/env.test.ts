@@ -42,6 +42,33 @@ describe("VITE_INLOGDIENST", () => {
   });
 });
 
+describe("VITE_INLOGDIENST als lijst (klantportaal)", () => {
+  it("neemt een lijst met komma's aan en laat één dienst zoals hij was", async () => {
+    const { envSchema } = await import("./env");
+    const lijst = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare,mailcode" });
+    expect(lijst.success).toBe(true);
+    const een = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare" });
+    expect(een.data?.VITE_INLOGDIENST).toBe("cloudflare");
+  });
+
+  it("weigert een lijst met een onbekende dienst, met de naam in de melding", async () => {
+    const { envSchema } = await import("./env");
+    const uitkomst = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare,okta" });
+    expect(uitkomst.success).toBe(false);
+    expect(uitkomst.error?.issues[0]?.message).toContain("okta");
+  });
+
+  it("weigert wachtwoord in een lijst", async () => {
+    const { envSchema } = await import("./env");
+    expect(envSchema.safeParse({ VITE_INLOGDIENST: "wachtwoord,mailcode" }).success).toBe(false);
+  });
+
+  it("geeft de app de lijst; zonder instelling is dat alleen wachtwoord", async () => {
+    const { inlogdiensten } = await import("./env");
+    expect(inlogdiensten).toEqual(["wachtwoord"]);
+  });
+});
+
 describe("lege waarden", () => {
   it("behandelt een lege variabele als niet gezet, zoals GitHub Actions die doorgeeft", async () => {
     // `${{ vars.X }}` wordt een lege tekst als X niet bestaat. Dat mag de app niet

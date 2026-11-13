@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { type InlogAuth, inlogVorm, startInloggen } from "./inlogdienst";
+import { type InlogAuth, inlogVorm, leesInlogdiensten, startInloggen } from "./inlogdienst";
 
 function nepAuth(fout: { message: string } | null = null) {
   return {
@@ -68,5 +68,36 @@ describe("inlogVorm", () => {
     expect(inlogVorm("google")).toBe("knop");
     expect(inlogVorm("mailcode")).toBe("mailcode");
     expect(inlogVorm("wachtwoord")).toBe("wachtwoord");
+  });
+});
+
+describe("leesInlogdiensten", () => {
+  it("leest één dienst als een lijst met die ene dienst", () => {
+    for (const dienst of ["cloudflare", "azure", "google", "mailcode", "wachtwoord"] as const) {
+      expect(leesInlogdiensten(dienst)).toEqual({ ok: true, diensten: [dienst] });
+    }
+  });
+
+  it("leest een lijst met komma's, in de opgegeven volgorde, spaties mogen", () => {
+    expect(leesInlogdiensten("cloudflare,mailcode")).toEqual({
+      ok: true,
+      diensten: ["cloudflare", "mailcode"],
+    });
+    expect(leesInlogdiensten(" mailcode , cloudflare ")).toEqual({
+      ok: true,
+      diensten: ["mailcode", "cloudflare"],
+    });
+  });
+
+  it("weigert een onbekende dienst, een lege plek en een dubbele", () => {
+    for (const tekst of ["okta", "cloudflare,okta", "cloudflare,", ",", "cloudflare,cloudflare"]) {
+      expect(leesInlogdiensten(tekst).ok, tekst).toBe(false);
+    }
+  });
+
+  it("weigert wachtwoord naast een andere dienst: dat is alleen voor lokaal en de tests", () => {
+    const uitkomst = leesInlogdiensten("cloudflare,wachtwoord");
+    expect(uitkomst.ok).toBe(false);
+    if (!uitkomst.ok) expect(uitkomst.fout).toContain("wachtwoord");
   });
 });
