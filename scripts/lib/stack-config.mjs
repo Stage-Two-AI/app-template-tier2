@@ -170,3 +170,245 @@ export function leesRollen() {
   }
   return lijst.map((r) => r.toLowerCase());
 }
+
+/** Zo kort mag een reden in een lijst van het klantportaal hoogstens niet zijn. */
+export const KORTSTE_REDEN = 8;
+
+/**
+ * Wat er mis is met een lijst namen met per naam een reden (de lijsten van het klantportaal).
+ * Leeg als alles klopt. Dezelfde toets draait in guard:rls (via `klantportaal()`) en in de
+ * databasecontrole (scripts/lib/klantportaal-database.mjs), zodat een lege reden of een naam
+ * die op iets anders past dan bedoeld, ook daar rood is.
+ *
+ * `soort` is "naam" (een functie, view of tabel) of "openbaar" (ook `bucket:<id>`).
+ */
+export function problemenMetNamenMetReden(sleutel, lijst, soort = "naam") {
+  if (lijst === undefined) return [];
+  if (typeof lijst !== "object" || Array.isArray(lijst) || lijst === null) {
+    return [`\`${sleutel}\` hoort een object te zijn met per naam een reden`];
+  }
+  const patroon = soort === "openbaar" ? OPENBARE_NAAM : NAAM;
+  const problemen = [];
+  for (const [naam, reden] of Object.entries(lijst)) {
+    if (!patroon.test(naam)) {
+      problemen.push(
+        `${sleutel}.${naam} is geen naam die de poort kent. Schrijf de naam van een functie, view of tabel in kleine letters, zonder haakjes, aanhalingstekens of jokertekens, met het schema ervoor als het niet public is (bijvoorbeeld api.zoek_product)`,
+      );
+    }
+    if (typeof reden !== "string" || reden.trim() === "") {
+      problemen.push(`bij ${sleutel}.${naam} hoort een reden (waarom mag dit?)`);
+    } else if (reden.trim().length < KORTSTE_REDEN) {
+      problemen.push(
+        `de reden bij ${sleutel}.${naam} is te kort ("${reden.trim()}"); schrijf in een paar woorden waarom dit mag`,
+      );
+    }
+  }
+  return problemen;
+}
+
+/** Een lijst namen met per naam een reden (de lijsten van het klantportaal). */
+function namenMetReden(sleutel, voorbeeld, soort = "naam") {
+  const lijst = stackConfig()[sleutel] ?? {};
+  const problemen = problemenMetNamenMetReden(sleutel, lijst, soort);
+  if (problemen.length > 0) {
+    throw new Error(
+      `stack.config.json: ${problemen.join(";\n")}.\nVoorbeeld:\n  "${sleutel}": ${voorbeeld}`,
+    );
+  }
+  return lijst;
+}
+
+/** Een naam in de database: `naam` (in public) of `schema.naam`. */
+const NAAM = /^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/;
+/** Als NAAM, of `bucket:<id>` voor een openbare bucket in Supabase Storage. */
+const OPENBARE_NAAM = /^(?:bucket:[A-Za-z0-9_.-]+|(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*)$/;
+
+/**
+ * De sleutels die stack.config.json kent: die van de template en die de plugin schrijft. Een
+ * sleutel die met `$` begint, is uitleg. Een andere sleutel is een tikfout, en een tikfout in een
+ * schakelaar (`klantPortaal`) zet hem anders stil uit.
+ */
+export const BEKENDE_SLEUTELS = [
+  "database",
+  "gedeelde_database",
+  "testdatabase",
+  "testmail",
+  "open_tabellen",
+  "leesrollen",
+  "klantportaal",
+  "klantportaal_poorten",
+  "klantportaal_vrije_functies",
+  "klantportaal_openbaar",
+];
+
+/** Hoeveel letters `a` en `b` verschillen (toevoegen, weghalen of vervangen). */
+function afstand(a, b) {
+  const rij = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let vorige = rij[0];
+    rij[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const bewaard = rij[j];
+      rij[j] = Math.min(rij[j] + 1, rij[j - 1] + 1, vorige + (a[i - 1] === b[j - 1] ? 0 : 1));
+      vorige = bewaard;
+    }
+  }
+  return rij[b.length];
+}
+
+/**
+ * De sleutels in stack.config.json die de stack niet kent, elk met de dichtstbijzijnde bekende.
+ * Leeg als alles klopt.
+ */
+export function onbekendeSleutels(config = stackConfig()) {
+  const uit = [];
+  for (const sleutel of Object.keys(config)) {
+    if (sleutel.startsWith("$") || BEKENDE_SLEUTELS.includes(sleutel)) continue;
+    const kaal = sleutel
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z]/g, "");
+    const dichtst = [...BEKENDE_SLEUTELS].sort(
+      (a, b) => afstand(kaal, a.replace(/_/g, "")) - afstand(kaal, b.replace(/_/g, "")),
+    )[0];
+    uit.push({ sleutel, dichtst });
+  }
+  return uit;
+}
+
+/**
+ * Is deze app een klantportaal: een app zonder deur van Cloudflare, waar klanten met een code
+ * per mail inloggen? Dan is "ingelogd" iedereen op internet met een e-mailadres, en mag wie
+ * alleen een e-mailadres heeft niets, tenzij het met een reden is vrijgegeven. De sluitende
+ * controle staat in scripts/lib/klantportaal-database.mjs (op de database, in de
+ * Kwaliteitspoort); guard-rls.mjs controleert de tekst van de migraties al eerder.
+ *
+ *   "klantportaal": true
+ *
+ * Standaard uit: dan verandert er niets. Drie lijsten horen erbij, alle drie optioneel en
+ * alle drie met per naam een reden die de reviewer in de pull request ziet:
+ *
+ *   "klantportaal_poorten": { "is_inkoper": "medewerker van de afdeling inkoop" }
+ *       eigen poorten: functies die in een policy als poort tellen. Zo'n functie is
+ *       `language sql` en geeft één uitdrukking terug met public.is_medewerker() of
+ *       public.is_goedgekeurde_klant() als harde eis; wat hij verder doet, is de zorg van de app.
+ *   "klantportaal_vrije_functies": { "meld_storing": "mag iedereen met een account" }
+ *       `security definer`-functies en views zonder security_invoker die iemand zonder
+ *       goedkeuring mag gebruiken.
+ *   "klantportaal_openbaar": { "producten": "de catalogus is openbaar", "bucket:logo": "het logo" }
+ *       wat bezoekers ZONDER account mogen: een tabel of view (dan mag een policy `to anon`),
+ *       een functie (dan mag anon hem uitvoeren), of een bucket in Storage met public = true.
+ *
+ * Geeft null als de app geen klantportaal is. Een klantportaal moet een eigen database hebben.
+ */
+export function klantportaal() {
+  const waarde = stackConfig().klantportaal;
+  if (waarde === undefined || waarde === false) return null;
+  if (waarde !== true) {
+    throw new Error(
+      `stack.config.json: "klantportaal" is ${JSON.stringify(waarde)}; kies true of false.`,
+    );
+  }
+  const modus = databaseModus();
+  if (modus !== "eigen") {
+    throw new Error(
+      `stack.config.json: "klantportaal": true hoort bij een eigen database ("database": true), maar hier staat "database": ${JSON.stringify(stackConfig().database)}.\n` +
+        "Een klantportaal leunt op de regels in zijn eigen database; zonder eigen database is er niets dat de poort bewaakt.",
+    );
+  }
+  return {
+    poorten: namenMetReden("klantportaal_poorten", '{ "is_inkoper": "medewerker van inkoop" }'),
+    vrijeFuncties: namenMetReden(
+      "klantportaal_vrije_functies",
+      '{ "meld_storing": "mag iedereen met een account" }',
+    ),
+    openbaar: namenMetReden(
+      "klantportaal_openbaar",
+      '{ "producten": "de catalogus is voor iedereen", "bucket:logo": "het logo" }',
+      "openbaar",
+    ),
+    openTabellen: openTabellen(),
+  };
+}
+
+/**
+ * De schakelaar zoals de RLS-tests hem lezen: streng, zonder stil overslaan. Een onbekende
+ * sleutel, een afwijkende waarde (`"true"`, 1), een lijst die niet klopt of een bestand dat geen
+ * JSON is, is een fout (die gooit deze functie). Zonder bestand of zonder de schakelaar:
+ * `{ aan: false }`, precies zoals een gewone app.
+ */
+export function klantportaalStreng() {
+  let tekst;
+  try {
+    tekst = readFileSync("stack.config.json", "utf8");
+  } catch (fout) {
+    if (fout?.code === "ENOENT") return { aan: false };
+    throw new Error(`stack.config.json is niet te lezen: ${fout?.message ?? fout}`);
+  }
+  let config;
+  try {
+    config = JSON.parse(tekst);
+  } catch (fout) {
+    throw new Error(`stack.config.json is geen geldige JSON: ${fout?.message ?? fout}`);
+  }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new Error("stack.config.json hoort één object te zijn, met per keuze een sleutel.");
+  }
+  const onbekend = onbekendeSleutels(config);
+  if (onbekend.length > 0) {
+    throw new Error(
+      `stack.config.json heeft een sleutel die de stack niet kent: ${onbekend
+        .map(({ sleutel, dichtst }) => `"${sleutel}" (bedoel je "${dichtst}"?)`)
+        .join(", ")}. Een tikfout zet een schakelaar anders stil uit.`,
+    );
+  }
+  const portaal = klantportaal();
+  return portaal === null ? { aan: false } : { aan: true, config: portaal };
+}
+
+/** Een naam uit een lijst van het klantportaal, voluit: `public.x` voor `x`, `bucket:` blijft. */
+export function voluit(naam) {
+  return naam.startsWith("bucket:") || naam.includes(".") ? naam : `public.${naam}`;
+}
+
+/** De lijsten waarmee een klantportaal iets vrijgeeft, met hun sleutel in stack.config.json. */
+export const VRIJGEEF_LIJSTEN = [
+  "klantportaal_poorten",
+  "klantportaal_vrije_functies",
+  "klantportaal_openbaar",
+];
+
+/**
+ * De namen die een pull request vrijgeeft: in een lijst van het klantportaal in `nu`, en niet
+ * in die lijst in `basis` (stack.config.json op de basisbranch). Stond de schakelaar op de basis
+ * nog uit, dan telt alles wat nu op een lijst staat als nieuw: wie eerst namen zet en later de
+ * schakelaar aan, bevestigt ze dan alsnog. Zonder de schakelaar nu: niets.
+ */
+export function nieuwVrijgegeven(nu, basis) {
+  if (nu?.klantportaal !== true) return [];
+  const basisAan = basis?.klantportaal === true;
+  const uit = [];
+  for (const sleutel of VRIJGEEF_LIJSTEN) {
+    const lijst = nu[sleutel];
+    if (typeof lijst !== "object" || lijst === null || Array.isArray(lijst)) continue;
+    const eerder = basisAan ? Object.keys(basis?.[sleutel] ?? {}).map(voluit) : [];
+    for (const [naam, reden] of Object.entries(lijst)) {
+      if (!eerder.includes(voluit(naam))) uit.push({ lijst: sleutel, naam, reden });
+    }
+  }
+  return uit;
+}
+
+/** De regel in de PR-tekst die bevestigt dat `naam` bewust is vrijgegeven. */
+export function bevestigingVrijgeven(naam) {
+  return `Bevestigd: klantportaal vrijgegeven: ${naam}`;
+}
+
+/** Staat de bevestiging voor `naam` (of dezelfde naam voluit) in de PR-tekst? */
+export function vrijgevenBevestigd(naam, prTekst) {
+  const regels = prTekst.split(/\r?\n/).map((r) => r.trim());
+  return regels.some((regel) => {
+    const m = /^Bevestigd:\s*klantportaal vrijgegeven:\s*(\S+)\s*$/i.exec(regel);
+    return m !== null && voluit(m[1] ?? "") === voluit(naam);
+  });
+}

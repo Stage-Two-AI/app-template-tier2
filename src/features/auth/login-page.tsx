@@ -2,8 +2,17 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { InlogMetCode } from "@/features/auth/inlog-met-code";
 import { type Inlogdienst, inlogVorm, startInloggen } from "@/features/auth/inlogdienst";
-import { env, testloginVoorDev } from "@/lib/env";
+import {
+  adresVingerafdruk,
+  foutUitAdres,
+  isDienstInlogBegonnen,
+  leesLink,
+  merkAangevraagd,
+  merkDienstInlog,
+} from "@/features/auth/mailcode";
+import { env, inlogdiensten, testloginVoorDev } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { credentialsSchema, fieldErrors } from "@/lib/validation";
 
@@ -22,29 +31,79 @@ function terugNaar(): string {
   return `${window.location.origin}/login`;
 }
 
+function tabblad(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Gedeeld door de tabbladen van deze browser; zie `merkAangevraagd` in mailcode.ts. */
+function gedeeldeOpslag(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Kwam Supabase terug met een fout (bijvoorbeeld: geen toegang)? Dan staat die in het
  * adres. In dat geval sturen we niet opnieuw door, anders ontstaat een eindeloze lus.
+ *
+ * Getoond wordt een vaste tekst, nooit de tekst uit het adres: anders zet iedereen met een
+ * link eigen tekst op het inlogscherm ("bel dit nummer en geef je code door").
  */
-function foutUitAdres(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const fout = params.get("error_description") ?? hash.get("error_description");
-  if (fout) return fout;
-  return params.get("error") ?? hash.get("error");
+function meldingUitAdres(): string | null {
+  const kluis = tabblad();
+  const zelfBegonnen = kluis !== null && isDienstInlogBegonnen(kluis, Date.now());
+  const fout = foutUitAdres(window.location.search, window.location.hash, zelfBegonnen);
+  if (!fout) return null;
+  return fout.soort === "dienst" || fout.soort === "link" ? GEEN_TOEGANG : fout.tekst;
 }
 
+const GEEN_TOEGANG =
+  "Inloggen is niet gelukt. Probeer het opnieuw of vraag je beheerder om toegang.";
+
+/**
+ * Eén dienst: de pagina van die dienst, zoals altijd. Meer diensten (een klantportaal,
+ * `VITE_INLOGDIENST=cloudflare,mailcode`): één pagina met het e-mailadres en de code voor
+ * klanten en een knop voor medewerkers; zie inlog-met-code.tsx.
+ */
 export function LoginPage({
-  dienst = env.VITE_INLOGDIENST,
+  dienst: opgegeven = inlogdiensten,
   testlogin = testloginVoorDev(),
+  robotSleutel = env.VITE_TURNSTILE_SITEKEY,
 }: {
-  dienst?: Inlogdienst;
+  dienst?: Inlogdienst | readonly Inlogdienst[];
   /** Alleen lokaal in de dev-server: de testgebruiker van de testdatabase (`pnpm testlogin`). */
   testlogin?: { email: string; wachtwoord: string } | null;
+  /** De sitekey van Turnstile voor het formulier van klanten; leeg is uit (robotcontrole.ts). */
+  robotSleutel?: string;
 }) {
+  const diensten = typeof opgegeven === "string" ? [opgegeven] : opgegeven;
+  const [dienst = "wachtwoord"] = diensten;
+  if (diensten.length > 1) {
+    return (
+      <InlogMetCode
+        diensten={diensten}
+        auth={supabase.auth}
+        terugNaar={terugNaar}
+        robotSleutel={robotSleutel}
+      />
+    );
+  }
   const vorm = inlogVorm(dienst);
   if (vorm === "wachtwoord") return <WachtwoordFormulier testlogin={testlogin} />;
-  if (vorm === "mailcode") return <MailcodeFormulier />;
+  if (vorm === "mailcode") {
+    // De link uit de inlogmail (supabase/templates/inlogcode.html) komt hier binnen met
+    // `?token_hash=`. Die verwerkt de pagina met de bevestigknop, ook bij alleen mailcode.
+    if (leesLink(window.location.search)) {
+      return <InlogMetCode diensten={diensten} auth={supabase.auth} terugNaar={terugNaar} />;
+    }
+    return <MailcodeFormulier />;
+  }
   return <ExterneInlog dienst={dienst} automatisch={vorm === "doorsturen"} />;
 }
 
@@ -58,7 +117,7 @@ function Pagina({ children }: { children: React.ReactNode }) {
 }
 
 function ExterneInlog({ dienst, automatisch }: { dienst: Inlogdienst; automatisch: boolean }) {
-  const [fout, setFout] = useState<string | null>(() => foutUitAdres());
+  const [fout, setFout] = useState<string | null>(() => meldingUitAdres());
   const [bezig, setBezig] = useState(false);
   const gestart = useRef(false);
 
@@ -66,16 +125,18 @@ function ExterneInlog({ dienst, automatisch }: { dienst: Inlogdienst; automatisc
     setFout(null);
     setBezig(true);
     try {
+      const kluis = tabblad();
+      if (kluis) merkDienstInlog(kluis, Date.now());
       await startInloggen(dienst, supabase.auth, { terugNaar: terugNaar() });
     } catch {
-      setFout("Inloggen is niet gelukt. Probeer het opnieuw of vraag je beheerder om toegang.");
+      setFout(GEEN_TOEGANG);
       setBezig(false);
     }
   }, [dienst]);
 
   useEffect(() => {
     // Eén keer automatisch doorsturen, en alleen als er geen fout terugkwam.
-    if (!automatisch || gestart.current || foutUitAdres()) return;
+    if (!automatisch || gestart.current || meldingUitAdres()) return;
     gestart.current = true;
     void inloggen();
   }, [automatisch, inloggen]);
@@ -130,6 +191,11 @@ function MailcodeFormulier() {
         terugNaar: terugNaar(),
         email: adres.data,
       });
+      // Zoals bij een klantportaal: deze browser vroeg de link aan, voor dit adres. Dan
+      // waarschuwt de pagina niet als de link straks hier opent, en vergelijkt de app na het
+      // inloggen het adres (zie merkAangevraagd in mailcode.ts).
+      const gedeeld = gedeeldeOpslag();
+      if (gedeeld) merkAangevraagd(gedeeld, await adresVingerafdruk(adres.data), Date.now());
       setVerstuurd(true);
     } catch {
       setFout("Er ging iets mis bij het versturen. Controleer je e-mailadres.");

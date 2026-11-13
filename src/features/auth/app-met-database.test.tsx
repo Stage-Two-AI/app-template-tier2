@@ -53,7 +53,7 @@ describe("AppMetDatabase op /login", () => {
   it("toont zonder sessie de fout van Supabase en stuurt niet opnieuw door", async () => {
     sessie.mockReturnValue({ session: null, loading: false });
     renderOp("/login?error=access_denied");
-    expect(await screen.findByRole("alert")).toHaveTextContent("access_denied");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Inloggen is niet gelukt");
     expect(screen.getByTestId("adres")).toHaveTextContent("/login?error=access_denied");
     expect(signInWithOAuth).not.toHaveBeenCalled();
   });
@@ -64,5 +64,35 @@ describe("AppMetDatabase op /login", () => {
     expect(await screen.findByText("Startpagina")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("adres").textContent).toBe("/"));
     expect(signInWithOAuth).not.toHaveBeenCalled();
+    // Eén dienst blijft als vanouds: geen tussenpagina en geen melding bovenin.
+    expect(screen.queryByText(/Je bent/)).toBeNull();
+  });
+});
+
+describe("alleen mailcode: na het inloggen staat het adres er ook", () => {
+  it("zegt op welk adres je bent ingelogd, want ook hier kan een ander je zijn link sturen", async () => {
+    vi.stubEnv("VITE_INLOGDIENST", "mailcode");
+    vi.resetModules();
+    const { default: AlleenMailcode } = await import("./app-met-database");
+    sessie.mockReturnValue({ session: null, loading: false });
+    window.history.replaceState(null, "", "/login");
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <AlleenMailcode />
+      </MemoryRouter>,
+    );
+    sessie.mockReturnValue({
+      session: { user: { email: "piet@klant.nl" } } as Session,
+      loading: false,
+    });
+    rerender(
+      <MemoryRouter initialEntries={["/login"]}>
+        <AlleenMailcode />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("ingelogd-als")).toHaveTextContent(
+      "Je bent ingelogd als piet@klant.nl.",
+    );
+    vi.stubEnv("VITE_INLOGDIENST", "cloudflare");
   });
 });

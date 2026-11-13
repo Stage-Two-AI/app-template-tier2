@@ -156,11 +156,23 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# De link in de inlogmail gaat altijd hierheen (supabase/templates/inlogcode.html gebruikt
+# SiteURL, net als de mail in productie), wat de aanvrager ook opgeeft. Lokaal is dat de poort
+# waarop de browsertest de app als klantportaal draait (playwright.config.ts). Logt jouw app
+# alleen met `mailcode` in, zet hier dan de poort waarop jouw browsertest draait.
+site_url = "http://127.0.0.1:4174"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Erbij: de adressen waarop de app lokaal en in de browsertest draait (dev-server, gebouwde app,
+# en de gebouwde app als klantportaal). Na inloggen via een inlogdienst mag Supabase alleen
+# daarheen terug.
+additional_redirect_urls = [
+  "https://127.0.0.1:3000",
+  "http://127.0.0.1:5173/login",
+  "http://127.0.0.1:4173/login",
+  "http://127.0.0.1:4174/login",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -196,7 +208,9 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Ruim, zodat de RLS-tests en de browsertest echt kunnen inloggen met een code uit de lokale
+# mailvanger. Er gaat lokaal geen mail naar buiten. In productie zet de inrichting de grens.
+email_sent = 200
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -204,9 +218,10 @@ anonymous_users = 30
 # Number of sessions that can be refreshed in a 5 minute interval per IP address.
 token_refresh = 150
 # Number of sign up and sign-in requests that can be made in a 5 minute interval per IP address (excludes anonymous users).
-sign_in_sign_ups = 30
+# Ruimer dan de standaard van 30: de tests loggen vaak in vanaf één adres (deze computer).
+sign_in_sign_ups = 150
 # Number of OTP / Magic link verifications that can be made in a 5 minute interval per IP address.
-token_verifications = 30
+token_verifications = 150
 # Number of Web3 logins that can be made in a 5 minute interval per IP address.
 web3 = 30
 
@@ -220,6 +235,11 @@ web3 = 30
 # end-to-end test maken er gebruikers mee aan. In productie zet de inrichting
 # (beheer/inrichten-cloudflare.mjs) e-mail-inlog uit en Cloudflare als enige
 # inlogdienst aan; dat gebeurt via de Management API, niet via dit bestand.
+#
+# Inloggen met een code per mail (klantportaal) werkt lokaal zoals in productie: een code van
+# tien cijfers, een kwartier geldig, en een nieuw adres moet eerst bevestigd worden met die
+# code. De mail zelf komt in de lokale mailvanger (zie [local_smtp]); daar lezen de tests de
+# code uit.
 [auth.email]
 # Allow/disallow new user signups via email to your project.
 enable_signup = true
@@ -227,15 +247,33 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# Aan, zoals in productie (daar staat mailer_autoconfirm uit): wie per mail een account
+# maakt, is pas binnen na de code. De testgebruikers van de tests worden al bevestigd
+# aangemaakt (email_confirm: true) en merken hier niets van.
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
-otp_length = 6
+otp_length = 10
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+otp_expiry = 900
+
+# Eén mail met code én link, voor een eerste aanmelding, voor elke volgende keer, en ook als
+# iemand een herstelmail laat sturen (de code daaruit werkt in hetzelfde codevak). De
+# inrichting zet in productie hetzelfde sjabloon voor dezelfde drie soorten.
+[auth.email.template.confirmation]
+subject = "Je inlogcode"
+content_path = "./supabase/templates/inlogcode.html"
+
+[auth.email.template.magic_link]
+subject = "Je inlogcode"
+content_path = "./supabase/templates/inlogcode.html"
+
+[auth.email.template.recovery]
+subject = "Je inlogcode"
+content_path = "./supabase/templates/inlogcode.html"
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -319,6 +357,19 @@ max_frequency = "5s"
 # [auth.mfa.web_authn]
 # enroll_enabled = true
 # verify_enabled = true
+
+# Alleen voor de tests van het klantportaal (tests/rls/klantportaal.test.ts): een nagebootste
+# inlogdienst op deze computer, die de test zelf start en stopt (tests/rls/lib/inlogdienst-nep.ts).
+# Zo doorloopt de lokale Supabase echt de terugkeer van een inlogdienst, zoals in productie bij
+# Cloudflare. Hij hangt in het vak keycloak omdat alleen daar een adres zonder https in past;
+# met Keycloak zelf heeft het niets te maken. Draait de test niet, dan luistert er niemand op
+# dit adres en doet dit blok niets. Het "geheim" is geen geheim: de nagebootste dienst kijkt er
+# niet naar. In productie bestaat dit niet; daar zet de inrichting Cloudflare als inlogdienst.
+[auth.external.keycloak]
+enabled = true
+client_id = "lokale-test"
+secret = "lokale-test"
+url = "http://host.docker.internal:54390/realms/lokale-test"
 
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
 # `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,

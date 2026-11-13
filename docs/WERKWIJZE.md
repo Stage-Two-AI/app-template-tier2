@@ -135,6 +135,224 @@ gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Tw
   maar namen van tabellen en functies zijn dan wel zichtbaar. De gegevens zelf blijven
   beschermd door RLS.
 
+**Een recht hangt nooit aan iets wat een klant zelf kan claimen.** Dit geldt voor een
+klantportaal: een app zonder deur op het domein, waar medewerkers via Cloudflare inloggen en
+klanten met een code per mail (tien cijfers, een kwartier geldig;
+`VITE_INLOGDIENST=cloudflare,mailcode`). Iedereen kan daar de
+inlogpagina openen en per mail een account maken. De regels in de database zijn dan de enige
+grens, en die mogen dus alleen leunen op wat een klant niet zelf in de hand heeft.
+
+Wat een klant wel zelf in de hand heeft, en waar dus nooit een recht aan mag hangen:
+
+- **Een e-mailadres.** Supabase kent één account per adres, hoe je ook inlogt. Wie bij de
+  mailbox van een medewerker kan, vraagt een code aan op dat adres en zit dan op het account
+  van die medewerker: zelfde adres, zelfde `auth.uid()`. Zonder Google, zonder tweestaps.
+  Een regel als "wie `@bedrijf.nl` heeft, is medewerker" of "deze `user_id` is beheerder"
+  geeft die persoon dus alle rechten.
+- **`user_metadata`.** Dat past iedere gebruiker zelf aan, en het staat daarna in zijn token.
+- **`app_metadata.provider` en `providers`.** Die zeggen hoe het account ooit is gemaakt en
+  welke inlogmanieren eraan hangen, niet hoe iemand nu is binnengekomen.
+- **Alles wat de browser meestuurt**: een verborgen veld, een rol in een formulier, een
+  adres in een aanvraag.
+
+Waar een recht wel aan mag hangen: aan hoe déze sessie is begonnen. Supabase schrijft dat
+bij het inloggen zelf op en zet het in het ondertekende token (`amr`: `oauth` via Cloudflare,
+`otp` per mail). De gebruiker kan dat niet wijzigen, en het blijft zo zolang de sessie duurt.
+De template heeft daar een functie voor, `sessie_via_cloudflare()`, en een voorbeeld
+(`supabase/migrations/20261114100000_klantportaal.sql`):
+
+```sql
+-- Goed: alleen een sessie via Cloudflare ziet de klanten.
+create policy "klanten_select_medewerker" on public.klanten
+  for select to authenticated
+  using ((select public.is_medewerker()));
+
+-- Fout: het adres kan iedereen met toegang tot die mailbox claimen.
+--   using (auth.jwt() ->> 'email' like '%@bedrijf.nl')
+-- Fout: user_metadata vult de gebruiker zelf in.
+--   using (auth.jwt() -> 'user_metadata' ->> 'rol' = 'medewerker')
+```
+
+Wat daarbij hoort:
+
+- **Per mail is een medewerker gewoon klant.** Dat is de bedoeling: wie meer wil mogen, logt
+  in met de knop voor medewerkers. Die knop staat ook op `/login` voor wie al is ingelogd,
+  dus uitloggen hoeft daar niet voor.
+- **Medewerkerrechten gelden twaalf uur na het inloggen via Cloudflare.** Daarna is de
+  medewerker nog ingelogd, maar als klant, tot hij opnieuw op de knop voor medewerkers
+  klikt. Zo houdt iemand die bij Cloudflare is afgesloten zijn rechten niet wekenlang. De
+  duur staat op één plek, in `sessie_via_cloudflare()`; de tijd komt uit de administratie
+  van Supabase (`auth.sessions.created_at`) en niet uit iets wat de gebruiker kan aanpassen.
+  Een scherm voor medewerkers toont na die twaalf uur "Log opnieuw in als medewerker" in
+  plaats van een leeg scherm, met `useMedewerkersessie` en `OpnieuwAlsMedewerker` uit
+  `src/features/auth/medewerkersessie.tsx`.
+- **Cloudflare is de enige inlogdienst naast mail.** Het token zegt "via een inlogdienst",
+  niet welke. Zet daarom in Supabase niet ook Google of Microsoft rechtstreeks aan; hangt er
+  een tweede dienst aan een account, dan zegt de functie nee.
+- **Eén account per adres.** Vult een medewerker zijn werkadres in het vak voor klanten in,
+  dan bestaat er daarna een klantaccount op dat adres. De inlogpagina wijst medewerkers
+  daarom op de knop, en zegt het eerlijk als de knop daardoor vastloopt.
+
+**Wie alleen een e-mailadres heeft, mag niets.** Iedereen op internet kan bij een
+klantportaal per mail een account maken. Een policy `to authenticated` geldt daar dus voor
+iedereen met een e-mailadres, ook `using (auth.uid() = owner_id)`: een vreemde vult dan zijn
+eigen rijen in jouw tabellen. Een account mag pas iets als een medewerker het heeft
+goedgekeurd. In het voorbeeld meldt een klant zich aan met `klant_aanmelden()`, zet een
+medewerker `goedgekeurd` aan in de tabel `klanten`, en is `is_goedgekeurde_klant()` daarna
+waar. De klant ziet die tabel zelf niet.
+
+Zet in `stack.config.json` de schakelaar `"klantportaal": true` (alleen bij een eigen database,
+`"database": true`). Dan geldt: **wie alleen een e-mailadres heeft, of geen account, mag
+niets, tenzij het met een reden is vrijgegeven.** Concreet:
+
+1. Elke tabel waar bezoekers bij kunnen, heeft RLS aan en minstens één policy. Geen
+   materialized view of foreign table waar bezoekers bij kunnen (die kennen geen RLS).
+2. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in elke
+   `using` en `with check` een poort als harde eis: `public.is_medewerker()` of
+   `public.is_goedgekeurde_klant()`, met `and` aan de rest vast, in elke tak van een `or`.
+   Een policy `as restrictive` met alleen die eis dekt de opdrachten (`for all`, `for select`)
+   en de rollen waarvoor hij geldt; een poort `to authenticated` dekt een policy `to anon` of
+   zonder `to` dus niet.
+3. Een `security definer`-functie of een view zonder `security_invoker = true` leest met de
+   rechten van zijn eigenaar en gaat dus langs de policies heen. Mag een ingelogde gebruiker
+   hem gebruiken, dan staat hij met een reden in `klantportaal_vrije_functies`. "Hij roept een
+   poort aan" is geen bewijs: de poort kan in een `or` staan of het antwoord weggooien. Wat een
+   vrije functie doet, kan geen controle zien; daarom bevestigt de pull request die een naam
+   vrijgeeft dat met de regel `Bevestigd: klantportaal vrijgegeven: <naam>` (anders is
+   `guard:rls` rood), en drukt de databasecontrole bij elke run de vrijgegeven namen met hun
+   reden af. Een vrije definer-functie die `public.klanten` of een tabel in `auth` leest of
+   schrijft, heeft de poort als harde eis.
+4. Wat een bezoeker zonder account mag (een policy `to anon`, een functie die `anon` mag
+   uitvoeren, een bucket met `public = true`), staat met een reden in `klantportaal_openbaar`.
+   Standaard is die lijst leeg. Supabase geeft `anon` het recht op elke nieuwe functie in
+   `public`; trek dat in met `revoke execute on function public.<naam>() from public, anon`.
+5. De basisfuncties van de template (`sessie_via_cloudflare`, `is_medewerker`,
+   `is_goedgekeurde_klant`, `klant_aanmelden`, de trigger op `auth.users`) en de tabel
+   `klanten` blijven precies zoals de template ze maakt, en er komt geen tweede functie met
+   hun naam bij (geen overload, niet in een ander schema). Wil de app iets anders, dan maakt ze
+   een eigen poort (zie hieronder).
+6. `open_tabellen` is leeg: "iedereen binnen" is hier iedereen met een e-mailadres.
+7. **De poort zegt of iemand binnen mag; de A/B-test bewijst dat klanten elkaars rijen niet
+   zien; bij een klantportaal is die test verplicht.** Een policy die voor elke rij waar is
+   (`true`, `id is not null`, `1 = 1`, `coalesce(..., true)`) is rood, ook achter een
+   `restrictive` poort; elke andere ruime vorm vangt alleen de A/B-test per tabel, en
+   `guard:rls-tests` is bij een klantportaal rood voor een tabel zonder die test.
+
+```json
+"klantportaal": true,
+"klantportaal_poorten": { "is_inkoper": "medewerker van de afdeling inkoop" },
+"klantportaal_vrije_functies": { "meld_storing": "mag iedereen met een account" },
+"klantportaal_openbaar": { "producten": "de catalogus is openbaar", "bucket:logo": "het logo" }
+```
+
+Een naam zonder schema is in `public`; schrijf `api.zoek_product` voor een ander schema, en
+`bucket:<naam>` voor een bucket. Een onbekende sleutel in `stack.config.json` (een tikfout
+als `klantPortaal`) is rood, zodat een schakelaar niet stil uit staat.
+
+**Twee controles.** `pnpm guard:rls` leest de tekst van de migraties: snel, al bij een
+concept-PR, met goede meldingen, maar tekst is te misleiden (dynamische SQL, een tabel in een
+ander schema, iets wat een latere migratie terugdraait). De sluitende controle draait in de
+Kwaliteitspoort op de database zelf, nadat alle migraties zijn toegepast
+(`tests/rls/open-policies.test.ts`, met de regels uit `scripts/lib/klantportaal-database.mjs`):
+die leest de catalogus van Postgres in elk schema waar `anon` of `authenticated` bij kan, en
+ziet dus wat er werkelijk staat. Dat die controle zelf werkt, bewijst
+`tests/rls/klantportaal-controle.test.ts`: elke bekende omweg wordt in een transactie op de
+database gezet en moet rood zijn.
+
+De eenvoudigste weg voor een tabel die er al is: één poort erbij, en de policies die er
+stonden blijven zoals ze zijn. Voor de voorbeeldtabel `items`:
+
+```sql
+create policy "items_poort" on public.items as restrictive for all to authenticated
+  using (public.is_medewerker() or public.is_goedgekeurde_klant());
+```
+
+Een `restrictive` policy komt bovenop de andere: zonder poort komt niemand erdoor, mét poort
+gelden de gewone regels (alleen je eigen rijen). Bij een nieuwe tabel kan de poort ook in de
+policy zelf:
+
+```sql
+-- Goed: zonder goedkeuring is dit nooit waar.
+using (public.is_goedgekeurde_klant() and auth.uid() = owner_id)
+using (public.is_medewerker() or (public.is_goedgekeurde_klant() and auth.uid() = owner_id))
+
+-- Fout: de tweede tak heeft geen poort.
+--   using (public.is_medewerker() or auth.uid() = owner_id)
+-- Fout: zonder `public.` kan een andere functie met die naam bedoeld zijn.
+--   using (is_medewerker())
+```
+
+Schrijf de poort voluit, met `public.` ervoor. Een functie die een ingelogde gebruiker niet
+hoort aan te roepen, raakt het recht kwijt met
+`revoke all on function public.<naam>() from public, anon, authenticated`; een view krijgt
+`with (security_invoker = true)`. Kent de app soorten medewerkers, maak dan een eigen poort en
+zet hem met een reden in `klantportaal_poorten`. Een eigen poort is een functie in
+`language sql` die één uitdrukking teruggeeft, met een poort van de template als harde eis:
+
+```sql
+create function public.is_inkoper() returns boolean language sql stable
+security definer set search_path = '' as $$
+  select public.is_medewerker()
+     and exists (select 1 from public.inkopers i where i.user_id = auth.uid())
+$$;
+revoke execute on function public.is_inkoper() from public, anon;
+```
+
+Meer kan de controle aan een eigen poort niet nakijken: wat hij verder doet, is de zorg van de
+app (en van de reviewer, die de reden in de pull request ziet).
+
+De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft de poort
+niet. Zonder de schakelaar verandert er voor een app niets. Een bestaande app een klantportaal
+maken gaat stap voor stap met de route `docs/routes/klantportaal.md`.
+
+**Edge functions vallen buiten de guard.** Een functie in `supabase/functions/` draait met de
+geheimen van de app (de `service_role`, een sleutel van een andere dienst) en ziet de regels in
+de database alleen als ze er zelf naar vraagt. Bij een klantportaal vraagt daarom elke functie
+die iets doet op basis van wat de gebruiker meestuurt, of die rijen van de gebruiker leest of
+schrijft, eerst met het token van de aanroeper aan de database of die mag:
+`is_medewerker()` of `is_goedgekeurde_klant()` (het voorbeeld staat in stap 4 van de route),
+en anders geeft ze 403. `pnpm guard:rls` en de databasetests zien een functie zonder die vraag
+niet; nalopen is werk van de bouwer, bij elke nieuwe functie.
+
+**Een klant wijzigt zijn e-mailadres niet zelf.** Dat loopt via een medewerker, en de
+inrichting zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past
+het adres aan in Supabase), dan loopt het adres in `klanten` mee, vervalt de goedkeuring tot
+een medewerker opnieuw kijkt, en eindigen alle sessies van dat account.
+
+**De link in de inlogmail.** De mail bevat de code en een link naar de inlogpagina. De link
+gaat altijd naar het adres van de app zelf, wat de aanvrager ook opgeeft, en logt pas in na
+een klik op de pagina. Is de mail niet in dezelfde browser aangevraagd, dan vraagt de pagina
+eerst "Heb je deze mail zelf aangevraagd?": een ander kan je ook de link uit zíjn mail
+sturen, en dan log je in op zijn account. Daarvoor onthoudt de browser na een geslaagde
+aanvraag een vingerafdruk van het adres (niet het adres zelf) en het tijdstip. Na het inloggen
+staat bovenin op welk adres je binnen bent, tot je het wegklikt of naar een ander scherm gaat;
+is dat niet het adres dat je in deze browser invulde, dan staat er met nadruk bij dat je moet
+uitloggen als dit niet jouw account is. Dat geldt ook bij alleen `mailcode`.
+
+Bekende beperkingen, die de app niet kan oplossen:
+
+- **Wie de mail heeft, is binnen.** De code en de link werken voor iedereen die de mail kan
+  lezen, ook na doorsturen. Na gebruik werken ze niet nog eens, maar twee mensen die de link
+  op hetzelfde moment openen kan Supabase niet uit elkaar houden.
+- **Een vreemde kan een lopende code ongeldig maken** door zelf een code aan te vragen op
+  het adres van een klant. De klant vraagt dan opnieuw een code aan. De rem per adres en de
+  controle tegen robots uit de inrichting beperken dit, ze voorkomen het niet.
+- **Rechtstreeks bij Supabase is te zien of een adres een account heeft.** De inlogpagina
+  geeft bij een bekend en een onbekend adres hetzelfde antwoord, maar wie de API van Supabase
+  zelf aanroept met "maak geen nieuw account", ziet het verschil.
+- **Blokkeren alleen is niet genoeg.** Een geblokkeerd account (ban in Supabase) krijgt geen
+  nieuw token, maar een lopend token blijft tot een uur geldig. De basisfuncties kijken zelf
+  naar de blokkade, dus de poorten zeggen meteen nee; wat een app buiten de poorten om laat
+  doen, kan dat uur nog lukken. Blokkeren doe je samen met afmelden; een klant direct stoppen
+  doe je met goedkeuring uit.
+- **De twaalf uur is zo hard als de sessieduur bij Cloudflare.** Wie na twaalf uur opnieuw op
+  de knop klikt en bij Cloudflare nog een geldige sessie heeft, is zonder opnieuw in te
+  loggen weer medewerker. Iemand buitensluiten doe je dus bij Cloudflare.
+
+Test het zoals RLS: `tests/rls/klantportaal.test.ts` logt echt in per mail op het adres van
+een medewerker en verwacht geen medewerkerrechten; dezelfde persoon via Cloudflare krijgt ze
+wel. Elke tabel die medewerkers meer laat zien dan klanten, krijgt zo'n test.
+
 In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
 lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de

@@ -74,3 +74,142 @@ test("pakket: imports blijven in beheer/, op de config-controle na, en pakketten
   }
   assert.deepEqual(fouten, []);
 });
+
+// ---------------------------------------------------------------- de proef-workflows
+
+const workflows = resolve(BEHEER, "..", ".github", "workflows");
+const heeftWorkflows = existsSync(join(workflows, "proef-controle.yml"));
+
+test("proef-workflows: de knop Controle van buitenaf heeft een eigen concurrency-groep (hij vervangt nooit een wachtende Toegang bijwerken), krijgt alleen leessleutels en leidt stdout nergens heen", {
+  skip: heeftWorkflows ? false : "een losse kopie van beheer/ heeft de proef-workflows niet",
+}, () => {
+  const lees = (naam) => readFileSync(join(workflows, naam), "utf8");
+  const groep = (yml) =>
+    lees(yml).match(/concurrency:\n(?:\s*#.*\n)*\s*group: (\S+)\n\s*cancel-in-progress: (\S+)/);
+  const controle = groep("proef-controle.yml");
+  assert.equal(groep("proef-toegang.yml")[1], groep("proef-inrichten.yml")[1]);
+  assert.notEqual(controle[1], groep("proef-toegang.yml")[1]);
+  assert.equal(controle[2], "false");
+  const knop = lees("proef-controle.yml");
+  assert.doesNotMatch(knop, /\btee\b|GITHUB_STEP_SUMMARY"/);
+  assert.deepEqual([...knop.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]).sort(), [
+    "CLOUDFLARE_PROEF_TOKEN",
+    "SUPABASE_ACCESS_TOKEN",
+    "SUPABASE_ORG_SLUG",
+  ]);
+  for (const yml of ["proef-inrichten.yml", "proef-controle.yml", "proef-toegang.yml"]) {
+    const tekst = lees(yml);
+    // Invoer gaat via de omgeving; geheimen staan op precies één stap.
+    assert.doesNotMatch(tekst.split("run: |")[1] ?? "", /\$\{\{/, yml);
+    assert.equal((tekst.match(/^\s+env:/gm) ?? []).length, 1, yml);
+  }
+});
+
+// ---------------------------------------------------------------- geen klantnamen
+
+/**
+ * Deze map gaat naar elke klant (via beheer-template). Er staat dus geen naam of domein van een
+ * echte klant in: niet in de README, een voorbeeld, een foutmelding, commentaar of testgegevens.
+ * De namen staan hier in stukken, zodat deze test zichzelf niet vindt.
+ */
+const KLANTNAMEN = [
+  ["win", "co"],
+  ["plan", "tas"],
+  ["rich", "plant"],
+  ["together", "2", "grow"],
+  ["together", "to", "grow"],
+  ["t", "2", "g"],
+].map((delen) => delen.join(""));
+
+function alleBestanden(map) {
+  return readdirSync(map, { withFileTypes: true }).flatMap((e) => {
+    if (e.name === "node_modules") return [];
+    const pad = join(map, e.name);
+    return e.isDirectory() ? alleBestanden(pad) : [pad];
+  });
+}
+
+test("geen klantnamen, klantvoorvoegsels of klantdomeinen in beheer/: de README, voorbeelden, foutmeldingen, commentaar, testgegevens en de vastgelegde aanroepen van versie 42 gebruiken klant.nl, kl-, Voorbeeld en shop", () => {
+  // Ook het voorvoegsel van een klant (in stukken, zoals de namen) als het als naam in een
+  // tekst staat, bijvoorbeeld "<voorvoegsel>start".
+  const patroon = new RegExp(`${KLANTNAMEN.join("|")}|["'\`/]${["r", "p"].join("")}-[a-z]`, "i");
+  const gevonden = [];
+  for (const pad of alleBestanden(BEHEER)) {
+    const naam = relative(BEHEER, pad);
+    readFileSync(pad, "utf8")
+      .split("\n")
+      .forEach((regel, i) => {
+        const m = regel.match(patroon);
+        if (m) gevonden.push(`${naam}:${i + 1}: ${m[0]}`);
+      });
+    assert.doesNotMatch(naam, patroon, `de bestandsnaam ${naam}`);
+  }
+  assert.deepEqual(gevonden, []);
+  // De proef-workflows horen bij deze map; ook daar geen klantnaam.
+  if (heeftWorkflows) {
+    for (const yml of readdirSync(workflows).filter((n) => n.startsWith("proef-"))) {
+      assert.doesNotMatch(readFileSync(join(workflows, yml), "utf8"), patroon, yml);
+    }
+  }
+});
+
+// ---------------------------------------------------------------- de documentatie klopt met de code
+
+test("documentatie: elke verwijzing uit de code naar een kop in README.md of KLANTPORTAAL.md bestaat, de stappen noemen de meldingen die de code geeft, en de owner leest dat droogloop uit moet", () => {
+  const readme = readFileSync(join(BEHEER, "README.md"), "utf8");
+  const achtergrond = readFileSync(join(BEHEER, "KLANTPORTAAL.md"), "utf8");
+  const koppen = (tekst) =>
+    tekst
+      .split("\n")
+      .filter((r) => /^#{1,4} /.test(r))
+      .map((r) => r.replace(/^#+ /, ""));
+  const code = [
+    "inrichten-cloudflare.mjs",
+    "controle-doorsteek.mjs",
+    "lib/toegang.mjs",
+    "lib/supabase.mjs",
+  ]
+    .map((b) => readFileSync(join(BEHEER, b), "utf8"))
+    .join("\n");
+  const verwijzingen = [
+    ...code.matchAll(/\\?"([^"\\]+)\\?" in (?:beheer\/)?(README|KLANTPORTAAL)\.md/g),
+  ];
+  assert.ok(verwijzingen.length >= 5);
+  for (const [, kop, bestand] of verwijzingen) {
+    const lijst = koppen(bestand === "README" ? readme : achtergrond);
+    assert.ok(lijst.includes(kop), `de kop "${kop}" staat niet in ${bestand}.md`);
+  }
+  // De meldingen waar de stappen op wijzen, staan letterlijk in de code.
+  const hoofdstuk = readme.slice(readme.indexOf("## Klantportaal"), readme.indexOf("## Alleen IT"));
+  for (const melding of [
+    "gestopt zonder wijzigingen",
+    "de deur gaat niet weg, want er staat nog iets anders te wijzigen",
+    "wacht op App inrichten",
+    "de app begrijpt de inlog van een",
+    "Turnstile kent dit geheim niet",
+    "Alles staat klaar",
+  ]) {
+    assert.ok(hoofdstuk.replace(/\s+/g, " ").includes(melding), `README: ${melding}`);
+    assert.ok(code.includes(melding.replace("de app begrijpt", "begrijpt")), `code: ${melding}`);
+  }
+  // Stap 3 en stap 5 zeggen uitdrukkelijk dat droogloop uit moet (het vakje staat aan).
+  for (const stap of ["Stap 3", "Stap 5"]) {
+    const a = hoofdstuk.indexOf(`**${stap}.`);
+    const tekst = hoofdstuk.slice(a, hoofdstuk.indexOf("**Stap", a + 10));
+    assert.match(tekst.replace(/\s+/g, " "), /\*\*zet "droogloop" uit\*\*/, stap);
+  }
+  if (heeftWorkflows) {
+    const inrichten = readFileSync(join(workflows, "proef-inrichten.yml"), "utf8");
+    assert.match(inrichten, /droogloop:\n(?:.*\n){2}\s+default: true/);
+  }
+  // Het hoofdstuk voor de owner is kort; de achtergrond staat één keer, in KLANTPORTAAL.md.
+  const weten = hoofdstuk.slice(hoofdstuk.indexOf("### Wat je moet weten"));
+  assert.ok(weten.split("\n").filter((r) => r.startsWith("- ")).length <= 10);
+  assert.equal(new Set(koppen(achtergrond)).size, koppen(achtergrond).length);
+  for (const tekst of [readme, achtergrond]) {
+    assert.doesNotMatch(tekst, /"eigen_hooks": true|regel JSON|—/);
+  }
+  assert.doesNotMatch(hoofdstuk, /INRICHTING|logboek als/);
+  assert.match(achtergrond, /## Open punten vóór de eerste klant\n[\s\S]*IPv6/);
+  assert.doesNotMatch(hoofdstuk, /IPv6/);
+});

@@ -115,8 +115,8 @@ Hoort B in een rol of organisatie te zitten om het te kunnen proberen, zet hem d
 `voorbereidB`, maar niet in die van A.
 
 `guard:rls-tests` kijkt of elke tabel in `public` zo'n aanroep heeft, of met een reden in
-`open_tabellen` staat (zie stap 2). In deze versie is dat nog een waarschuwing; vanaf de
-volgende uitgave van Stage Two is het rood.
+`open_tabellen` staat (zie stap 2). Dat is nu nog een waarschuwing; in een latere uitgave van
+Stage Two wordt het verplicht. Zet de test er dus nu al bij.
 
 Die test draait in de Kwaliteitspoort (stap 4), in dezelfde eigen Supabase als je migraties.
 

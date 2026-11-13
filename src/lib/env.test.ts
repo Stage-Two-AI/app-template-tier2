@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { env } from "./env";
+import { env, envSchema } from "./env";
 
 describe("env", () => {
   it("praat standaard met het schema public", () => {
@@ -39,6 +39,33 @@ describe("VITE_INLOGDIENST", () => {
     for (const dienst of ["cloudflare", "azure", "google", "mailcode", "wachtwoord"]) {
       expect(envSchema.safeParse({ VITE_INLOGDIENST: dienst }).success).toBe(true);
     }
+  });
+});
+
+describe("VITE_INLOGDIENST als lijst (klantportaal)", () => {
+  it("neemt een lijst met komma's aan en laat één dienst zoals hij was", async () => {
+    const { envSchema } = await import("./env");
+    const lijst = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare,mailcode" });
+    expect(lijst.success).toBe(true);
+    const een = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare" });
+    expect(een.data?.VITE_INLOGDIENST).toBe("cloudflare");
+  });
+
+  it("weigert een lijst met een onbekende dienst, met de naam in de melding", async () => {
+    const { envSchema } = await import("./env");
+    const uitkomst = envSchema.safeParse({ VITE_INLOGDIENST: "cloudflare,okta" });
+    expect(uitkomst.success).toBe(false);
+    expect(uitkomst.error?.issues[0]?.message).toContain("okta");
+  });
+
+  it("weigert wachtwoord in een lijst", async () => {
+    const { envSchema } = await import("./env");
+    expect(envSchema.safeParse({ VITE_INLOGDIENST: "wachtwoord,mailcode" }).success).toBe(false);
+  });
+
+  it("geeft de app de lijst; zonder instelling is dat alleen wachtwoord", async () => {
+    const { inlogdiensten } = await import("./env");
+    expect(inlogdiensten).toEqual(["wachtwoord"]);
   });
 });
 
@@ -116,5 +143,19 @@ describe("testloginVoorDev", () => {
     });
     expect(uitkomst.success).toBe(true);
     expect(uitkomst.data?.VITE_TESTLOGIN_WACHTWOORD).toBeUndefined();
+  });
+});
+
+describe("VITE_TURNSTILE_SITEKEY", () => {
+  it("is er standaard niet: de controle tegen robots staat dan uit", () => {
+    expect(env.VITE_TURNSTILE_SITEKEY).toBeUndefined();
+    expect(envSchema.safeParse({ VITE_TURNSTILE_SITEKEY: "" }).data?.VITE_TURNSTILE_SITEKEY).toBe(
+      undefined,
+    );
+  });
+
+  it("neemt een sleutel over zoals hij is", () => {
+    const uitkomst = envSchema.safeParse({ VITE_TURNSTILE_SITEKEY: "0x4AAAAAAA-voorbeeld" });
+    expect(uitkomst.data?.VITE_TURNSTILE_SITEKEY).toBe("0x4AAAAAAA-voorbeeld");
   });
 });

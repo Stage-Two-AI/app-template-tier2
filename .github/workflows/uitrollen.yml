@@ -90,6 +90,8 @@ jobs:
           VITE_SUPABASE_SCHEMA: ${{ vars.VITE_SUPABASE_SCHEMA }}
           VITE_INLOGDIENST: ${{ vars.VITE_INLOGDIENST }}
           VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          # Alleen bij een klantportaal met de controle tegen robots; anders leeg (= uit).
+          VITE_TURNSTILE_SITEKEY: ${{ vars.VITE_TURNSTILE_SITEKEY }}
         run: pnpm build
 
       - name: Uitrollen naar Cloudflare
