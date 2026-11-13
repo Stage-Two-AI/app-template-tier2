@@ -3,6 +3,7 @@ import {
   type Actor,
   anoniem,
   controleerAfscherming,
+  KLANTPORTAAL,
   maakActor,
   verwijderActor,
 } from "./lib/afscherming";
@@ -102,5 +103,21 @@ describe("items: row level security", () => {
   it("laat een uitgelogde bezoeker helemaal niets zien", async () => {
     const { data } = await anoniem().from("items").select("id");
     expect(data ?? []).toEqual([]);
+  });
+
+  // Alleen bij een klantportaal (stap 6 van docs/routes/klantportaal.md): A en B hierboven zijn
+  // dan goedgekeurde klanten; een account zonder goedkeuring komt niet door de poort.
+  it.runIf(KLANTPORTAAL)("een account zonder goedkeuring ziet en schrijft niets", async () => {
+    const vreemde = await maakActor("vreemde", { goedgekeurd: false });
+    try {
+      const { data } = await vreemde.client.from("items").select("id");
+      expect(data ?? []).toEqual([]);
+      const { error } = await vreemde.client
+        .from("items")
+        .insert({ title: "Van een vreemde", owner_id: vreemde.id });
+      expect(error).not.toBeNull();
+    } finally {
+      await verwijderActor(vreemde);
+    }
   });
 });

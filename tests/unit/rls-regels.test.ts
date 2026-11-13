@@ -781,7 +781,79 @@ describe.runIf(inDeTemplate)("klantportaal: de template zelf", () => {
     expect(poort, "het voorbeeld van de poort staat in docs/WERKWIJZE.md").toBeDefined();
     expect(problemen(`${migraties()}\n${poort}`)).toEqual([]);
   });
+
+  it("het voorbeeld uit docs/routes/klantportaal.md (stap 4) maakt een nagebootste app groen in guard:rls", () => {
+    const route = readFileSync(resolve(__dirname, "../../docs/routes/klantportaal.md"), "utf8");
+    const voorbeeld = /<!-- voorbeeld-poort -->\s*```sql\n([\s\S]*?)```/.exec(route)?.[1];
+    expect(voorbeeld, "het voorbeeld staat in stap 4 van de route").toBeDefined();
+    const werkwijze = readFileSync(resolve(__dirname, "../../docs/WERKWIJZE.md"), "utf8");
+    const itemsPoort = /create policy "items_poort"[\s\S]*?;/.exec(werkwijze)?.[0] ?? "";
+    const config = {
+      database: true,
+      open_tabellen: {},
+      klantportaal: true,
+      klantportaal_poorten: { is_beheerder: "medewerker die klanten goedkeurt" },
+    };
+    const guard = (eigen: string) => {
+      const map = mkdtempSync(join(tmpdir(), "guard-rls-route-"));
+      try {
+        writeFileSync(join(map, "stack.config.json"), JSON.stringify(config));
+        mkdirSync(join(map, "supabase/migrations"), { recursive: true });
+        writeFileSync(join(map, "supabase/migrations/1_template.sql"), migraties());
+        writeFileSync(
+          join(map, "supabase/migrations/2_app.sql"),
+          `${VOOR_DE_ROUTE}\n${itemsPoort}`,
+        );
+        writeFileSync(join(map, "supabase/migrations/3_klantportaal-poort.sql"), eigen);
+        return spawnSync("node", [resolve(__dirname, "../../scripts/guard-rls.mjs")], {
+          cwd: map,
+          encoding: "utf8",
+          maxBuffer: RUIME_BUFFER,
+        });
+      } finally {
+        rmSync(map, { recursive: true, force: true });
+      }
+    };
+    const zonder = guard("select 1;");
+    expect(zonder.status, "zonder het voorbeeld is de nagebootste app rood").toBe(1);
+    for (const naam of ["public.omzet", "public.is_beheerder", "public.bestellingen_overzicht"]) {
+      expect(zonder.stderr).toContain(naam);
+    }
+    const met = guard(voorbeeld ?? "");
+    expect(met.stderr).toBe("");
+    expect(met.status).toBe(0);
+  });
 });
+
+/**
+ * Een app zoals stap 4 van docs/routes/klantportaal.md hem aantreft: een tabel met eigen rijen,
+ * een tabel beheerders, een view, een security definer-functie en een eigen rollenfunctie, alles
+ * met de rechten die Supabase standaard geeft. Dezelfde app staat in
+ * tests/rls/klantportaal-controle.test.ts, voor de controle op de database.
+ */
+const VOOR_DE_ROUTE = `
+create table public.bestellingen (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid(),
+  bedrag numeric not null default 0
+);
+alter table public.bestellingen enable row level security;
+grant select, insert, update, delete on public.bestellingen to authenticated;
+create policy "bestellingen_eigen" on public.bestellingen for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create table public.beheerders (user_id uuid primary key);
+alter table public.beheerders enable row level security;
+grant select on public.beheerders to authenticated;
+create policy "beheerders_zelf" on public.beheerders for select to authenticated
+  using (auth.uid() = user_id);
+create view public.bestellingen_overzicht as
+  select user_id, count(*) as aantal from public.bestellingen group by user_id;
+create function public.omzet() returns numeric language sql stable
+  security definer set search_path = '' as $$ select coalesce(sum(bedrag), 0) from public.bestellingen $$;
+create function public.is_beheerder() returns boolean language plpgsql stable
+  security definer set search_path = '' as $$
+  begin return exists (select 1 from public.beheerders b where b.user_id = auth.uid()); end $$;
+`;
 
 describe("scripts/guard-rls.mjs: de schakelaar klantportaal", () => {
   type Geval = { config: Record<string, unknown>; sql: string | null };

@@ -39,7 +39,9 @@ jobs:
           auth=$(docker ps --format '{{.Names}}' | grep auth | head -n 1)
           docker logs "$auth" 2>&1 | grep -v '"path":"/health"' | tail -n 60 | cut -c1-600
       # Dezelfde database, nu met de schakelaar aan en de poort op de voorbeeldtabel: de
-      # controle op de database zelf (tests/rls/open-policies.test.ts) moet dan groen zijn.
+      # controle op de database zelf (tests/rls/open-policies.test.ts) moet dan groen zijn, en
+      # de A/B-tests van de template (tests/rls/items.test.ts) ook: met de schakelaar aan maakt
+      # maakActor goedgekeurde klanten, anders komen A en B niet door de poort op items.
       - name: Klantportaal aan - de poort in de echte database
         if: always()
         run: |
@@ -51,7 +53,7 @@ jobs:
           psql "$db" -v ON_ERROR_STOP=1 -c \
             'create policy "items_poort" on public.items as restrictive for all to authenticated using (public.is_medewerker() or public.is_goedgekeurde_klant())'
           node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("stack.config.json","utf8"));c.klantportaal=true;fs.writeFileSync("stack.config.json",JSON.stringify(c,null,2))'
-          pnpm exec vitest run --config vitest.rls.config.ts tests/rls/open-policies.test.ts
+          pnpm exec vitest run --config vitest.rls.config.ts tests/rls/open-policies.test.ts tests/rls/items.test.ts
       - run: pnpm exec playwright install --with-deps chromium
         if: always()
       - name: End-to-end test

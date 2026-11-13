@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { vraagDatabase } from "./lib/database";
@@ -278,6 +279,34 @@ const GEVALLEN: Geval[] = [
   },
 ];
 
+/**
+ * Een app zoals stap 4 van docs/routes/klantportaal.md hem aantreft, met de rechten die Supabase
+ * standaard geeft. Dezelfde app staat in tests/unit/rls-regels.test.ts, voor guard:rls.
+ */
+const VOOR_DE_ROUTE = `
+create table public.bestellingen (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid(),
+  bedrag numeric not null default 0
+);
+alter table public.bestellingen enable row level security;
+grant select, insert, update, delete on public.bestellingen to authenticated;
+create policy "bestellingen_eigen" on public.bestellingen for all to authenticated
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create table public.beheerders (user_id uuid primary key);
+alter table public.beheerders enable row level security;
+grant select on public.beheerders to authenticated;
+create policy "beheerders_zelf" on public.beheerders for select to authenticated
+  using (auth.uid() = user_id);
+create view public.bestellingen_overzicht as
+  select user_id, count(*) as aantal from public.bestellingen group by user_id;
+create function public.omzet() returns numeric language sql stable
+  security definer set search_path = '' as $$ select coalesce(sum(bedrag), 0) from public.bestellingen $$;
+create function public.is_beheerder() returns boolean language plpgsql stable
+  security definer set search_path = '' as $$
+  begin return exists (select 1 from public.beheerders b where b.user_id = auth.uid()); end $$;
+`;
+
 const metKlantportaal = describe.runIf(heeftKlantportaal || isDeTemplate());
 
 metKlantportaal("de databasecontrole van het klantportaal keurt elke bekende omweg af", () => {
@@ -294,6 +323,30 @@ metKlantportaal("de databasecontrole van het klantportaal keurt elke bekende omw
         create policy "items_poort" on public.items as restrictive for all to authenticated
           using (public.is_medewerker() or public.is_goedgekeurde_klant());`);
       expect(beoordeel(model)).toEqual([]);
+    },
+  );
+
+  it.runIf(isDeTemplate())(
+    "het voorbeeld uit docs/routes/klantportaal.md (stap 4) brengt een nagebootste app door de controle",
+    () => {
+      const route = readFileSync(resolve(__dirname, "../../docs/routes/klantportaal.md"), "utf8");
+      const voorbeeld = /<!-- voorbeeld-poort -->\s*```sql\n([\s\S]*?)```/.exec(route)?.[1];
+      expect(voorbeeld, "het voorbeeld staat in stap 4 van de route").toBeDefined();
+      const config = { poorten: { is_beheerder: "medewerker die klanten goedkeurt" } };
+      const leeg = beoordeel(leesModel(), config);
+      const zonder = beoordeel(leesModel(VOOR_DE_ROUTE), config).filter((p) => !leeg.includes(p));
+      for (const naam of [
+        /public\.omzet\(\)/,
+        /public\.is_beheerder\(\)/,
+        /public\.bestellingen_overzicht/,
+      ]) {
+        expect(
+          zonder.some((p) => naam.test(p)),
+          `zonder het voorbeeld is ${naam} rood; nu:\n${zonder.join("\n")}`,
+        ).toBe(true);
+      }
+      const met = beoordeel(leesModel(`${VOOR_DE_ROUTE}\n${voorbeeld}`), config);
+      expect(met.filter((p) => !leeg.includes(p))).toEqual([]);
     },
   );
 

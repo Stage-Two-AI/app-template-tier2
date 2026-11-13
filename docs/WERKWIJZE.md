@@ -283,10 +283,12 @@ security definer set search_path = '' as $$
   select public.is_medewerker()
      and exists (select 1 from public.inkopers i where i.user_id = auth.uid())
 $$;
+revoke execute on function public.is_inkoper() from public, anon;
 ```
 
 Meer kan de controle aan een eigen poort niet nakijken: wat hij verder doet, is de zorg van de
 app (en van de reviewer, die de reden in de pull request ziet).
+
 De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft de poort
 niet. Zonder de schakelaar verandert er voor een app niets. Een bestaande app een klantportaal
 maken gaat stap voor stap met de route `docs/routes/klantportaal.md`.

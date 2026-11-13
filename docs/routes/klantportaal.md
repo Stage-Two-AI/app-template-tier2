@@ -4,10 +4,8 @@ Een klantportaal is een app zonder deur van Cloudflare op het eigen domein. Mede
 in via Cloudflare, klanten met een code of link per mail. Iedereen op internet kan dan een
 account maken: de regels in de database zijn de **enige** grens. Lees eerst in
 `docs/WERKWIJZE.md` (hoofdstuk 2) de alinea's vanaf "Een recht hangt nooit aan iets wat een
-klant zelf kan claimen".
-
-`/stagetwo-tier2:updaten` brengt de bestanden voor een klantportaal niet mee (ze zijn van het
-project); je haalt ze hier uit de template. Het werk gaat in twee pull requests volgens
+klant zelf kan claimen". `/stagetwo-tier2:updaten` brengt de bestanden niet mee (ze zijn van het
+project); je haalt ze uit de template, in twee pull requests volgens
 `docs/routes/verder-werken.md`: eerst de database, dan de rest.
 
 ## Stap 0: Moet dit een klantportaal worden?
@@ -19,7 +17,7 @@ Niet als alleen medewerkers de app gebruiken, en niet voor een paar pagina's die
 cat .claude/stack-version
 grep '"database"' stack.config.json
 grep -v '^\s*//' wrangler.jsonc | grep custom_domain
-grep -rlE 'public\.(klanten|is_medewerker|is_goedgekeurde_klant|klant_aanmelden|sessie_via_cloudflare)\b' supabase/migrations
+grep -rliE '(table|view|function|policy)[^;]*\b(klanten|is_medewerker|is_goedgekeurde_klant|klant_aanmelden|klant_adres_gewijzigd|sessie_via_cloudflare)\b' supabase/migrations
 grep -n '^\[auth.hook' supabase/config.toml
 grep -rnE 'references auth\.users|owner_id|user_id|klant_id|account_id' supabase/migrations
 ```
@@ -29,7 +27,7 @@ grep -rnE 'references auth\.users|owner_id|user_id|klant_id|account_id' supabase
 | 1 | 43 of hoger | eerst `/stagetwo-tier2:updaten` en die pull request mergen |
 | 2 | `"database": true` | stop: een klantportaal heeft een eigen database nodig |
 | 3 | `"custom_domain": true` | je kunt bouwen, maar de owner geeft de app eerst een eigen domein; zeg het de bouwer |
-| 4 | niets, of alleen `*_klantportaal.sql` | stop: een naam van de app botst met de template; die krijgt eerst een andere naam, in een eigen pull request |
+| 4 | niets, of alleen `*_klantportaal*.sql` | stop: een naam van de app botst met de template (vaak een eigen tabel `klanten`). Die krijgt eerst een andere naam (`alter table public.klanten rename to ...`, met code en tests), in een eigen pull request, en die wordt gemerged vóór stap 1 |
 | 5 | niets | stop: de app heeft eigen hooks in Supabase Auth; overleg met de bouwer en de owner |
 | 6 | een tabel met een kolom die naar de gebruiker of klant verwijst | zonder zo'n tabel is niets "van een klant" en ziet hij na goedkeuring een lege app. Zeg dat de bouwer en vraag welke gegevens een klant moet zien, vóór je bouwt (vaak eerst een kolom erbij, met `docs/routes/databasewijziging.md`) |
 
@@ -38,9 +36,8 @@ Staan `src/features/auth/inlog-met-code.tsx` en `supabase/migrations/*_klantport
 van stap 3 alleen "Daarna, met de hand".
 
 Stel de bouwer **één** vraag en bouw pas als het antwoord er is: "Wat mag een klant zien en
-doen (per scherm of tabel), en welke medewerkers keuren nieuwe klanten goed?" Schrijf het op
-als lijst per tabel: "alleen medewerkers", "medewerkers en goedgekeurde klanten, elk zijn eigen
-rijen", of iets daartussen. Dat is je bouwtekening.
+doen (per scherm of tabel), en welke medewerkers keuren nieuwe klanten goed?" Schrijf het op per
+tabel ("alleen medewerkers", "medewerkers en klanten, elk zijn eigen rijen"): je bouwtekening.
 
 ## Stap 1: De template ophalen
 
@@ -94,13 +91,11 @@ pnpm db:types:uit-ci && pnpm check
 git add src/lib/database.types.ts && git commit -m "Databasetypes bijwerken" && git push
 ```
 
-De Kwaliteitspoort draait ook op een concept, omdat de PR `supabase/` raakt. `gh pr checks
---watch` wacht tot hij klaar is: `Database en end-to-end` is dan rood op "Databasetypes lopen
-gelijk met het schema". Dat hoort zo: de nieuwe types staan in zijn log, en
-`pnpm db:types:uit-ci` haalt ze op. Zegt dat "loopt nog", wacht; zegt het "geen gegenereerde
-types", zet de PR op klaar (`gh pr ready`), wacht en probeer opnieuw. Rood op `typecheck` daarna:
-eigen code die over **alle** tabellen gaat (een `Record` of lijst met een sleutel per tabel uit
-`Database["public"]["Tables"]`) mist `klanten`; zet die erbij.
+De Kwaliteitspoort draait ook op een concept (de PR raakt `supabase/`). `Database en end-to-end`
+is rood op "Databasetypes lopen gelijk met het schema"; dat hoort zo, `pnpm db:types:uit-ci` haalt
+de types uit zijn log. "loopt nog": wacht; "geen gegenereerde types": `gh pr ready`, wacht, opnieuw.
+Rood op `typecheck` daarna: eigen code met een sleutel per tabel uit
+`Database["public"]["Tables"]` mist `klanten`; zet die erbij.
 
 Goed als: alle checks groen (`guard:rls-tests` mag waarschuwen over `klanten`). PR-tekst zoals in
 `verder-werken.md` (preview: niets te zien), op klaar, groen, en de bouwer merget. Voor
@@ -114,12 +109,10 @@ git checkout main && git pull && git checkout -b klantportaal
 node "$T/scripts/klantportaal-overnemen.mjs" --template "$T"
 ```
 
-Dit kijkt alleen. Een update raakt `src/` nooit, dus de eigen code kan van een veel oudere
-versie zijn dan de app; het script vergelijkt elk bestand daarom met de template op **elke**
-eerdere versie. Per bestand: `nieuw`, `samenvoegen` (gelijk of weinig anders dan de
-dichtstbijzijnde versie, die de basis wordt) of `MET DE HAND` (veel van de template ontbreekt:
-een oudere of eigen indeling). Bovenaan: heeft de app `src/features/auth/app-met-database.tsx`,
-en waar staan de routes. Onderaan: **weg A** of **weg B**.
+Dit kijkt alleen, en vergelijkt elk bestand met de template op **elke** eerdere versie (een
+update raakt `src/` nooit). Per bestand: `nieuw`, `samenvoegen` (weinig anders dan de
+dichtstbijzijnde versie, de basis) of `MET DE HAND` (een oudere of eigen indeling). Bovenaan: waar
+staan de routes. Onderaan: **weg A** of **weg B**.
 
 **Weg A** (geen `MET DE HAND`): draai het opnieuw met `--overnemen`. Bij `CONFLICT` staan de
 plekken tussen `<<<<<<< app` en `>>>>>>> template`: neem het deel van de template en zet erin wat
@@ -130,22 +123,11 @@ de app zelf toevoegde (eigen routes, variabelen, functies in `config.toml`).
 de nieuwe inlogpagina. Ik neem die bestanden over en zet jouw schermen erin terug; daarna kijken
 we samen in de preview of alles er nog is." Na zijn akkoord: `--overnemen`. Elk bestand
 `MET DE HAND` is dan de versie van de template; wat de app erin had, toont
-`git show HEAD:<pad>`. Zet alleen de eigen routes en imports terug. De routes gaan uit de
-bestanden die het script noemde (meestal `src/App.tsx`) naar
-`src/features/auth/app-met-database.tsx`, in de plaats van het voorbeeld `ItemsPage`:
-
-```tsx
-// Vóór, in src/App.tsx (met een eigen hook: const { session } = useAuth()):
-import { BestellingenPage } from "@/features/bestellingen/bestellingen-page";
-<Route path="/" element={session ? <BestellingenPage session={session} /> : <Navigate to="/login" replace />} />
-// Na, in app-met-database.tsx (session komt daar uit useSession; import en route van ItemsPage zijn weg):
-import { BestellingenPage } from "@/features/bestellingen/bestellingen-page";
-<Route path="/" element={session ? <BestellingenPage session={session} /> : <Navigate to="/login" replace />} />
-```
-
-`src/App.tsx` wordt die van de template, `src/main.tsx` laadt voortaan `src/start.tsx`, en wat de
-app zelf in `main.tsx` deed (een eigen import, een aanroep vóór het renderen) gaat naar
-`src/start.tsx`.
+`git show HEAD:<pad>`. Zet alleen de eigen routes en imports terug: de `<Route>`-regels en hun
+imports gaan ongewijzigd uit de bestanden die het script noemde (meestal `src/App.tsx`) naar
+`src/features/auth/app-met-database.tsx`, in de plaats van het voorbeeld `ItemsPage` (`session`
+komt daar uit `useSession`). `src/App.tsx` wordt die van de template; `src/main.tsx` laadt
+voortaan `src/start.tsx`, en wat de app zelf in `main.tsx` deed, gaat naar `src/start.tsx`.
 
 **Daarna, met de hand**, bij beide wegen:
 
@@ -157,8 +139,7 @@ grep -rln '^<<<<<<<' src tests e2e supabase playwright.config.ts .env.example .g
 1. `--nakijken` meldt elk pad uit de router van de laatste commit dat nu weg is; zet het terug.
    De typecontrole ziet dat niet. De `grep` toont niets meer.
 2. `app-met-database.test.tsx` en `app-klantportaal.test.tsx` bootsen de startpagina van de
-   template na (`vi.mock("@/features/items/items-page", ...)`). Heeft de app op `/` een eigen
-   scherm, boots dat dan na, bijvoorbeeld
+   template na (`vi.mock("@/features/items/items-page", ...)`); boots het eigen scherm op `/` na:
    `vi.mock("@/features/bestellingen/bestellingen-page", () => ({ BestellingenPage: () => <p>Startpagina</p> }));`.
 3. Geen tabel `items` in de app: haal in `tests/rls/klantportaal.test.ts` de blokken weg die met
    `describe("de poort van een klantportaal` beginnen (tot het volgende `describe(`), en de
@@ -175,32 +156,63 @@ zijn (bij weg B nadrukkelijk).
 
 ## Stap 4: De schakelaar en de regels in de database
 
-Zet in `stack.config.json` `"klantportaal": true` en `"open_tabellen": {}`, verder niets. Nu is
-`pnpm guard:rls` rood, met een regel per policy, functie of view die openstaat voor iedereen met
-een e-mailadres. Los alles op in **één nieuwe migratie**
-(`supabase/migrations/<tijdstempel>_klantportaal-poort.sql`) tot hij groen is.
+Zet in `stack.config.json` `"klantportaal": true` en `"open_tabellen": {}`. Los alles op in
+**één nieuwe migratie** (`supabase/migrations/<tijdstempel>_klantportaal-poort.sql`).
+`pnpm guard:rls` is snelle hulp op de tekst van de migraties; maak hem groen. De **grens** is de
+controle op de database zelf in de Kwaliteitspoort (`Database en end-to-end`,
+`tests/rls/open-policies.test.ts`): rood daar betekent dat het echt open staat.
 
-Een **poort** is `public.is_medewerker()` (via Cloudflare, hoogstens twaalf uur geleden) of
-`public.is_goedgekeurde_klant()`, als harde eis in elke regel voor ingelogde gebruikers. Schrijf
-hem als `(select public.is_medewerker())`: dan rekent Postgres hem één keer per vraag uit in
-plaats van per rij. Per geval:
+Een **poort** is `(select public.is_medewerker())` (via Cloudflare, hoogstens twaalf uur
+geleden) of `(select public.is_goedgekeurde_klant())`, als harde eis in elke regel voor
+ingelogde gebruikers. Verder:
 
-| Geval | Wat je schrijft |
-|---|---|
-| tabel voor medewerkers en klanten | `create policy "<tabel>_poort" on public.<tabel> as restrictive for all to authenticated using ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()));` De bestaande policies (bijvoorbeeld "alleen je eigen rijen") blijven gelden. Bij `restrictive for all` geldt de `using` ook bij schrijven |
-| medewerkers zien alle rijen | erbij: `create policy "<tabel>_medewerker" on public.<tabel> for select to authenticated using ((select public.is_medewerker()));` |
-| tabel alleen voor medewerkers | `create policy "<tabel>_poort" on public.<tabel> as restrictive for all to authenticated using ((select public.is_medewerker()));` (schermen: stap 5, tests: stap 6) |
-| bestanden (`storage.objects`) | dezelfde poort als de eerste regel, `on storage.objects` |
-| tabel in `open_tabellen` | `drop policy "<naam>" on public.<tabel>;` en opnieuw, met de poort in plaats van `true` |
-| `security definer`-functie | de poort in de functie zelf (`create or replace function`), of `revoke all on function public.<naam>() from public, anon, authenticated;`, of alleen als de bouwer zegt dat iemand zonder goedkeuring hem mag gebruiken: `"klantportaal_vrije_functies": { "<naam>": "<waarom>" }` |
-| view | `alter view public.<naam> set (security_invoker = true);` |
-| eigen rollenfunctie (`is_beheerder()`) | laat hem `public.is_medewerker()` aanroepen en zet hem in `"klantportaal_poorten": { "is_beheerder": "<waarom>" }` |
-| niet elke medewerker mag goedkeuren | `create policy "klanten_goedkeuren_beheer" on public.klanten as restrictive for update to authenticated using ((select public.is_beheerder()));` |
+1. Elke tabel in `public` heeft RLS aan en een policy, ook als niemand er rechten op heeft.
+2. **Elke functie**, ook de bestaande die de meldingen noemen: `revoke execute on function
+   public.<naam>(<argumenttypes>) from public, anon;` (Supabase geeft `anon` dat recht standaard).
+3. `security definer`: liefst `security invoker`, dan gelden de policies. Moet hij definer
+   blijven en mag elke ingelogde gebruiker hem gebruiken: de poort erin en met een reden in
+   `"klantportaal_vrije_functies"`, alleen als de bouwer het zegt. Anders `revoke all on function
+   ... from public, anon, authenticated`. Een view krijgt `security_invoker = true`.
+4. Wat een bezoeker zonder account mag, staat met een reden in `"klantportaal_openbaar"`: een
+   tabel of view (`"producten"`), functie (`"zoek_product"`) of openbare bucket (`"bucket:logo"`).
+   Standaard niets.
+5. Een eigen rollenfunctie (`is_beheerder()`) is een **eigen poort** in `"klantportaal_poorten"`,
+   in een vaste vorm: `language sql`, één uitdrukking `select public.is_medewerker() and ...`
+   (of `is_goedgekeurde_klant()`). Een policy uit `open_tabellen` krijgt de poort in plaats van `true`.
+6. Altijd rood: een eigen trigger op `auth.users`, `auth.identities`, `auth.sessions` of
+   `public.klanten`, en elke wijziging aan de basisfuncties of de tabel `klanten`.
 
-**Edge functions** (`supabase/functions/`) ziet de guard niet. Loop elke functie na die een
-geheim gebruikt op een waarde die de gebruiker zelf meestuurt, of die rijen van de gebruiker
-leest of schrijft. Zo'n functie vraagt eerst met het token van de aanroeper (`authorization`, de
-header `Authorization`, zie `supabase/functions/voorbeeld-met-geheim/`) of hij mag:
+Voorbeeld, met `"klantportaal_poorten": { "is_beheerder": "medewerker die klanten goedkeurt" }`:
+
+<!-- voorbeeld-poort -->
+```sql
+-- Medewerkers en klanten; de bestaande policies (eigen rijen) blijven gelden, ook bij schrijven.
+create policy "bestellingen_poort" on public.bestellingen as restrictive for all to authenticated
+  using ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()));
+-- Medewerkers zien alle rijen; beheerders is alleen voor medewerkers (stap 5 en 6).
+create policy "bestellingen_medewerker" on public.bestellingen for select to authenticated
+  using ((select public.is_medewerker()));
+create policy "beheerders_poort" on public.beheerders as restrictive for all to authenticated
+  using ((select public.is_medewerker()));
+create policy "bestanden_poort" on storage.objects as restrictive for all to authenticated
+  using ((select public.is_medewerker()) or (select public.is_goedgekeurde_klant()));
+alter view public.bestellingen_overzicht set (security_invoker = true);
+alter function public.omzet() security invoker;
+revoke execute on function public.omzet() from public, anon;
+create or replace function public.is_beheerder() returns boolean language sql stable
+security definer set search_path = '' as $$
+  select public.is_medewerker()
+     and exists (select 1 from public.beheerders b where b.user_id = auth.uid())
+$$;
+revoke execute on function public.is_beheerder() from public, anon;
+-- Niet elke medewerker mag klanten goedkeuren.
+create policy "klanten_goedkeuren_beheer" on public.klanten as restrictive for update
+  to authenticated using ((select public.is_beheerder()));
+```
+
+**Edge functions** (`supabase/functions/`) ziet geen controle. Een functie die rijen van de
+gebruiker leest of schrijft, of een geheim gebruikt op wat de gebruiker meestuurt, vraagt eerst
+met het token van de aanroeper (`authorization`, zie `supabase/functions/voorbeeld-met-geheim/`):
 
 ```ts
 // Klantportaal: alleen een medewerker of een goedgekeurde klant mag verder.
@@ -217,12 +229,9 @@ if (!(await poort("is_medewerker")) && !(await poort("is_goedgekeurde_klant"))) 
 }
 ```
 
-Alleen voor medewerkers: laat de tweede `poort(...)` weg. Een functie voor een machine
-(`welkApparaat`) heeft dit niet nodig.
+Alleen voor medewerkers: zonder de tweede `poort(...)`. Niet nodig bij `welkApparaat`.
 
-Niet te onderhandelen (`docs/WERKWIJZE.md`): geen recht aan een e-mailadres of domein
-(`auth.jwt() ->> 'email'`), `user_metadata` of een vaste `user_id`. Goed als: `pnpm guard:rls`
-en `pnpm check` groen.
+Goed als: `pnpm guard:rls` en `pnpm check` groen; de databasecontrole volgt na de push.
 
 ## Stap 5: De app zelf
 
@@ -269,18 +278,13 @@ testgebruiker, een klant; de schermen voor medewerkers zie je in de Cloudflare-p
 Met de schakelaar aan is elke testgebruiker van `maakActor` (dus ook A en B in
 `controleerAfscherming`) vanzelf een goedgekeurde klant; de bestaande A/B-tests blijven werken.
 
-1. Eigen hulpen die zelf gebruikers maken: `grep -rln "auth.admin.createUser\|signInWithPassword" tests/rls`.
-   Roep daar na het maken `await keurGoedAlsKlant({ id, email })` aan (uit `./lib/afscherming`),
-   behalve in de bestanden van de template (`lib/afscherming.ts`, `lib/sessies.ts`,
-   `klantportaal.test.ts`).
+1. Eigen hulpen die zelf gebruikers maken (`grep -rln "auth.admin.createUser\|signInWithPassword"
+   tests/rls`, buiten de bestanden van de template) roepen daarna `keurGoedAlsKlant({ id, email })` aan.
 2. Een tabel alleen voor medewerkers: laat `maakRijAlsA` de rij maken met `admin` (die gaat
    langs de regels heen); B, een klant, mag er dan niet bij.
 3. Per tabel waar klanten in schrijven: een account zonder goedkeuring
    (`await maakActor("vreemde", { goedgekeurd: false })`) krijgt bij `select` `[]` en bij
-   `insert` een fout. Ruim op met `verwijderActor`.
-
-Deze tests en de browsertest draaien in GitHub (lokaal alleen met Docker; voor de bouwer niet
-nodig).
+   `insert` een fout. Ruim op met `verwijderActor`. Deze tests draaien in GitHub.
 
 ## Stap 7: Vóór het mergen van pull request 2
 
@@ -299,19 +303,13 @@ having bool_or(i.provider not in ('custom:cloudflare', 'email'))
  order by u.email;
 ```
 
-Goed als: geen rijen. Staat er een medewerker in, merge dan niet. De owner bekijkt eerst die
-rijen (`select * from auth.identities where user_id = '<id>' and provider not in ('custom:cloudflare', 'email');`)
-en haalt ze dan met hetzelfde filter weg (`delete from ...`); het account en zijn gegevens
-blijven. Twijfelt hij, dan beslissen bouwer en owner samen en blijft de PR open.
+Goed als: geen rijen. Staat er een medewerker in, merge dan niet: de owner haalt die rijen uit
+`auth.identities` weg (eerst `select`, dan `delete` met hetzelfde filter); het account blijft.
 
-Zeg de bouwer in gewone taal wat er na de merge verandert: "Iedereen logt nog steeds in via
-Cloudflare. Wie al lang ingelogd was, ziet één keer 'Log opnieuw in als medewerker' en klikt op
-de knop; dat geldt daarna elke twaalf uur. Klanten kunnen pas erin als de owner de deur
-weghaalt."
-
-Klaar als `pnpm check` groen is, de PR op klaar staat, alle checks groen zijn (ook `Database en
-end-to-end`) en de bouwer hem heeft gemerged. Rood: `gh run view <run-id> --log-failed`, en
-repareer.
+Zeg de bouwer na de merge: "Iedereen logt nog steeds in via Cloudflare. Wie al lang ingelogd
+was, klikt één keer op 'Log opnieuw in als medewerker'; dat geldt daarna elke twaalf uur. Klanten
+kunnen pas erin als de owner de deur weghaalt." Klaar als de PR op klaar staat, alle checks groen
+zijn (ook `Database en end-to-end`; rood: `gh run view <id> --log-failed`) en de bouwer merget.
 
 ## Stap 8: De overdracht aan de owner
 
@@ -322,8 +320,10 @@ beheer-repo (`https://github.com/<org>/stagetwo-beheer-tier2#klantportaal`, of
 "Deur weghalen". App inrichten stopt als `stack.config.json` op `main` van de app geen
 `"klantportaal": true` heeft. Geef de bouwer mee voor de owner: versie 43 of later, deze route
 gevolgd en gemerged, een nieuw account ziet niets tot een medewerker het goedkeurt,
-medewerkerrechten alleen via Cloudflare, geen eigen hooks in Supabase Auth. `VITE_INLOGDIENST`
-en `VITE_TURNSTILE_SITEKEY` zet de inrichting, niet jij.
+medewerkerrechten alleen via Cloudflare, geen eigen hooks in Supabase Auth, en: een klant stoppen
+doe je met `goedgekeurd` uit. Blokkeren in Supabase neemt de rechten van de poorten meteen weg,
+maar een lopend token werkt nog tot een uur: blokkeren doe je samen met afmelden.
+`VITE_INLOGDIENST` en `VITE_TURNSTILE_SITEKEY` zet de inrichting, niet jij.
 
 ## Wat je niet doet
 
