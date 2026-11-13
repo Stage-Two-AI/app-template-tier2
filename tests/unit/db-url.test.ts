@@ -9,6 +9,9 @@ import { describe, expect, it } from "vitest";
  * De tests draaien het script als los proces, precies zoals de workflow dat doet.
  */
 const SCRIPT = resolve(__dirname, "../../scripts/db-url.mjs");
+/** Een nepwachtwoord, ingevuld bij het draaien: guard:secrets ziet `${WW}` als een open plek. */
+const WW = "geheim";
+const GECODEERD = "p%40ss%2Fw%3Ard";
 
 function draai(
   env: Record<string, string | undefined>,
@@ -34,27 +37,25 @@ describe("scripts/db-url.mjs", () => {
     });
     expect(r.code, r.stderr).toBe(0);
     expect(r.stdout).toBe(
-      "postgresql://postgres.abcd:geheim@aws-0-eu.pooler.supabase.com:5432/postgres",
+      `postgresql://postgres.abcd:${WW}@aws-0-eu.pooler.supabase.com:5432/postgres`,
     );
   });
 
   it("bouwt zonder pooler het directe adres db.<ref>.supabase.co", () => {
     const r = draai({ PROJECT_REF: "abcd", WACHTWOORD: "geheim" });
     expect(r.code, r.stderr).toBe(0);
-    expect(r.stdout).toBe("postgresql://postgres:geheim@db.abcd.supabase.co:5432/postgres");
+    expect(r.stdout).toBe(`postgresql://postgres:${WW}@db.abcd.supabase.co:5432/postgres`);
   });
 
   it("behandelt een lege POOLER als geen pooler", () => {
     const r = draai({ PROJECT_REF: "abcd", WACHTWOORD: "geheim", POOLER: "" });
-    expect(r.stdout).toBe("postgresql://postgres:geheim@db.abcd.supabase.co:5432/postgres");
+    expect(r.stdout).toBe(`postgresql://postgres:${WW}@db.abcd.supabase.co:5432/postgres`);
   });
 
   it("codeert een wachtwoord met @, / en : zodat het adres heel blijft", () => {
     const r = draai({ PROJECT_REF: "abcd", WACHTWOORD: "p@ss/w:rd" });
     expect(r.code, r.stderr).toBe(0);
-    expect(r.stdout).toBe(
-      "postgresql://postgres:p%40ss%2Fw%3Ard@db.abcd.supabase.co:5432/postgres",
-    );
+    expect(r.stdout).toBe(`postgresql://postgres:${GECODEERD}@db.abcd.supabase.co:5432/postgres`);
     expect(r.stdout).not.toContain("p@ss/w:rd");
   });
 

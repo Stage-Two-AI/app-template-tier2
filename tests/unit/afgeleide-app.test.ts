@@ -274,6 +274,15 @@ const STAPPEN: Array<[string, string, string[]]> = [
   ["guard:rls", "node", ["scripts/guard-rls.mjs"]],
   ["guard:rls-tests", "node", ["scripts/guard-rls-tests.mjs"]],
   ["guard:secrets", "node", ["scripts/guard-secrets.mjs"]],
+  // Zoals na de build: wat in public/ staat (de iconen van de app), staat dan ook in dist/.
+  [
+    "guard:secrets met public/ in dist/",
+    "sh",
+    [
+      "-c",
+      "rm -rf dist && cp -R public dist && node scripts/guard-secrets.mjs; s=$?; rm -rf dist; exit $s",
+    ],
+  ],
   ["guard:escapes", "node", ["scripts/guard-escape-hatches.mjs"]],
   ["guard:template", "node", ["scripts/guard-template.mjs"]],
   ["guard:cloudflare", "node", ["scripts/guard-cloudflare.mjs"]],
