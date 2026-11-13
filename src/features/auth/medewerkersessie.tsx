@@ -11,12 +11,13 @@ import { supabase } from "@/lib/supabase";
  *
  * Medewerkerrechten gelden twaalf uur na het inloggen via Cloudflare
  * (`sessie_via_cloudflare()` in supabase/migrations). Daarna is de medewerker nog ingelogd,
- * maar geeft de database hem niets meer: zonder uitleg ziet hij lege schermen. Gebruik op een
- * scherm voor medewerkers:
+ * maar geeft de database hem niets meer: zonder uitleg ziet hij lege schermen. Een scherm voor
+ * medewerkers zet je meestal in `<AlleenMedewerker session={session}>` uit
+ * `alleen-medewerker.tsx`; dat doet dit:
  *
  *   const stand = useMedewerkersessie(session);
  *   if (stand === "verlopen") return <OpnieuwAlsMedewerker />;
- *   if (stand !== "medewerker") return <GeenToegang />;
+ *   if (stand !== "medewerker") return <GeenToegang />; // ook uit alleen-medewerker.tsx
  *
  * Dit is alleen uitleg voor de gebruiker. De grens zelf is de database: een scherm dat dit
  * overslaat, krijgt nog steeds niets.
