@@ -24,6 +24,13 @@ on:
         description: Alleen Access op de Worker zetten (na de eerste uitrol)
         type: boolean
         default: false
+      deur_weghalen:
+        # Alleen voor een klantportaal, en alleen nadat een run zonder dit vinkje alles heeft
+        # klaargezet en het inloggen per mail achter de deur is getest. Zonder dit vinkje
+        # verandert geen enkele run iets aan de deur. Zie "Klantportaal" in beheer/README.md.
+        description: Deur weghalen (klantportaal live zetten)
+        type: boolean
+        default: false
 
 concurrency:
   # Nooit twee inrichtingen tegelijk.
@@ -76,6 +83,7 @@ jobs:
           DROOGLOOP: ${{ inputs.droogloop }}
           OPRUIMEN: ${{ inputs.opruimen }}
           TWEEDE_DOORGANG: ${{ inputs.tweede_doorgang }}
+          DEUR_WEGHALEN: ${{ inputs.deur_weghalen }}
         run: |
           # Het voorvoegsel is verplicht; cf-proef- is dat van de proef en de enige
           # waarmee het script op deze repo (GITHUB_REPOSITORY) mag terugvallen.
@@ -83,4 +91,5 @@ jobs:
           if [ "$DROOGLOOP" = "true" ]; then args+=(--droogloop); fi
           if [ "$OPRUIMEN" = "true" ]; then args+=(--opruimen); fi
           if [ "$TWEEDE_DOORGANG" = "true" ]; then args+=(--tweede-doorgang); fi
+          if [ "$DEUR_WEGHALEN" = "true" ]; then args+=(--deur-weghalen); fi
           node beheer/inrichten-cloudflare.mjs "${args[@]}"
