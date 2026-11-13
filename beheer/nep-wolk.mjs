@@ -49,9 +49,13 @@ export function nepWolk({
   ghVariabelen = {},
   ghSecrets = {},
   // Bestanden op de standaardtak van de app-repo, voor `gh api repos/<repo>/contents/<pad>`.
-  ghBestanden = {},
+  // Standaard een app op versie 43: env.ts leest de lijst van inlogdiensten (alleen de
+  // inrichting van een klantportaal kijkt daarnaar).
+  ghBestanden = { "src/lib/env.ts": "leesInlogdiensten(waarden.VITE_INLOGDIENST)" },
   faal = () => null,
   poolerFout = null,
+  // Turnstile: de geheimen die siteverify kent; null = elk geheim klopt.
+  turnstileGeheimen = null,
   // Sentry: teams en projecten ({ slug, id, keys? }) van organisatie "klant"; met
   // aankomst false komt een proefmelding nooit aan.
   sentry = {},
@@ -258,7 +262,9 @@ export function nepWolk({
         staat.sqlOp.push({ ref: m[1], query: body.query });
         // De vraag naar de Cloudflare-inlogs (klantportaal): de rijen uit auth.identities
         // van dit project. De identiteiten staan in de nep-wolk op de gebruiker zelf.
-        if (/from auth\.identities where provider = 'custom:cloudflare'/.test(body.query)) {
+        if (
+          /^select .*from auth\.identities where provider = 'custom:cloudflare'/.test(body.query)
+        ) {
           if (staat.identiteitenAntwoord !== undefined) {
             return antwoord(201, staat.identiteitenAntwoord);
           }
@@ -273,6 +279,21 @@ export function nepWolk({
                   email: String(i.identity_data?.email ?? "").toLowerCase(),
                 })),
             ),
+          );
+        }
+        // Het sluiten van een klantportaal: elk account zonder Cloudflare-inlog krijgt het
+        // klantkenmerk in app_metadata; het antwoord is één rij per account.
+        if (/^update auth\.users set raw_app_meta_data/.test(body.query)) {
+          const lijst = staat.gebruikersOp[`https://${m[1]}.supabase.co`] ?? staat.gebruikers;
+          const klanten = lijst.filter(
+            (g) => !(g.identities ?? []).some((i) => i.provider === "custom:cloudflare"),
+          );
+          for (const g of klanten) {
+            g.app_metadata = { ...g.app_metadata, klantportaal_klant: true };
+          }
+          return antwoord(
+            201,
+            klanten.map((g) => ({ id: g.id })),
           );
         }
         return antwoord(201, []);
@@ -316,6 +337,13 @@ export function nepWolk({
       staat.sentry.ontvangen.push(id);
       if (staat.sentry.aankomst) staat.sentry.aangekomen.add(id);
       return antwoord(200, { id });
+    }
+    if (pad === "challenges.cloudflare.com/turnstile/v0/siteverify" && methode === "POST") {
+      const kent = turnstileGeheimen === null || turnstileGeheimen.includes(body?.secret);
+      return antwoord(200, {
+        success: false,
+        "error-codes": [kent ? "invalid-input-response" : "invalid-input-secret"],
+      });
     }
     return antwoord(404, { message: `onbekende host ${u.host}` });
   }
@@ -413,7 +441,10 @@ export function nepWolk({
   function schrijfacties() {
     return aanroepen
       .filter((a) => {
-        if (a.soort === "fetch") return a.methode !== "GET";
+        // De toets van het Turnstile-geheim is een POST, maar wijzigt niets,
+        // en een leesvraag aan de database (een select) evenmin.
+        if (a.soort === "fetch" && /^select /i.test(a.body?.query ?? "")) return false;
+        if (a.soort === "fetch") return a.methode !== "GET" && !a.pad.includes("/siteverify");
         if (a.soort === "admin") return !["listProviders", "listUsers"].includes(a.methode);
         return !a.args.includes("list") && a.args[0] !== "api";
       })

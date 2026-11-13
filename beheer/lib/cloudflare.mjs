@@ -313,6 +313,19 @@ export function zelfdeAdressen(app, gewenst) {
   );
 }
 
+/**
+ * Hetzelfde als zelfdeAdressen, met een derde uitkomst: "onbekend" als Cloudflare een
+ * bestemming teruggeeft zonder adres (`uri`). Zo beschrijft de API de nieuwe bestemmingen voor
+ * Workers (een `worker_id` in plaats van een adres). Dan is niet te zien welke Worker de app
+ * bewaakt, en mag de inrichting hem niet "herstellen": dat zou elke run een goede app
+ * overschrijven. Geeft "zelfde", "anders" of "onbekend".
+ */
+export function adresStand(app, gewenst) {
+  const zonderAdres = (app?.destinations ?? []).some((d) => typeof d?.uri !== "string" || !d.uri);
+  if (zonderAdres) return "onbekend";
+  return zelfdeAdressen(app, gewenst) ? "zelfde" : "anders";
+}
+
 /** De body voor een bestaande app met de gewenste policies én inlogmethoden. */
 export function metGewenst(app, policyIds, idps) {
   return { ...metPolicies(app, policyIds), ...inlogmethoden(idps) };

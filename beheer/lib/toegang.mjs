@@ -8,7 +8,7 @@
  *                                  "gegevens_naar_test": false } }
  *                  of { "<app>": { "groepen": ["<groep>", ...], "klantportaal": true,
  *                                  "afzender": "Naam <adres>",
- *                                  "turnstile_sitekey": "0x4AAA..." } },
+ *                                  "turnstile_sitekey": "0x4AAA...", "eigen_hooks": true } },
  *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
  *
@@ -64,9 +64,16 @@ const APP_VELDEN = [
   "afzender",
   "captcha",
   "turnstile_sitekey",
+  "eigen_hooks",
 ];
 /** De openbare sleutel van een Turnstile-widget (begint bij Cloudflare met 0x4). */
 const SITEKEY = /^[A-Za-z0-9_-]{10,100}$/;
+/**
+ * De openbare sleutel van Turnstile is rond de 24 tekens, de geheime rond de 35, en ze beginnen
+ * hetzelfde. Wat langer is dan dit, is de geheime: die hoort nooit in toegang.json (dat staat in
+ * git, en de waarde komt als openbare variabele in de bundel van de app).
+ */
+export const SITEKEY_MAX = 30;
 /**
  * De afzender van de inlogmail: een adres, of "Naam <adres>". De naam komt in het onderwerp
  * en in de tekst van de mail; daarom alleen letters, cijfers, spaties en . & ' ( ) -, zodat
@@ -129,6 +136,15 @@ export function captchaVanApp(t, app) {
 /** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
 export function sitekeyVanApp(t, app) {
   return captchaVanApp(t, app) ? (t.apps[app].turnstile_sitekey ?? null) : null;
+}
+
+/**
+ * Heeft de bouwer uitdrukkelijk gezegd dat de app eigen hooks heeft die de weigeringen van het
+ * klantportaal overnemen (`"eigen_hooks": true`)? Dan laat de inrichting een andere aanmeld- of
+ * token-hook staan in plaats van te stoppen.
+ */
+export function eigenHooksVanApp(t, app) {
+  return isKlantportaal(t, app) && t.apps[app].eigen_hooks === true;
 }
 
 /** Kopieert Testdatabase verversen gegevens en bestanden voor deze app? Standaard ja. */
@@ -247,6 +263,13 @@ export function valideerToegang(t) {
         fouten.push(
           `app "${app}": turnstile_sitekey is de openbare sleutel van de Turnstile-widget (letters, cijfers, - en _), niet de geheime`,
         );
+      } else if ((waarde.turnstile_sitekey ?? "").length > SITEKEY_MAX) {
+        fouten.push(
+          `app "${app}": turnstile_sitekey heeft de lengte van de GEHEIME sleutel van Turnstile (meer dan ${SITEKEY_MAX} tekens). Hier hoort de openbare (Site Key). Staat de geheime nu in git, maak dan in Cloudflare een nieuwe (Turnstile, de widget, Rotate secret) en zet die alleen als secret TURNSTILE_GEHEIM`,
+        );
+      }
+      if (waarde.eigen_hooks !== undefined && typeof waarde.eigen_hooks !== "boolean") {
+        fouten.push(`app "${app}": eigen_hooks is true of false`);
       }
       if (waarde.klantportaal === true) {
         // De captcha staat standaard aan; uitzetten kan alleen uitdrukkelijk.
@@ -271,7 +294,7 @@ export function valideerToegang(t) {
           );
         }
       } else {
-        for (const veld of ["afzender", "captcha", "turnstile_sitekey"]) {
+        for (const veld of ["afzender", "captcha", "turnstile_sitekey", "eigen_hooks"]) {
           if (waarde[veld] !== undefined) {
             fouten.push(
               `app "${app}": ${veld} hoort bij een klantportaal; zet "klantportaal": true erbij of haal ${veld} weg`,
@@ -521,7 +544,7 @@ export function magAanmelden(email, toegang, app) {
  * klant heeft in geen van de drie een Cloudflare-inlog, want die krijg je alleen door de
  * Access-policy van de inlogdienst.
  */
-function heeftCloudflareInlog(g, cloudflare) {
+export function heeftCloudflareInlog(g, cloudflare) {
   if (cloudflare?.has(g.id)) return true;
   const meta = g.app_metadata ?? {};
   if (meta.provider === PROVIDER_CLOUDFLARE) return true;
@@ -530,12 +553,71 @@ function heeftCloudflareInlog(g, cloudflare) {
 }
 
 /** Kan dit account ook per mail inloggen (een e-mailinlog naast die van Cloudflare)? */
-function heeftMailInlog(g) {
+export function heeftMailInlog(g) {
   const meta = g.app_metadata ?? {};
   if (meta.provider === "email") return true;
   if (Array.isArray(meta.providers) && meta.providers.includes("email")) return true;
   return (g.identities ?? []).some((i) => i?.provider === "email");
 }
+
+/**
+ * Het kenmerk dat App inrichten bij het sluiten van een klantportaal op elk klantaccount zet
+ * (in `app_metadata`, waar een gebruiker zelf niet bij kan). Toegang bijwerken ziet het in de
+ * gebruikerslijst die hij toch al leest, en bant zo'n account nooit: een portaal sluiten is
+ * geen reden om honderden klanten te bannen. Een app die nooit klantportaal was, heeft geen
+ * enkel account met dit kenmerk en gedraagt zich dus precies als altijd.
+ */
+export const KLANT_KENMERK = "klantportaal_klant";
+
+/** Een klant van een gesloten klantportaal: het kenmerk, en geen inlog via Cloudflare. */
+export function isOudKlant(g) {
+  return g?.app_metadata?.[KLANT_KENMERK] === true && !heeftCloudflareInlog(g, null);
+}
+
+/** Lijkt dit account een klant: wel een inlog per mail, geen inlog via Cloudflare? */
+export function lijktKlant(g) {
+  return heeftMailInlog(g) && !heeftCloudflareInlog(g, null);
+}
+
+const ZONDER_CLOUDFLARE = `not in (select user_id from auth.identities where provider = '${PROVIDER_CLOUDFLARE}')`;
+
+/**
+ * Bij het sluiten van een klantportaal (terug naar een gewone app): elk account zonder inlog
+ * via Cloudflare krijgt het klantkenmerk (één rij per account in het antwoord) en wordt
+ * afgemeld. Geen ban. Twee losse vragen, allebei veilig te herhalen.
+ */
+export const KLANTEN_MARKEREN_SQL = `update auth.users set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"${KLANT_KENMERK}": true}'::jsonb where id ${ZONDER_CLOUDFLARE} returning id::text as id;`;
+export const KLANTEN_AFMELDEN_SQL = `delete from auth.sessions where user_id ${ZONDER_CLOUDFLARE};`;
+
+/** Een adres voor in een melding: de eerste letter en het domein (`p***@klant.nl`). */
+export function maskeerAdres(adres) {
+  const [naam, domein] = String(adres ?? "")
+    .toLowerCase()
+    .split("@");
+  return naam && domein ? `${naam[0]}***@${domein}` : "***";
+}
+
+/**
+ * Klantaccounts (geen inlog via Cloudflare) op een adres dat volgens toegang.json van een
+ * medewerker is. Dat gebeurt als een klant medewerker wordt, of als een medewerker het klantvak
+ * gebruikte vóór de aanmeld-hook er was. Zo'n account blokkeert de inlog via Cloudflare van
+ * die persoon blijvend: Supabase maakt dan een tweede account zonder adres, dat niet te
+ * bevestigen is. De inrichting ruimt niets op; ze meldt het, met het adres gemaskeerd en de id
+ * erbij zodat de owner het account in Supabase kan vinden.
+ */
+export function klantenOpMedewerkeradres(gebruikers, cloudflare, toegang, app) {
+  return gebruikers
+    .filter(
+      (g) =>
+        g.email &&
+        !heeftCloudflareInlog(g, cloudflare) &&
+        magAanmelden(g.email, toegang, app) === "ja",
+    )
+    .map((g) => `${maskeerAdres(g.email)} (id ${g.id})`);
+}
+
+export const KLANT_OP_MEDEWERKERADRES =
+  "Dit adres hoort volgens toegang.json bij een medewerker, maar het account is een klantaccount (per mail gemaakt, zonder inlog via Cloudflare). Zolang het bestaat kan deze persoon niet als medewerker inloggen. Er is niets gewijzigd. Wat de owner doet: overleg met de persoon, verwijder het account in Supabase (Authentication, Users; zoek op de id) en laat hem daarna inloggen via Inloggen voor medewerkers. Wat aan het klantaccount hing, moet de eigenaar van de app zo nodig eerst overzetten";
 
 /**
  * De adressen waarop een account met een Cloudflare-inlog beoordeeld wordt: het adres
@@ -587,6 +669,9 @@ function strengsteOordeel(oordelen) {
  * alleen de Cloudflare-kant dichtgaan, dan hield een vertrokken medewerker een werkend
  * account over, en hing alles af van de regels in elke app. Een account met een
  * Cloudflare-inlog zonder enig adres staat in `onbekend`, als `id:<gebruikers-id>`.
+ * Bij een gewone app (geen klantportaal, niet de testdatabase) blijft alleen een account met
+ * het klantkenmerk van een gesloten portaal buiten schot (isOudKlant); `klanten` staat dan
+ * alleen in het resultaat als er zo'n account is.
  * `zonderAdres` noemt de accounts met een Cloudflare-inlog die zelf geen adres hebben;
  * `ookPerMail` de ingetrokken accounts die daarnaast per mail konden inloggen.
  */
@@ -634,6 +719,11 @@ export async function trekIn({
         : "onbekend";
     } else {
       if (!g.email) continue;
+      // Een klant van een gesloten klantportaal (zie KLANT_KENMERK): nooit geband.
+      if (!test.size && isOudKlant(g)) {
+        uit.klanten = (uit.klanten ?? 0) + 1;
+        continue;
+      }
       oordeel = test.has(String(g.email).toLowerCase())
         ? "ja"
         : magAanmelden(g.email, toegang, app);
@@ -838,6 +928,13 @@ export const MELDING_GEEN_WACHTWOORD =
  * daarvoor waarschuwt de inrichting.
  *
  * Toegang bijwerken schrijft de functie bij elke run opnieuw, zodat hij de groepen volgt.
+ *
+ * De rechten volgen de documentatie van Supabase voor een hook in Postgres: de rol van Supabase
+ * Auth krijgt `usage` op het schema en `execute` op de functie, en niemand anders mag hem
+ * aanroepen. Die `usage` staat er uitdrukkelijk: een app die het schema public heeft
+ * dichtgezet (`revoke usage on schema public from public`) zou Supabase Auth anders de hook
+ * niet laten aanroepen, en dan komt niemand meer binnen. De functies lezen geen tabellen, dus
+ * verdere rechten zijn niet nodig.
  */
 export function portaalAanmeldHookSql(toegang, app, functie) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
@@ -873,6 +970,7 @@ begin
 end;
 $hook$;
 
+grant usage on schema public to supabase_auth_admin;
 grant execute on function ${naam}(jsonb) to supabase_auth_admin;
 revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
 `;
@@ -902,8 +1000,9 @@ export function groepenZonderAdressen(t, app) {
  * wachtwoord. Gebruikt de klant daarna de mail die daarvan komt, dan was het wachtwoord van de
  * ander geldig. Met deze hook is een wachtwoord nooit genoeg voor een sessie.
  *
- * Een project heeft maar één zo'n hook. Heeft de app er zelf een nodig (extra claims), dan
- * moet die deze weigering overnemen; de inrichting zet bij elke run deze functie terug.
+ * Een project heeft maar één zo'n hook. Heeft de app er zelf een (extra claims), dan stopt de
+ * inrichting vóór de eerste wijziging: de bouwer neemt deze weigering over in de eigen hook en
+ * zet `"eigen_hooks": true` in toegang.json, of haalt de eigen hook weg. Nooit stil vervangen.
  */
 export function portaalTokenHookSql(functie) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
@@ -931,6 +1030,7 @@ begin
 end;
 $hook$;
 
+grant usage on schema public to supabase_auth_admin;
 grant execute on function ${naam}(jsonb) to supabase_auth_admin;
 revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
 `;

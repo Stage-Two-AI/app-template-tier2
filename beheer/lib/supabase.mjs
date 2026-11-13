@@ -117,9 +117,14 @@ export const BURST = 30;
  *   rate_limit_verify      aanvullen per vijf minuten per IP-adres voor het inwisselen van
  *                          een code of link, ook met een voorraad van 30. 5: in het kwartier
  *                          dat een code geldt zijn dat 30 + 3 x 5 = 45 gokken per IP-adres,
- *                          op honderd miljoen mogelijkheden (acht cijfers). Met honderd
- *                          IP-adressen een hele dag lang is de kans op één goede gok
- *                          ongeveer een half procent; met zes cijfers was dat ruim een derde.
+ *                          op honderd miljoen mogelijkheden (acht cijfers). Over een hele
+ *                          dag is het 30 + 288 x 5 = 1470 gokken per IP-adres (GOKKEN_PER_DAG).
+ *                          Met honderd IP-adressen is de kans op één goede gok dan ongeveer
+ *                          0,15 procent per dag; met zes cijfers was dat ruim 13 procent.
+ *                          Aanname: de teller telt per letterlijk adres. Eén aansluiting
+ *                          met IPv6 heeft er miljarden; telt het platform van Supabase die
+ *                          niet samen, dan is deze grens voor zo'n aanvaller veel zwakker.
+ *                          Vraag dat bij Supabase na vóór een klant live gaat (README).
  *
  * De tellers per IP-adres houden dus één mens tegen, geen aanvaller die de mailgrens wil
  * opmaken. Daarvoor is de captcha, die bij een klantportaal standaard aan staat: Supabase Auth
@@ -145,6 +150,9 @@ export const REM = {
  * Supabase biedt dit alleen op het Pro-plan en hoger. Daarom gaat het in een eigen aanroep,
  * na de rest: weigert Supabase hem, dan is de rest al gezet en meldt de inrichting het.
  */
+/** Hoeveel codes één IP-adres in een dag kan proberen: de voorraad, plus de aanvulling. */
+export const GOKKEN_PER_DAG = BURST + ((24 * 60) / 5) * REM.rate_limit_verify;
+
 export const SESSIE = { sessions_inactivity_timeout: 30 * 24 };
 
 function htmlTekst(tekst) {
@@ -201,19 +209,130 @@ export function inlogmail(naam) {
 }
 
 /**
+ * De mails die bij een klantportaal NIET bruikbaar mogen zijn. Supabase Auth verstuurt ze
+ * buiten de twee hooks om, en de standaardsjablonen bevatten een link die bij openen al
+ * bevestigt (`{{ .ConfirmationURL }}`) of een code:
+ *
+ *   email_change      een ingelogde gebruiker vraagt een ander adres aan (PUT /user). De mail
+ *                     gaat naar een adres dat hij zelf kiest. Met het standaardsjabloon zou een
+ *                     klant zijn account op het adres van een ander kunnen zetten zodra die
+ *                     ander (of de linkscanner van zijn mailserver) de link opent. Hier staat
+ *                     geen link en geen code in: een adreswijziging is zo niet te bevestigen.
+ *                     Adres wijzigen loopt bij een klantportaal via de eigenaar van de app.
+ *   reauthentication  de controlecode voor het wijzigen van een wachtwoord. Wachtwoorden
+ *                     bestaan hier niet; de mail zegt dat en bevat geen code.
+ *   invite            een uitnodiging uit het dashboard van Supabase. Geen link die inlogt;
+ *                     de mail verwijst naar de inlogpagina, waar de genodigde een code aanvraagt.
+ *
+ * In deze teksten staat geen enkele sjabloonopdracht behalve `{{ .SiteURL }}`: een sjabloon dat
+ * niet te lezen is, vervangt Supabase Auth stil door het standaardsjabloon (met de link).
+ * De tekst van `reauthentication` is voor elk klantportaal dezelfde; daaraan herkent de
+ * inrichting later een project dat klantportaal is (geweest), zie wasKlantportaal.
+ */
+export const GEEN_CONTROLECODE = {
+  onderwerp: "Een controlecode is hier niet nodig",
+  inhoud:
+    "<p>Er is om een controlecode gevraagd. Die is hier niet nodig: je logt in met een inlogcode per mail, zonder wachtwoord.</p>\n<p>Heb je dit niet zelf gedaan? Dan hoef je niets te doen.</p>",
+};
+
+export function neutraleMails(naam) {
+  if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
+  const n = htmlTekst(naam);
+  return {
+    mailer_subjects_email_change: `Je adres bij ${naam} wijzigen`,
+    mailer_templates_email_change_content: `<p>Er is gevraagd om het e-mailadres van een account bij ${n} te wijzigen. Dat kan niet zelf: er is niets gewijzigd.</p>\n<p>Wil je een ander adres gebruiken, neem dan contact op met ${n}. Heb je dit niet zelf gevraagd? Dan hoef je niets te doen.</p>`,
+    mailer_subjects_reauthentication: GEEN_CONTROLECODE.onderwerp,
+    mailer_templates_reauthentication_content: GEEN_CONTROLECODE.inhoud,
+    mailer_subjects_invite: `Je kunt inloggen bij ${naam}`,
+    mailer_templates_invite_content: `<p>Je bent toegevoegd bij ${n}.</p>\n<p>Ga naar {{ .SiteURL }}/login, vul dit e-mailadres in en vraag een inlogcode aan.</p>`,
+  };
+}
+
+/**
+ * Is dit project klantportaal (geweest)? Te zien aan iets wat alleen de inrichting van een
+ * klantportaal zet: een van de twee hooks, of de mail zonder controlecode. Een gewone app die
+ * dat nooit was heeft geen van beide, ook niet als iemand met de hand inloggen per mail aanzette.
+ */
+export function wasKlantportaal(auth, functies) {
+  const hooks = [auth?.hook_custom_access_token_uri, auth?.hook_before_user_created_uri];
+  return (
+    auth?.mailer_templates_reauthentication_content === GEEN_CONTROLECODE.inhoud ||
+    hooks.some(
+      (uri) =>
+        typeof uri === "string" &&
+        (uri.endsWith(`/${functies.token}`) || uri.endsWith(`/${functies.aanmelden}`)),
+    )
+  );
+}
+
+/**
+ * Een hook-adres voor in een melding: alleen het schema en de host, want in het pad of de
+ * query van een HTTP-hook kan een sleutel staan. Van een functie in Postgres ook de naam; dat
+ * is een naam, geen geheim.
+ */
+export function veiligHookAdres(uri) {
+  const m = String(uri ?? "").match(/^([a-z][a-z0-9+.-]*):\/\/([^/?#@]*@)?([^/?#:]+)/i);
+  if (!m) return "(adres niet te lezen)";
+  const [, schema, , host] = m;
+  if (schema.toLowerCase() === "pg-functions") {
+    const functie = String(uri).match(/^pg-functions:\/\/[^/]+\/([a-z0-9_]+\/[a-z0-9_]+)$/i);
+    return functie ? `pg-functions://${host}/${functie[1]}` : `pg-functions://${host}`;
+  }
+  return `${schema.toLowerCase()}://${host.toLowerCase()} (de rest van het adres is niet getoond)`;
+}
+
+/**
+ * Welke hooks staan er vóór de run in het project die niet van het klantportaal zijn? Geeft
+ * `{ aanmelden?, token?, mail? }` met per hook het veilige adres.
+ */
+export function andereHooks(auth, functies) {
+  const uit = {};
+  const ander = (aan, uri, eigen) =>
+    aan === true && typeof uri === "string" && uri && !uri.endsWith(`/${eigen}`);
+  if (
+    ander(
+      auth?.hook_before_user_created_enabled,
+      auth?.hook_before_user_created_uri,
+      functies.aanmelden,
+    )
+  )
+    uit.aanmelden = veiligHookAdres(auth.hook_before_user_created_uri);
+  if (
+    ander(
+      auth?.hook_custom_access_token_enabled,
+      auth?.hook_custom_access_token_uri,
+      functies.token,
+    )
+  )
+    uit.token = veiligHookAdres(auth.hook_custom_access_token_uri);
+  if (auth?.hook_send_email_enabled === true) uit.mail = veiligHookAdres(auth.hook_send_email_uri);
+  return uit;
+}
+
+/**
  * De twee hooks van een klantportaal in productie (zie portaalAanmeldHookSql en
  * portaalTokenHookSql in toegang.mjs). Schrijf de functies altijd eerst: een hook die naar een
  * functie wijst die niet bestaat, laat elke inlog mislukken.
  */
-export function portaalHookInstellingen(functies) {
+export function portaalHookInstellingen(functies, eigen = {}) {
   for (const f of [functies?.aanmelden, functies?.token]) {
     if (!/^[a-z_][a-z0-9_]{0,62}$/.test(f ?? "")) throw new Error("de hookfuncties ontbreken");
   }
+  // `eigen`: de app heeft daar een eigen hook die de weigering overneemt ("eigen_hooks": true
+  // in toegang.json); die blijft dan staan.
   return {
-    hook_before_user_created_enabled: true,
-    hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
-    hook_custom_access_token_enabled: true,
-    hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
+    ...(eigen.aanmelden
+      ? {}
+      : {
+          hook_before_user_created_enabled: true,
+          hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
+        }),
+    ...(eigen.token
+      ? {}
+      : {
+          hook_custom_access_token_enabled: true,
+          hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
+        }),
   };
 }
 
@@ -244,13 +363,20 @@ export function portaalHookInstellingen(functies) {
  * een onbevestigd adres toch kan inloggen. `disable_signup` blijft onaangeroerd.
  *
  * De captcha staat standaard aan (`captcha` is alleen uit met een uitdrukkelijke false). Met
- * CAPTCHA_LATER blijven de captcha-instellingen zoals ze zijn: de inrichting zet de captcha
- * pas aan als de app in productie de widget al toont, anders kan geen klant nog een code
- * aanvragen. Het geheim moet er dan wel al zijn.
+ * CAPTCHA_LATER blijven de captcha-instellingen zoals ze zijn: op een portaal dat al live is
+ * verandert alleen een run met het vinkje "Deur weghalen" iets aan de captcha, anders sluit een
+ * nieuwe sleutel klanten buiten tot de app ermee is uitgerold. Het geheim moet er dan wel al zijn.
+ *
+ * `eigenHooks` (`{ aanmelden?, token? }`): die hook is van de app zelf en blijft staan.
+ *
+ * Adres wijzigen, de controlecode en de uitnodiging krijgen een mail zonder link en zonder
+ * code (neutraleMails), en `mailer_secure_email_change_enabled` staat aan: mocht iemand een
+ * code van acht cijfers willen raden om een adreswijziging toch te bevestigen, dan moet hij er
+ * twee raden (die voor het oude en die voor het nieuwe adres).
  * `smtpWachtwoord` en `captchaGeheim` zijn geheimen. Ze staan alleen in de body van de PATCH
  * en nooit in een melding of in het resultaat.
  */
-/** De captcha moet aan, maar nog niet in deze run (zie klantportaalInstellingen). */
+/** De captcha-instellingen blijven in deze run zoals ze zijn (zie klantportaalInstellingen). */
 export const CAPTCHA_LATER = "later";
 
 export function klantportaalInstellingen({
@@ -259,6 +385,7 @@ export function klantportaalInstellingen({
   captcha = true,
   captchaGeheim,
   hooks,
+  eigenHooks = {},
 }) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
@@ -273,7 +400,7 @@ export function klantportaalInstellingen({
     // medewerker zijn Cloudflare-inlog loskoppelen, als "klant" verder gaan met dezelfde
     // sessie, en bij zijn vertrek aan Toegang bijwerken ontsnappen.
     security_manual_linking_enabled: false,
-    ...portaalHookInstellingen(hooks),
+    ...portaalHookInstellingen(hooks, eigenHooks),
     smtp_host: SMTP_HOST,
     smtp_port: SMTP_POORT,
     smtp_user: SMTP_GEBRUIKER,
@@ -290,6 +417,9 @@ export function klantportaalInstellingen({
     mailer_templates_magic_link_content: mail.inhoud,
     mailer_subjects_recovery: mail.onderwerp,
     mailer_templates_recovery_content: mail.inhoud,
+    // Alles wat Supabase Auth verder kan mailen: zonder link en zonder code.
+    ...neutraleMails(afzender.naam),
+    mailer_secure_email_change_enabled: true,
     ...REM,
     ...(captcha === CAPTCHA_LATER
       ? {}
@@ -336,6 +466,34 @@ export function organisaties(orgSlug) {
     .split(",")
     .map((o) => o.trim())
     .filter(Boolean);
+}
+
+/** De velden van de auth-config waar een geheim in staat. */
+const GEHEIME_VELDEN = ["smtp_pass", "security_captcha_secret"];
+
+export const TURNSTILE_SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+/**
+ * Klopt het geheim van de Turnstile-widget? Eén aanroep naar siteverify met een verzonnen
+ * bewijs: een onbekend geheim geeft `invalid-input-secret`, een goed geheim klaagt alleen over
+ * het bewijs. Geeft null als het klopt, anders de reden. Het geheim staat alleen in de body.
+ */
+export async function toetsTurnstileGeheim(fetchFn, geheim) {
+  let data;
+  try {
+    const antwoord = await fetchFn(TURNSTILE_SITEVERIFY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret: geheim, response: "toets-van-de-inrichting" }),
+    });
+    data = JSON.parse(await antwoord.text());
+  } catch {
+    return "Turnstile was niet te bereiken, dus het geheim is niet getoetst. Probeer het later opnieuw";
+  }
+  const codes = Array.isArray(data?.["error-codes"]) ? data["error-codes"] : [];
+  if (codes.includes("invalid-input-secret") || codes.includes("missing-input-secret"))
+    return "Turnstile kent dit geheim niet. Kopieer de Secret Key van de widget opnieuw (Cloudflare, Turnstile, de widget, Settings) en zet hem als secret TURNSTILE_GEHEIM";
+  return null;
 }
 
 export function supabaseBeheer({ fetchFn = fetch, token, orgSlug, slaap = wacht }) {
@@ -402,8 +560,26 @@ export function supabaseBeheer({ fetchFn = fetch, token, orgSlug, slaap = wacht 
     zetDatabaseWachtwoord: (ref, wachtwoord) =>
       s(`/projects/${ref}/database/password`, { methode: "PATCH", body: { password: wachtwoord } }),
     authConfig: (ref) => s(`/projects/${ref}/config/auth`),
-    werkAuthBij: (ref, velden) =>
-      s(`/projects/${ref}/config/auth`, { methode: "PATCH", body: velden }),
+    /**
+     * Zit er een geheim in de wijziging (het SMTP-wachtwoord, het geheim van de captcha), dan
+     * komt de foutmelding van Supabase niet in de fout: die kan een stuk van de waarde
+     * terugkaatsen, en een afgekapt geheim herkent geen maskering. Alleen de status en de
+     * namen van de velden die Supabase noemt.
+     */
+    async werkAuthBij(ref, velden) {
+      const pad = `/projects/${ref}/config/auth`;
+      try {
+        return await s(pad, { methode: "PATCH", body: velden });
+      } catch (fout) {
+        if (!GEHEIME_VELDEN.some((v) => Object.hasOwn(velden, v))) throw fout;
+        const genoemd = Object.keys(velden).filter((v) => String(fout.message).includes(v));
+        const veilig = new Error(
+          `PATCH /v1${pad} gaf ${fout.status ?? "een fout"}. De melding van Supabase is niet getoond, omdat er een geheim in kan staan${genoemd.length ? `; ze noemt: ${genoemd.join(", ")}` : ""}. Kijk in het dashboard van Supabase (Authentication) of de instellingen kloppen`,
+        );
+        veilig.status = fout.status;
+        throw veilig;
+      }
+    },
     voerSqlUit: (ref, query) =>
       s(`/projects/${ref}/database/query`, { methode: "POST", body: { query } }),
     verwijderProject: (ref) => s(`/projects/${ref}`, { methode: "DELETE" }),

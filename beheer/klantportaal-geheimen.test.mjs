@@ -6,7 +6,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { richtIn, uitvoerRegel, werkToegangBij } from "./inrichten-cloudflare.mjs";
-import { ARG, auth, DEUR, opzet, PORTAAL, SMTP, TURNSTILE } from "./klantportaal-opzet.mjs";
+import {
+  ARG,
+  auth,
+  DEUR,
+  GROEPEN,
+  opzet,
+  PORTAAL,
+  PORTAAL_APP,
+  SITEKEY,
+  SMTP,
+  TURNSTILE,
+} from "./klantportaal-opzet.mjs";
+import { SITEKEY_MAX, valideerToegang } from "./lib/toegang.mjs";
 import { vraag } from "./lib/vraag.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
@@ -39,7 +51,7 @@ test("geheimen: kaatst Supabase de body terug in een fout die geen JSON is, dan 
       (f) => f,
     );
     assert.ok(fout, "de run stopt");
-    assert.match(fout.message, /config\/auth gaf 400: Bad Request; het antwoord was geen JSON/);
+    assert.match(fout.message, /config\/auth gaf 400\. De melding van Supabase is niet getoond/);
     const regel = uitvoerRegel({ status: "mislukt", reden: fout.message }, d.geheimen);
     for (const geheim of [SMTP, TURNSTILE]) {
       for (let lengte = 6; lengte <= geheim.length; lengte += 1) {
@@ -68,25 +80,44 @@ test("geheimen: een antwoord dat geen JSON is komt nooit in een melding, alleen 
   );
 });
 
-test("geheimen: kaatst Supabase het SMTP-wachtwoord of het Turnstile-geheim terug in een gewone (JSON) foutmelding, dan maskeert de uitvoerregel ze", async () => {
+test("geheimen: kaatst Supabase een geheim (of een afgekapt stuk ervan) terug in een gewone JSON-foutmelding, dan komt die melding niet in de fout: alleen de status en de genoemde velden", async () => {
   const basis = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(basis, DEUR));
-  // De tweede run van de overgang: daarin gaat ook het Turnstile-geheim naar Supabase.
-  await richtIn(ARG, opzet(basis, PORTAAL));
-  // De echte API geeft een geheim nooit leesbaar terug; de run stuurt het dus opnieuw.
-  auth(basis).smtp_pass = "<verborgen>";
-  const w = metAuthFout(basis, (body) => JSON.stringify({ message: `ongeldig: ${body}` }));
-  const d = opzet(w, PORTAAL);
-  const fout = await richtIn(ARG, d).then(
-    () => null,
-    (f) => f,
-  );
-  assert.ok(fout);
-  // In de fout zelf staan ze heel (de bibliotheek kent de geheimen niet), in de uitvoerregel niet.
-  assert.ok(fout.message.includes(SMTP) && fout.message.includes(TURNSTILE));
-  const regel = uitvoerRegel({ status: "mislukt", reden: fout.message }, d.geheimen);
-  assert.ok(!regel.includes(SMTP));
-  assert.ok(!regel.includes(TURNSTILE));
+  const stuk = SMTP.slice(0, 14);
+  for (const melding of [
+    (body) => `ongeldig: ${body}`,
+    () => `smtp_pass: ongeldige waarde "${stuk}..."`,
+    () => `security_captcha_secret begint met ${TURNSTILE.slice(0, 9)}`,
+  ]) {
+    const w = metAuthFout(basis, (body) => JSON.stringify({ message: melding(body) }));
+    const d = opzet(w, PORTAAL);
+    const fout = await richtIn(ARG, d).then(
+      () => null,
+      (f) => f,
+    );
+    assert.ok(fout);
+    assert.match(
+      fout.message,
+      /PATCH \/v1\/projects\/[a-z0-9]+\/config\/auth gaf 400\. De melding van Supabase is niet getoond/,
+    );
+    assert.equal(fout.status, 400);
+    // Niet het geheim, en ook geen begin ervan dat geen maskering nog herkent.
+    const regel = uitvoerRegel({ status: "mislukt", reden: fout.message }, []);
+    for (const geheim of [SMTP, TURNSTILE]) {
+      for (let lengte = 6; lengte <= geheim.length; lengte += 1) {
+        assert.ok(!regel.includes(geheim.slice(0, lengte)), `geen begin van ${lengte} tekens`);
+      }
+    }
+  }
+  // Welke velden Supabase noemt, staat er wel: daar kan de owner mee verder.
+  const w = metAuthFout(basis, () => JSON.stringify({ message: "smtp_pass is te kort" }));
+  await assert.rejects(() => richtIn(ARG, opzet(w, PORTAAL)), /ze noemt: smtp_pass/);
+  // Een wijziging zonder geheim (een gewone app) houdt de melding van Supabase, zoals altijd.
+  const gewoon = nepWolk({
+    faal: (methode, pad) =>
+      methode === "PATCH" && pad.endsWith("/config/auth") ? { status: 500, message: "stuk" } : null,
+  });
+  await assert.rejects(() => richtIn(ARG, opzet(gewoon, DEUR)), /config\/auth gaf 500: stuk/);
 });
 
 test("geheimen: geen geheim in het resultaat van een droogloop, een gewone run of Toegang bijwerken, en geen geheim naar GitHub of Cloudflare", async () => {
@@ -94,14 +125,20 @@ test("geheimen: geen geheim in het resultaat van een droogloop, een gewone run o
   const uit = [];
   uit.push(await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL)));
   uit.push(await richtIn(ARG, opzet(w, PORTAAL)));
-  uit.push(await richtIn(ARG, opzet(w, PORTAAL)));
+  uit.push(await richtIn({ ...ARG, deurWeghalen: true }, opzet(w, PORTAAL)));
   uit.push(await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL)));
   uit.push(await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL)));
   uit.push(await werkToegangBij({ voorvoegsel: "wi-", droogloop: true }, opzet(w, PORTAAL)));
   const gh = w.aanroepen.filter((a) => a.soort === "gh").map((a) => [a.args, a.invoer]);
-  // Alles behalve de PATCH van de auth-config: ook de SQL van de hooks en de sessieduur.
+  // Alles behalve de PATCH van de auth-config en de toets bij Turnstile: ook de SQL van de
+  // hooks en de sessieduur.
+  const naarTurnstile = (a) =>
+    a.url === "https://challenges.cloudflare.com/turnstile/v0/siteverify";
   const rest = w.aanroepen.filter(
-    (a) => a.soort === "fetch" && !(a.methode === "PATCH" && /config\/auth$/.test(a.pad)),
+    (a) =>
+      a.soort === "fetch" &&
+      !(a.methode === "PATCH" && /config\/auth$/.test(a.pad)) &&
+      !naarTurnstile(a),
   );
   const tekst = JSON.stringify([uit, gh, rest.map((a) => [a.url, a.body])]);
   assert.ok(!tekst.includes(SMTP));
@@ -109,8 +146,123 @@ test("geheimen: geen geheim in het resultaat van een droogloop, een gewone run o
   const serviceRol = w.aanroepen.find((a) => a.soort === "admin")?.sleutel;
   assert.ok(serviceRol);
   assert.ok(!JSON.stringify(uit).includes(serviceRol));
-  // De geheimen gaan alleen mee in de ene aanroep die ze nodig heeft.
-  const met = w.aanroepen.filter((a) => JSON.stringify(a.body ?? "").includes(TURNSTILE));
-  assert.ok(met.length > 0);
-  for (const a of met) assert.deepEqual([a.methode, /config\/auth$/.test(a.pad)], ["PATCH", true]);
+  // Ook zonder enige maskering van de uitvoerregel: geen service-sleutel, geen client-secret.
+  const kaal = uit.map((r) => uitvoerRegel(r, [])).join("\n");
+  for (const geheim of [SMTP, TURNSTILE, "geheim-sr-", "geheim-cs-"]) {
+    assert.ok(!kaal.includes(geheim), geheim);
+  }
+  // De geheimen gaan alleen mee in de aanroepen die ze nodig hebben: het Turnstile-geheim
+  // naar Supabase en naar de toets bij Turnstile zelf, het SMTP-wachtwoord alleen naar Supabase.
+  const met = (geheim) => w.aanroepen.filter((a) => JSON.stringify(a.body ?? "").includes(geheim));
+  assert.ok(met(TURNSTILE).some(naarTurnstile));
+  for (const a of met(TURNSTILE)) {
+    assert.ok(naarTurnstile(a) || (a.methode === "PATCH" && /config\/auth$/.test(a.pad)), a.url);
+  }
+  assert.ok(met(SMTP).length > 0);
+  for (const a of met(SMTP))
+    assert.deepEqual([a.methode, /config\/auth$/.test(a.pad)], ["PATCH", true]);
+});
+
+// ---------------------------------------------------------------- de twee sleutels van Turnstile
+
+test("Turnstile: de geheime sleutel in turnstile_sitekey wordt geweigerd (dezelfde waarde als het secret, of de lengte van een geheim) en komt nooit in een variabele van de app", async () => {
+  // Dezelfde waarde als het secret TURNSTILE_GEHEIM: de inrichting stopt vóór de eerste wijziging.
+  const fout = {
+    groepen: GROEPEN,
+    apps: { direct: { ...PORTAAL_APP, turnstile_sitekey: TURNSTILE } },
+  };
+  const w = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(w, DEUR));
+  w.aanroepen.length = 0;
+  const d = opzet(w, fout);
+  const weigering = await richtIn(ARG, d).catch((f) => f);
+  assert.match(
+    weigering.message,
+    /gestopt zonder wijzigingen.*turnstile_sitekey in toegang\.json en het secret TURNSTILE_GEHEIM zijn dezelfde waarde.*Rotate secret/,
+  );
+  assert.deepEqual(w.schrijfacties(), []);
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, undefined);
+  assert.ok(
+    !uitvoerRegel({ status: "mislukt", reden: weigering.message }, d.geheimen).includes(TURNSTILE),
+  );
+  // Ook de droogloop zegt het, zonder het geheim te tonen.
+  const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, fout));
+  assert.match(droog.waarschuwingen.join(" "), /de echte run stopt hierop.*dezelfde waarde/);
+  // Een waarde met de lengte van een geheim (rond de 35 tekens) weigert toegang.json zelf al,
+  // ook als het secret er (nog) niet is.
+  const lang = "0x4AAAAAAADnPIDROrmt1Wwj-GeheimDeel1";
+  assert.ok(lang.length > SITEKEY_MAX && SITEKEY.length <= SITEKEY_MAX);
+  assert.throws(
+    () =>
+      valideerToegang({
+        groepen: GROEPEN,
+        apps: { direct: { ...PORTAAL_APP, turnstile_sitekey: lang } },
+      }),
+    /heeft de lengte van de GEHEIME sleutel van Turnstile/,
+  );
+  valideerToegang(structuredClone(PORTAAL));
+});
+
+test("Turnstile: het geheim wordt getoetst vóór de captcha aangaat; een verkeerd geheim (ook de openbare sleutel in het secret) stopt de run vóór de eerste wijziging", async () => {
+  // De widget kent alleen het echte geheim.
+  const w = nepWolk({ workerBestaat: true, turnstileGeheimen: [TURNSTILE] });
+  await richtIn(ARG, opzet(w, DEUR));
+  // De owner plakte de openbare sleutel in het secret (de twee lijken op elkaar), of een
+  // geheim van een andere widget.
+  for (const captchaGeheim of [SITEKEY, "0x4GeheimVanEenAndereWidget"]) {
+    for (const arg of [ARG, { ...ARG, deurWeghalen: true }]) {
+      w.aanroepen.length = 0;
+      const fout = await richtIn(arg, opzet(w, PORTAAL, { captchaGeheim })).catch((f) => f);
+      assert.match(
+        fout.message,
+        /gestopt zonder wijzigingen.*(dezelfde waarde|Turnstile kent dit geheim niet)/,
+      );
+      assert.deepEqual(w.schrijfacties(), []);
+      assert.notEqual(auth(w).security_captcha_enabled, true);
+      assert.equal(auth(w).external_email_enabled, false);
+    }
+  }
+  const droog = await richtIn(
+    { ...ARG, droogloop: true },
+    opzet(w, PORTAAL, { captchaGeheim: "0x4GeheimVanEenAndereWidget" }),
+  );
+  assert.match(
+    droog.waarschuwingen.join(" "),
+    /de echte run stopt hierop.*Turnstile kent dit geheim niet/,
+  );
+  // Het goede geheim: één toets, vóór de eerste schrijfactie, met een verzonnen bewijs.
+  w.aanroepen.length = 0;
+  await richtIn(ARG, opzet(w, PORTAAL));
+  const toets = w.aanroepen.filter(
+    (a) => a.url === "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+  );
+  assert.equal(toets.length, 1);
+  assert.deepEqual(toets[0].body, { secret: TURNSTILE, response: "toets-van-de-inrichting" });
+  const eersteWijziging = w.aanroepen.findIndex(
+    (a) =>
+      (a.soort === "fetch" && !["GET"].includes(a.methode) && a !== toets[0]) ||
+      (a.soort === "gh" && a.args[1] === "set"),
+  );
+  assert.ok(w.aanroepen.indexOf(toets[0]) < eersteWijziging);
+  assert.equal(auth(w).security_captcha_enabled, true);
+  // Is Turnstile niet te bereiken, dan is er niets getoetst en gebeurt er ook niets.
+  const d = opzet(w, PORTAAL);
+  const basis = d.fetchFn;
+  d.fetchFn = async (url, o) => {
+    if (String(url).includes("siteverify")) throw new Error("netwerk");
+    return basis(url, o);
+  };
+  await assert.rejects(
+    () => richtIn(ARG, d),
+    /Turnstile was niet te bereiken, dus het geheim is niet getoetst/,
+  );
+  // Met "captcha": false wordt er niets getoetst en is het geheim niet nodig.
+  const zonder = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, captcha: false } } };
+  w.aanroepen.length = 0;
+  await richtIn(ARG, opzet(w, zonder, { captchaGeheim: undefined }));
+  assert.equal(w.aanroepen.filter((a) => String(a.url).includes("siteverify")).length, 0);
+  // En een gewone app raakt Turnstile nooit.
+  const gewoon = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(gewoon, DEUR));
+  assert.equal(gewoon.aanroepen.filter((a) => String(a.url).includes("siteverify")).length, 0);
 });

@@ -78,11 +78,23 @@ test("argumenten: app verplicht, modi sluiten elkaar uit", () => {
     tweedeDoorgang: false,
     toegang: false,
     testdatabase: false,
+    deurWeghalen: false,
   });
   assert.equal(
     leesArgumenten([...PROEF, "--app", "cf-proef", "--testdatabase"]).testdatabase,
     true,
   );
+  // Het vinkje "Deur weghalen" hoort alleen bij de gewone inrichting.
+  assert.equal(
+    leesArgumenten([...PROEF, "--app", "cf-proef", "--deur-weghalen"]).deurWeghalen,
+    true,
+  );
+  for (const modus of ["--opruimen", "--toegang", "--tweede-doorgang"]) {
+    assert.throws(
+      () => leesArgumenten([...PROEF, "--app", "a", modus, "--deur-weghalen"]),
+      /--deur-weghalen hoort bij de gewone inrichting/,
+    );
+  }
   assert.throws(() => leesArgumenten([...PROEF, "--droogloop"]), /--app/);
   assert.throws(() => leesArgumenten([...PROEF, "--app", "Cf_Proef"]), /kleine letters/);
   assert.throws(

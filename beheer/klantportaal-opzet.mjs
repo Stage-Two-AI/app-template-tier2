@@ -50,6 +50,7 @@ export function opzet(w, toegang, extra = {}) {
     }),
     maakAdmin: w.maakAdmin,
     gh: w.gh,
+    fetchFn: w.fetchFn,
     wachtOpDiscovery: async () => {},
     toegang,
     accountId: "acc",
@@ -62,13 +63,17 @@ export function opzet(w, toegang, extra = {}) {
   };
 }
 
+/** Hetzelfde argument, met het vinkje "Deur weghalen". */
+export const MET_VINKJE = { ...ARG, deurWeghalen: true };
+
 /**
- * Van deur naar klantportaal gaat in twee runs van App inrichten: de eerste zet alles klaar
- * en laat de deur staan, de tweede haalt hem weg. Geeft het resultaat van de tweede.
+ * Van deur naar klantportaal: een run zonder vinkje zet alles klaar en laat de deur staan, een
+ * run met het vinkje (wat de owner doet na uitrollen en testen) haalt hem weg. Geeft het
+ * resultaat van die laatste.
  */
 export async function naarPortaal(w, toegang = PORTAAL, arg = ARG, extra = {}) {
   await richtIn(arg, opzet(w, toegang, extra));
-  return richtIn(arg, opzet(w, toegang, extra));
+  return richtIn({ ...arg, deurWeghalen: true }, opzet(w, toegang, extra));
 }
 
 export const app = (w, naam) => w.staat.apps.find((a) => a.name === naam);

@@ -220,6 +220,54 @@ async function extra(m) {
     stuk = false;
     await stap("X3b inrichten opnieuw", w, () => m.richtIn(ARG, opzet(w, toegang)));
   }
+  // X4. Een gewone app die nooit klantportaal was, waarvan de deur in Cloudflare is hernoemd,
+  //     is weggehaald, of er nooit was (de tijdelijke stand), en waar iemand in te trekken is:
+  //     een vertrokken medewerker met een inlog via Cloudflare, en een account zonder metadata.
+  for (const [naam, verbuig, arg] of [
+    ["hernoemd", (w) => (w.staat.apps.find((a) => a.name === "rp-start").name = "Start"), ARG],
+    [
+      "weggehaald",
+      (w) =>
+        w.staat.apps.splice(
+          w.staat.apps.findIndex((a) => a.name === "rp-start"),
+          1,
+        ),
+      ARG,
+    ],
+    ["tijdelijke stand", () => {}, { ...ARG, hostname: null, stand: "tijdelijk" }],
+  ]) {
+    const toegang = { groepen: G2, apps: { start: ["klant"] } };
+    const w = m.nepWolk({
+      workerBestaat: true,
+      gebruikers: [
+        {
+          id: ID(1),
+          email: "piet@klant.nl",
+          app_metadata: { provider: "custom:cloudflare", providers: ["custom:cloudflare"] },
+        },
+        {
+          id: ID(2),
+          email: "ex@oudbedrijf.nl",
+          identities: [
+            { provider: "custom:cloudflare", identity_data: { email: "ex@oudbedrijf.nl" } },
+          ],
+          app_metadata: { provider: "custom:cloudflare", providers: ["custom:cloudflare"] },
+        },
+        { id: ID(3), email: "vreemd@elders.nl" },
+      ],
+    });
+    await m.richtIn(arg, opzet(w, toegang));
+    verbuig(w);
+    await stap(`X4a deur ${naam}: toegang bijwerken trekt in`, w, () =>
+      m.werkToegangBij({ voorvoegsel: "rp-" }, opzet(w, toegang)),
+    );
+    await stap(`X4b deur ${naam}: nog een keer, niets meer te doen`, w, () =>
+      m.werkToegangBij({ voorvoegsel: "rp-" }, opzet(w, toegang)),
+    );
+    await stap(`X4c deur ${naam}: droogloop van App inrichten`, w, () =>
+      m.richtIn({ ...arg, droogloop: true }, opzet(w, toegang)),
+    );
+  }
   return uit;
 }
 
@@ -231,15 +279,40 @@ test("regressie: regressie-42.json komt echt uit de code van versie 42", {
   assert.deepEqual(opnieuw, vast);
 });
 
-test("regressie: 2300 accounts, IdP-groepen, geheimen van het klantportaal in de omgeving, verbogen auth-instellingen en een fout halverwege geven exact de aanroepen van versie 42", {
+test("regressie: 2300 accounts, IdP-groepen, geheimen van het klantportaal in de omgeving, verbogen auth-instellingen, een fout halverwege en een gewone app waarvan de deur ontbreekt of hernoemd is (met iemand in te trekken) geven exact de aanroepen van versie 42", {
   skip: sla,
 }, async () => {
   const [oud, nieuw] = [await extra(v42), await extra(nu)];
   const aantal = Object.values(oud).reduce((n, s) => n + s.aanroepen.length, 0);
   assert.ok(aantal > 150, "de scenario's doen echt iets");
-  const onverwacht = Object.entries(oud).filter(([, s]) => s.fout && !/stuk/.test(s.fout));
+  // Verwachte fouten: de nagebootste storing (X3a), en een hernoemde deur, waar App inrichten
+  // toen en nu op stopt ("bewaakt ... al").
+  const onverwacht = Object.entries(oud).filter(
+    ([, s]) => s.fout && !/stuk|zonder voorvoegsel\) bewaakt/.test(s.fout),
+  );
   assert.deepEqual(onverwacht, []);
-  for (const naam of Object.keys(oud)) assert.deepEqual(nieuw[naam], oud[naam], naam);
+  // Eén bewust verschil, alleen in tekst: de droogloop van App inrichten voor een gewone app
+  // zonder deur zegt er nu bij wat de echte run doet als dit een klantportaal was. De
+  // aanroepen zijn ook daar exact gelijk.
+  const zonderDeur = "X4c deur weggehaald: droogloop van App inrichten";
+  const erbij = nieuw[zonderDeur].resultaat.waarschuwingen.filter((x) =>
+    /er staat nu geen deur/.test(x),
+  );
+  assert.equal(erbij.length, 1);
+  nieuw[zonderDeur].resultaat.waarschuwingen = nieuw[zonderDeur].resultaat.waarschuwingen.filter(
+    (x) => !erbij.includes(x),
+  );
+  for (const naam of Object.keys(oud)) {
+    assert.deepEqual(nieuw[naam].aanroepen, oud[naam].aanroepen, naam);
+    assert.deepEqual(nieuw[naam], oud[naam], naam);
+  }
+  // De scenario's zonder deur trekken echt iemand in (anders bewijst de vergelijking niets).
+  for (const soort of ["hernoemd", "weggehaald", "tijdelijke stand"]) {
+    const bans = oud[`X4a deur ${soort}: toegang bijwerken trekt in`].aanroepen.filter(
+      (a) => a.m === "updateUserById",
+    );
+    assert.equal(bans.length, 2, soort);
+  }
   assert.deepEqual(Object.keys(nieuw), Object.keys(oud));
 });
 

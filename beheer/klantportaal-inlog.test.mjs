@@ -8,8 +8,9 @@
  * echte Postgres gedraaid met de invoer die Supabase Auth stuurt.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { CAPTCHA_UIT, richtIn } from "./inrichten-cloudflare.mjs";
+import { CAPTCHA_UIT, richtIn, uitvoerRegel } from "./inrichten-cloudflare.mjs";
 import {
   ARG,
   auth,
@@ -26,10 +27,19 @@ import {
   BURST,
   CODE_GELDIG_SECONDEN,
   CODE_LENGTE,
+  GEEN_CONTROLECODE,
+  GOKKEN_PER_DAG,
   klantportaalInstellingen,
+  neutraleMails,
   REM,
+  veiligHookAdres,
 } from "./lib/supabase.mjs";
-import { MELDING_GEEN_WACHTWOORD, portaalTokenHookSql } from "./lib/toegang.mjs";
+import {
+  MELDING_GEEN_WACHTWOORD,
+  portaalAanmeldHookSql,
+  portaalTokenHookSql,
+  valideerToegang,
+} from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
 const inst = (extra = {}) =>
@@ -90,26 +100,174 @@ test("overname met een wachtwoord: een sessie met een wachtwoord bestaat niet; d
   assert.equal(auth(w).hook_custom_access_token_enabled, true);
 });
 
-test("overname met een wachtwoord: een eigen token-hook van de app wordt vervangen, en het resultaat zegt dat", async () => {
+test("eigen hooks van de app: de inrichting vervangt ze nooit stil; ze stopt vóór de eerste wijziging, ook zichtbaar in de droogloop, tot de bouwer kiest", async () => {
+  const w = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(w, DEUR));
+  const eigen = {
+    hook_custom_access_token_enabled: true,
+    hook_custom_access_token_uri: "pg-functions://postgres/public/app_rollen_in_token",
+    hook_before_user_created_enabled: true,
+    hook_before_user_created_uri: "pg-functions://postgres/public/app_alleen_uitgenodigd",
+  };
+  Object.assign(auth(w), eigen);
+  const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL));
+  const tekst = droog.waarschuwingen.join(" ");
+  assert.match(tekst, /de echte run stopt hierop.*eigen aanmeld-hook.*app_alleen_uitgenodigd/);
+  assert.match(tekst, /de echte run stopt hierop.*eigen token-hook.*app_rollen_in_token/);
+  assert.match(tekst, /"eigen_hooks": true.*of de eigen hook weghalen/);
+  w.aanroepen.length = 0;
+  await assert.rejects(
+    () => richtIn(ARG, opzet(w, PORTAAL)),
+    /gestopt zonder wijzigingen.*eigen aanmeld-hook.*eigen token-hook.*vervangt hem niet stil/,
+  );
+  assert.deepEqual(w.schrijfacties(), []);
+  for (const [k, waarde] of Object.entries(eigen)) assert.equal(auth(w)[k], waarde, k);
+  assert.equal(auth(w).external_email_enabled, false, "productie draait gewoon door");
+
+  // De bouwer neemt de weigeringen over en zegt dat uitdrukkelijk: dan blijven de hooks van de
+  // app staan, en elke run zegt dat de inrichting daarop vertrouwt.
+  const metEigen = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, eigen_hooks: true } } };
+  const r = await richtIn(ARG, opzet(w, metEigen));
+  for (const [k, waarde] of Object.entries(eigen)) assert.equal(auth(w)[k], waarde, k);
+  assert.equal(auth(w).external_email_enabled, true);
+  assert.equal(
+    r.waarschuwingen.filter((x) =>
+      /blijft staan.*"eigen_hooks": true.*De inrichting controleert niet wat die hook doet/.test(x),
+    ).length,
+    2,
+  );
+  // Zonder een eigen hook in het project zet de inrichting gewoon haar eigen hooks, ook met
+  // het veld erbij.
+  const leeg = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(leeg, metEigen));
+  assert.equal(
+    auth(leeg).hook_custom_access_token_uri,
+    `pg-functions://postgres/public/${HOOKS.token}`,
+  );
+  // Een eigen mail-hook gaat buiten de sjablonen om: altijd stoppen.
+  const mailhook = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(mailhook, DEUR));
+  Object.assign(auth(mailhook), {
+    hook_send_email_enabled: true,
+    hook_send_email_uri: "https://hooks.voorbeeld.test/mail?sleutel=sk_EchtGeheimInDeUrl",
+  });
+  const fout = await richtIn(ARG, opzet(mailhook, metEigen)).catch((f) => f);
+  assert.match(
+    fout.message,
+    /eigen hook \(send email\): https:\/\/hooks\.voorbeeld\.test \(de rest van het adres is niet getoond\)/,
+  );
+  assert.doesNotMatch(fout.message, /sk_EchtGeheim/);
+});
+
+test("eigen hooks van de app: van een hook over HTTP toont een melding alleen het schema en de host, nooit het pad of een sleutel in het adres", async () => {
+  assert.equal(
+    veiligHookAdres(
+      "https://gebruiker:wachtwoord@Hooks.Voorbeeld.test:8443/claims/sk_pad?sleutel=sk_x#y",
+    ),
+    "https://hooks.voorbeeld.test (de rest van het adres is niet getoond)",
+  );
+  assert.equal(
+    veiligHookAdres("pg-functions://postgres/public/eigen_hook"),
+    "pg-functions://postgres/public/eigen_hook",
+  );
+  assert.equal(
+    veiligHookAdres("pg-functions://postgres/public/x'; drop"),
+    "pg-functions://postgres",
+  );
+  assert.equal(veiligHookAdres("onzin"), "(adres niet te lezen)");
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
   Object.assign(auth(w), {
     hook_custom_access_token_enabled: true,
-    hook_custom_access_token_uri: "pg-functions://postgres/public/eigen_hook",
+    hook_custom_access_token_uri:
+      "https://hooks.voorbeeld.test/claims?sleutel=sk_EchtGeheimInDeUrl",
   });
-  const r = await richtIn(ARG, opzet(w, PORTAAL));
-  assert.equal(
-    auth(w).hook_custom_access_token_uri,
-    `pg-functions://postgres/public/${HOOKS.token}`,
-  );
-  assert.ok(
-    r.waarschuwingen.some((x) =>
-      /eigen token-hook \(pg-functions:\/\/postgres\/public\/eigen_hook\).*vervangen/.test(x),
-    ),
-    JSON.stringify(r.waarschuwingen),
-  );
-  const r2 = await richtIn(ARG, opzet(w, PORTAAL));
-  assert.ok(!r2.waarschuwingen.some((x) => /eigen token-hook/.test(x)));
+  const d = opzet(w, PORTAAL);
+  const uit = [];
+  uit.push(uitvoerRegel(await richtIn({ ...ARG, droogloop: true }, d), d.geheimen));
+  const fout = await richtIn(ARG, d).catch((f) => f);
+  uit.push(uitvoerRegel({ status: "mislukt", reden: fout.message }, d.geheimen));
+  const eigen = { groepen: GROEPEN, apps: { direct: { ...PORTAAL_APP, eigen_hooks: true } } };
+  uit.push(uitvoerRegel(await richtIn(ARG, opzet(w, eigen)), d.geheimen));
+  for (const regel of uit) {
+    assert.match(regel, /https:\/\/hooks\.voorbeeld\.test \(de rest/);
+    assert.doesNotMatch(regel, /sk_EchtGeheimInDeUrl|claims\?/);
+  }
+});
+
+test("adres wijzigen: een account is niet naar het adres van een ander te zetten; de mail daarvoor bevat geen link en geen code, en hetzelfde geldt voor elke andere mail buiten de hooks om", () => {
+  const i = inst();
+  // Supabase Auth verstuurt zes soorten mail met een link of code (templatemailer.go:
+  // invite, confirmation, recovery, magic_link, email_change, reauthentication). Laat de
+  // inrichting er één ongemoeid, dan geldt het standaardsjabloon, met {{ .ConfirmationURL }}:
+  // een link die bij openen (ook door een linkscanner) al bevestigt.
+  const soorten = [
+    "invite",
+    "confirmation",
+    "recovery",
+    "magic_link",
+    "email_change",
+    "reauthentication",
+  ];
+  for (const soort of soorten) {
+    const inhoud = i[`mailer_templates_${soort}_content`];
+    assert.ok(
+      typeof inhoud === "string" && inhoud.length > 20,
+      `${soort} heeft een eigen sjabloon`,
+    );
+    assert.ok(i[`mailer_subjects_${soort}`], `${soort} heeft een eigen onderwerp`);
+    assert.doesNotMatch(inhoud, /ConfirmationURL|RedirectTo/, soort);
+    assert.doesNotMatch(
+      i[`mailer_subjects_${soort}`],
+      /\{\{/,
+      `${soort}: geen code in het onderwerp`,
+    );
+  }
+  // Adres wijzigen (PUT /user) gaat langs geen van beide hooks, en de mail gaat naar een adres
+  // dat de aanvrager zelf kiest. Zonder link, code of token_hash is de wijziging niet te
+  // bevestigen: het account blijft op zijn eigen adres.
+  for (const soort of ["email_change", "reauthentication"]) {
+    assert.doesNotMatch(
+      i[`mailer_templates_${soort}_content`],
+      /\{\{/,
+      `${soort}: geen enkele sjabloonopdracht`,
+    );
+  }
+  assert.match(i.mailer_templates_email_change_content, /Dat kan niet zelf: er is niets gewijzigd/);
+  assert.match(i.mailer_templates_email_change_content, /neem dan contact op met Winco Direct/);
+  // De uitnodiging logt niet in: alleen een verwijzing naar de inlogpagina op het eigen domein.
+  assert.deepEqual(i.mailer_templates_invite_content.match(/\{\{[^}]*\}\}/g), ["{{ .SiteURL }}"]);
+  // Wie de code van acht cijfers wil raden om de wijziging toch te bevestigen, moet er twee raden.
+  assert.equal(i.mailer_secure_email_change_enabled, true);
+  // De sjablonen zijn gewone tekst: een sjabloon dat Supabase Auth niet kan lezen, vervangt het
+  // stil door het standaardsjabloon. Ook met een naam vol leestekens blijft het leesbaar.
+  const lastig = neutraleMails("Bloem & Zn. (O'Neill)");
+  for (const tekst of Object.values(lastig)) assert.doesNotMatch(tekst, /\{\{(?! \.SiteURL \}\})/);
+  assert.match(lastig.mailer_templates_email_change_content, /Bloem &amp; Zn\. \(O&#39;Neill\)/);
+  assert.throws(() => neutraleMails("{{ .Token }}"), /ongeldig teken/);
+  assert.equal(i.mailer_templates_reauthentication_content, GEEN_CONTROLECODE.inhoud);
+});
+
+test("de hooks werken ook als de app het schema public heeft dichtgezet: beide scripts geven Supabase Auth zelf het recht op het schema, zoals de documentatie voorschrijft", () => {
+  for (const sql of [
+    portaalAanmeldHookSql(PORTAAL, "direct", HOOKS.aanmelden),
+    portaalTokenHookSql(HOOKS.token),
+  ]) {
+    const naam = sql.match(/create or replace function (public\.[a-z_]+)\(event jsonb\)/)[1];
+    const rechten = sql.slice(sql.indexOf("$hook$;"));
+    // Na `revoke usage on schema public from public` in een migratie van de app kan Supabase
+    // Auth de hook anders niet aanroepen, en dan komt niemand meer binnen, ook medewerkers niet.
+    assert.match(rechten, /grant usage on schema public to supabase_auth_admin;/);
+    assert.ok(rechten.includes(`grant execute on function ${naam}(jsonb) to supabase_auth_admin;`));
+    assert.ok(
+      rechten.includes(
+        `revoke execute on function ${naam}(jsonb) from authenticated, anon, public;`,
+      ),
+    );
+    // Geen recht voor wie dan ook op meer dan dat: de functies lezen geen tabellen.
+    assert.equal(rechten.match(/\bgrant\b/g).length, 2);
+    assert.match(sql, /set search_path = ''/);
+  }
 });
 
 test("overname met een wachtwoord: de mail die een ander kan uitlokken zegt wat je doet als je er niet om vroeg, en logt nooit in bij openen", () => {
@@ -202,6 +360,7 @@ test("mailgrens opmaken: de captcha staat standaard aan, want de tellers per IP-
   // In de inrichting: een klantportaal zonder keuze heeft de captcha aan; wie hem uitzet,
   // krijgt bij elke run de waarschuwing.
   const w = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(w, DEUR));
   const aan = await naarPortaal(w);
   assert.equal(auth(w).security_captcha_enabled, true);
   assert.ok(!aan.waarschuwingen.some((x) => x.includes(CAPTCHA_UIT)));
@@ -226,20 +385,28 @@ test("code raden: acht cijfers, en het aantal gokken per IP-adres klopt met wat 
     `${gokken} gokken in een kwartier vanaf één IP-adres`,
   );
   // Een fout antwoord maakt de code niet ongeldig en er is geen teller per account; de
-  // aanvaller vraagt elk kwartier een nieuwe code aan. Per dag zijn dat 96 kwartieren.
-  const ruimte = 10 ** CODE_LENGTE;
-  const kansPerDag = (ips, mogelijkheden = ruimte) =>
-    1 - (1 - (ips * gokken) / mogelijkheden) ** 96;
-  assert.ok(
-    kansPerDag(100) < 0.01,
-    `100 IP-adressen: ${(kansPerDag(100) * 100).toFixed(2)}% per dag`,
-  );
-  assert.ok(
-    kansPerDag(1000) < 0.05,
-    `1000 IP-adressen: ${(kansPerDag(1000) * 100).toFixed(1)}% per dag`,
-  );
-  // Met zes cijfers was dat met dezelfde honderd adressen ruim een derde.
-  assert.ok(kansPerDag(100, 10 ** 6) > 0.3);
+  // aanvaller vraagt steeds een nieuwe code aan. Wat telt is dus hoeveel gokken één IP-adres
+  // per dag heeft: de voorraad van 30 één keer, daarna 5 per vijf minuten.
+  const dag = teller(REM.rate_limit_verify);
+  let perDag = 0;
+  for (let s = 0; s < 24 * 3600; s += 1) while (dag(s)) perDag += 1;
+  assert.equal(GOKKEN_PER_DAG, 1470);
+  assert.ok(Math.abs(perDag - GOKKEN_PER_DAG) <= 1, `${perDag} gokken per dag vanaf één IP-adres`);
+  const kans = (adressen, cijfers = CODE_LENGTE) =>
+    1 - (1 - 10 ** -cijfers) ** (adressen * GOKKEN_PER_DAG);
+  // Honderd adressen: ongeveer 0,15 procent per dag. Met zes cijfers was dat ruim 13 procent.
+  assert.ok(kans(100) > 0.0014 && kans(100) < 0.0016, `${(kans(100) * 100).toFixed(3)}%`);
+  assert.ok(kans(100, 6) > 0.13);
+  // De aanname: de teller telt per letterlijk IP-adres. Eén aansluiting met IPv6 heeft er
+  // miljarden; telt Supabase die niet samen, dan is met 65.536 adressen de kans ruim de helft.
+  assert.ok(kans(65536) > 0.5);
+  // De README zegt precies dit en belooft niet meer: de som, de aanname en wat de owner doet.
+  const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
+  assert.match(readme, /1470 gokken per IP-adres per dag/);
+  assert.match(readme, /0,15 procent/);
+  assert.match(readme, /IPv6/);
+  assert.match(readme, /[Vv]raag dit bij Supabase na vóór een klant live gaat/);
+  assert.doesNotMatch(readme, /een half procent/);
 });
 
 test("de rem: elke grens ligt binnen wat de Management API aanneemt en heeft de eenheid uit de broncode", () => {
@@ -263,4 +430,61 @@ test("de rem: elke grens ligt binnen wat de Management API aanneemt en heeft de 
     CODE_LENGTE >= 6 && CODE_LENGTE <= 10,
     "Supabase Auth neemt 6 tot en met 10 cijfers aan",
   );
+});
+
+// ---------------------------------------------------------------- de hooks en toegang.json
+
+test("geen SQL via toegang.json: een groep, domein, adres of naam met aanhalingstekens, een $-blok, een backslash of een regeleinde wordt geweigerd vóór er één regel SQL bestaat", () => {
+  const gif = [
+    "x'; drop table auth.users; --@winco.nl",
+    "a@b.nl' or '1'='1",
+    "$hook$; select 1; $hook$@x.nl",
+    "a\\'@x.nl",
+    "a@x.nl\n'; select 1; --",
+  ];
+  for (const g of gif) {
+    for (const groep of [
+      { adressen: [g] },
+      { domeinen: [g] },
+      { domeinen: ["x.nl"], uitsluiten: [g] },
+    ]) {
+      const t = { groepen: { kantoor: groep }, apps: { direct: { ...PORTAAL_APP } } };
+      assert.throws(() => valideerToegang(structuredClone(t)), /ongeldig/, g);
+      assert.throws(() => portaalAanmeldHookSql(t, "direct", HOOKS.aanmelden), /ongeldig/, g);
+    }
+    for (const naam of [g, "kantoor'; --"]) {
+      assert.throws(
+        () =>
+          valideerToegang({
+            groepen: { [naam]: { domeinen: ["x.nl"] } },
+            apps: { direct: [naam] },
+          }),
+        /naam alleen kleine letters/,
+      );
+    }
+    const afzender = { ...PORTAAL_APP, afzender: `${g} <noreply@winco.nl>` };
+    assert.throws(
+      () => valideerToegang({ groepen: GROEPEN, apps: { direct: afzender } }),
+      /afzender/,
+    );
+  }
+  assert.throws(() => portaalAanmeldHookSql(PORTAAL, "direct", "x; drop"), /ongeldige functienaam/);
+  assert.throws(() => portaalTokenHookSql("X"), /ongeldige functienaam/);
+});
+
+test("de aanmeld-hook laat geen adres op het domein van een medewerker door: hoofdletters, spaties, een tab of twee apenstaartjes helpen niet", () => {
+  // Tegen een echte Postgres gedraaid (13-11-2026) met "a@b"@winco.nl, Nieuw@WINCO.NL,
+  // " nieuw@winco.nl", "nieuw@winco.nl\t", nieuw@elders.nl@winco.nl en nieuw+klant@winco.nl:
+  // allemaal geweigerd. Hier staat vast waar dat op rust.
+  const sql = portaalAanmeldHookSql(PORTAAL, "direct", HOOKS.aanmelden);
+  // Het adres wordt eerst klein gemaakt, en het domein is wat na het eerste apenstaartje komt.
+  assert.match(sql, /adres text := lower\(coalesce\(event->'user'->>'email', ''\)\);/);
+  assert.match(sql, /domein text := split_part\(adres, '@', 2\);/);
+  // Een adres met witruimte of meer dan één apenstaartje is geen adres: geweigerd, vóór de
+  // vergelijking met de groepen.
+  const vorm = sql.indexOf("adres !~ '^[^@[:space:]]+@[^@[:space:]]+$'");
+  const groepen = sql.indexOf("domein = any (array['winco.nl']::text[])");
+  assert.ok(vorm !== -1 && groepen !== -1 && vorm < groepen);
+  // Alles wat niet per mail of via Cloudflare komt (ook anoniem) wordt geweigerd.
+  assert.match(sql, /if aanbieder <> 'email' or adres !~/);
 });
