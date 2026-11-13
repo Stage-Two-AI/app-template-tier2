@@ -190,7 +190,7 @@ function CodeStap({ mailcode }: StapProps) {
       </form>
       <div className="flex flex-col gap-1 text-sm">
         <p className="text-muted-foreground">Geen mail gekregen? Kijk ook bij ongewenste mail.</p>
-        <div className="flex flex-wrap gap-x-2">
+        <div className="flex flex-wrap justify-between gap-x-4">
           <Button
             variant="ghost"
             className="h-11 px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline"
@@ -205,7 +205,7 @@ function CodeStap({ mailcode }: StapProps) {
           </Button>
           <Button
             variant="ghost"
-            className="h-11 px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline sm:ml-auto"
+            className="h-11 px-0 text-primary underline-offset-4 hover:bg-transparent hover:underline"
             disabled={bezig}
             onClick={mailcode.anderAdres}
           >
