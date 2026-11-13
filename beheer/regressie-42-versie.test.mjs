@@ -67,7 +67,14 @@ try {
     stdio: ["ignore", "pipe", "ignore"],
   });
   execFileSync("tar", ["-x", "-C", map], { input: tar });
-  symlinkSync(join(hier, "node_modules"), join(map, "beheer", "node_modules"));
+  // De pakketten staan naast beheer/ (eigen installatie) of een map hoger (de installatie van
+  // de repo, zoals in de Kwaliteitspoort). Beide plekken koppelen, voor zover ze bestaan.
+  if (existsSync(join(hier, "node_modules"))) {
+    symlinkSync(join(hier, "node_modules"), join(map, "beheer", "node_modules"));
+  }
+  if (existsSync(resolve(hier, "..", "node_modules"))) {
+    symlinkSync(resolve(hier, "..", "node_modules"), join(map, "node_modules"));
+  }
   const laad = (b) => import(pathToFileURL(join(map, "beheer", b)).href);
   const script = await laad("inrichten-cloudflare.mjs");
   v42 = {
