@@ -68,7 +68,7 @@
     {
       "naam": "klant_adres_gewijzigd",
       "tabel": "auth.users",
-      "definitie": "CREATE TRIGGER klant_adres_gewijzigd AFTER UPDATE ON auth.users FOR EACH ROW WHEN ((old.email IS DISTINCT FROM new.email)) EXECUTE FUNCTION public.klant_adres_gewijzigd()",
+      "definitie": "CREATE TRIGGER klant_adres_gewijzigd AFTER UPDATE ON auth.users FOR EACH ROW WHEN (((old.email)::text IS DISTINCT FROM (new.email)::text)) EXECUTE FUNCTION public.klant_adres_gewijzigd()",
       "aan": "O"
     }
   ],

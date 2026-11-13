@@ -200,16 +200,52 @@ goedgekeurd. In het voorbeeld meldt een klant zich aan met `klant_aanmelden()`, 
 medewerker `goedgekeurd` aan in de tabel `klanten`, en is `is_goedgekeurde_klant()` daarna
 waar. De klant ziet die tabel zelf niet.
 
-Zet in `stack.config.json` de schakelaar `"klantportaal": true`. Dan dwingt `pnpm guard:rls`
-(en in de databasejob `tests/rls/open-policies.test.ts`, op de database zelf) deze regel af:
+Zet in `stack.config.json` de schakelaar `"klantportaal": true` (alleen bij een eigen database,
+`"database": true`). Dan geldt: **wie alleen een e-mailadres heeft, of geen account, mag
+niets, tenzij het met een reden is vrijgegeven.** Concreet:
 
-1. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in elke
+1. Elke tabel waar bezoekers bij kunnen, heeft RLS aan en minstens één policy. Geen
+   materialized view of foreign table waar bezoekers bij kunnen (die kennen geen RLS).
+2. Elke policy voor ingelogde gebruikers (`to authenticated`, of zonder `to`) heeft in elke
    `using` en `with check` een poort als harde eis: `public.is_medewerker()` of
    `public.is_goedgekeurde_klant()`, met `and` aan de rest vast, in elke tak van een `or`.
-   Eén policy `as restrictive for all` met alleen die eis dekt de hele tabel.
-2. Elke `security definer`-functie en elke view waar een ingelogde gebruiker bij kan, roept
-   zelf een poort aan, of staat met een reden in `klantportaal_vrije_functies`. Er zijn geen
-   `open_tabellen`.
+   Een policy `as restrictive` met alleen die eis dekt de opdrachten (`for all`, `for select`)
+   en de rollen waarvoor hij geldt; een poort `to authenticated` dekt een policy `to anon` of
+   zonder `to` dus niet.
+3. Een `security definer`-functie of een view zonder `security_invoker = true` leest met de
+   rechten van zijn eigenaar en gaat dus langs de policies heen. Mag een ingelogde gebruiker
+   hem gebruiken, dan staat hij met een reden in `klantportaal_vrije_functies`. "Hij roept een
+   poort aan" is geen bewijs: de poort kan in een `or` staan of het antwoord weggooien.
+4. Wat een bezoeker zonder account mag (een policy `to anon`, een functie die `anon` mag
+   uitvoeren, een bucket met `public = true`), staat met een reden in `klantportaal_openbaar`.
+   Standaard is die lijst leeg. Supabase geeft `anon` het recht op elke nieuwe functie in
+   `public`; trek dat in met `revoke execute on function public.<naam>() from public, anon`.
+5. De basisfuncties van de template (`sessie_via_cloudflare`, `is_medewerker`,
+   `is_goedgekeurde_klant`, `klant_aanmelden`, de trigger op `auth.users`) en de tabel
+   `klanten` blijven precies zoals de template ze maakt. Wil de app iets anders, dan maakt ze
+   een eigen poort (zie hieronder).
+6. `open_tabellen` is leeg: "iedereen binnen" is hier iedereen met een e-mailadres.
+
+```json
+"klantportaal": true,
+"klantportaal_poorten": { "is_inkoper": "medewerker van de afdeling inkoop" },
+"klantportaal_vrije_functies": { "meld_storing": "mag iedereen met een account" },
+"klantportaal_openbaar": { "producten": "de catalogus is openbaar", "bucket:logo": "het logo" }
+```
+
+Een naam zonder schema is in `public`; schrijf `api.zoek_product` voor een ander schema, en
+`bucket:<naam>` voor een bucket. Een onbekende sleutel in `stack.config.json` (een tikfout
+als `klantPortaal`) is rood, zodat een schakelaar niet stil uit staat.
+
+**Twee controles.** `pnpm guard:rls` leest de tekst van de migraties: snel, al bij een
+concept-PR, met goede meldingen, maar tekst is te misleiden (dynamische SQL, een tabel in een
+ander schema, iets wat een latere migratie terugdraait). De sluitende controle draait in de
+Kwaliteitspoort op de database zelf, nadat alle migraties zijn toegepast
+(`tests/rls/open-policies.test.ts`, met de regels uit `scripts/lib/klantportaal-database.mjs`):
+die leest de catalogus van Postgres in elk schema waar `anon` of `authenticated` bij kan, en
+ziet dus wat er werkelijk staat. Dat die controle zelf werkt, bewijst
+`tests/rls/klantportaal-controle.test.ts`: elke bekende omweg wordt in een transactie op de
+database gezet en moet rood zijn.
 
 De eenvoudigste weg voor een tabel die er al is: één poort erbij, en de policies die er
 stonden blijven zoals ze zijn. Voor de voorbeeldtabel `items`:
@@ -237,8 +273,20 @@ using (public.is_medewerker() or (public.is_goedgekeurde_klant() and auth.uid() 
 Schrijf de poort voluit, met `public.` ervoor. Een functie die een ingelogde gebruiker niet
 hoort aan te roepen, raakt het recht kwijt met
 `revoke all on function public.<naam>() from public, anon, authenticated`; een view krijgt
-`with (security_invoker = true)`. Kent de app soorten medewerkers, maak dan een eigen functie
-die zelf `public.is_medewerker()` aanroept en zet hem met een reden in `klantportaal_poorten`.
+`with (security_invoker = true)`. Kent de app soorten medewerkers, maak dan een eigen poort en
+zet hem met een reden in `klantportaal_poorten`. Een eigen poort is een functie in
+`language sql` die één uitdrukking teruggeeft, met een poort van de template als harde eis:
+
+```sql
+create function public.is_inkoper() returns boolean language sql stable
+security definer set search_path = '' as $$
+  select public.is_medewerker()
+     and exists (select 1 from public.inkopers i where i.user_id = auth.uid())
+$$;
+```
+
+Meer kan de controle aan een eigen poort niet nakijken: wat hij verder doet, is de zorg van de
+app (en van de reviewer, die de reden in de pull request ziet).
 De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft de poort
 niet. Zonder de schakelaar verandert er voor een app niets. Een bestaande app een klantportaal
 maken gaat stap voor stap met de route `docs/routes/klantportaal.md`.
@@ -252,8 +300,11 @@ een medewerker opnieuw kijkt, en eindigen alle sessies van dat account.
 gaat altijd naar het adres van de app zelf, wat de aanvrager ook opgeeft, en logt pas in na
 een klik op de pagina. Is de mail niet in dezelfde browser aangevraagd, dan vraagt de pagina
 eerst "Heb je deze mail zelf aangevraagd?": een ander kan je ook de link uit zíjn mail
-sturen, en dan log je in op zijn account. Na het inloggen staat kort bovenin op welk adres
-je binnen bent.
+sturen, en dan log je in op zijn account. Daarvoor onthoudt de browser na een geslaagde
+aanvraag een vingerafdruk van het adres (niet het adres zelf) en het tijdstip. Na het inloggen
+staat bovenin op welk adres je binnen bent, tot je het wegklikt of naar een ander scherm gaat;
+is dat niet het adres dat je in deze browser invulde, dan staat er met nadruk bij dat je moet
+uitloggen als dit niet jouw account is. Dat geldt ook bij alleen `mailcode`.
 
 Bekende beperkingen, die de app niet kan oplossen:
 
@@ -266,6 +317,11 @@ Bekende beperkingen, die de app niet kan oplossen:
 - **Rechtstreeks bij Supabase is te zien of een adres een account heeft.** De inlogpagina
   geeft bij een bekend en een onbekend adres hetzelfde antwoord, maar wie de API van Supabase
   zelf aanroept met "maak geen nieuw account", ziet het verschil.
+- **Blokkeren alleen is niet genoeg.** Een geblokkeerd account (ban in Supabase) krijgt geen
+  nieuw token, maar een lopend token blijft tot een uur geldig. De basisfuncties kijken zelf
+  naar de blokkade, dus de poorten zeggen meteen nee; wat een app buiten de poorten om laat
+  doen, kan dat uur nog lukken. Blokkeren doe je samen met afmelden; een klant direct stoppen
+  doe je met goedkeuring uit.
 - **De twaalf uur is zo hard als de sessieduur bij Cloudflare.** Wie na twaalf uur opnieuw op
   de knop klikt en bij Cloudflare nog een geldige sessie heeft, is zonder opnieuw in te
   loggen weer medewerker. Iemand buitensluiten doe je dus bij Cloudflare.
