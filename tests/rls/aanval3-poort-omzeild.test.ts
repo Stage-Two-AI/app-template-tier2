@@ -111,7 +111,8 @@ describe("doel 1: databasecontrole groen, toch een lek", () => {
            language sql security definer set search_path = '' as $fn$
              select user_id, e_mail, goedgekeurd from public.klanten
            $fn$;
-         revoke execute on function public.kp_aanval_storing() from anon;`);
+         revoke execute on function public.kp_aanval_storing() from public, anon;
+         grant execute on function public.kp_aanval_storing() to authenticated;`);
     opruimen.push(() => sql("drop function if exists public.kp_aanval_storing()"));
 
     // Een echte klant als slachtoffer in de tabel.
