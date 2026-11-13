@@ -6,7 +6,7 @@ name: Tijdelijk - browsertest op concept
 
 on:
   push:
-    branches: ["uitgave/43"]
+    branches: ["uitgave/43", "aanval/43-inlog-3"]
 
 permissions:
   contents: read
