@@ -135,6 +135,60 @@ gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Tw
   maar namen van tabellen en functies zijn dan wel zichtbaar. De gegevens zelf blijven
   beschermd door RLS.
 
+**Een recht hangt nooit aan iets wat een klant zelf kan claimen.** Dit geldt voor een
+klantportaal: een app zonder deur op het domein, waar medewerkers via Cloudflare inloggen en
+klanten met een code per mail (`VITE_INLOGDIENST=cloudflare,mailcode`). Iedereen kan daar de
+inlogpagina openen en per mail een account maken. De regels in de database zijn dan de enige
+grens, en die mogen dus alleen leunen op wat een klant niet zelf in de hand heeft.
+
+Wat een klant wel zelf in de hand heeft, en waar dus nooit een recht aan mag hangen:
+
+- **Een e-mailadres.** Supabase kent één account per adres, hoe je ook inlogt. Wie bij de
+  mailbox van een medewerker kan, vraagt een code aan op dat adres en zit dan op het account
+  van die medewerker: zelfde adres, zelfde `auth.uid()`. Zonder Google, zonder tweestaps.
+  Een regel als "wie `@bedrijf.nl` heeft, is medewerker" of "deze `user_id` is beheerder"
+  geeft die persoon dus alle rechten.
+- **`user_metadata`.** Dat past iedere gebruiker zelf aan, en het staat daarna in zijn token.
+- **`app_metadata.provider` en `providers`.** Die zeggen hoe het account ooit is gemaakt en
+  welke inlogmanieren eraan hangen, niet hoe iemand nu is binnengekomen.
+- **Alles wat de browser meestuurt**: een verborgen veld, een rol in een formulier, een
+  adres in een aanvraag.
+
+Waar een recht wel aan mag hangen: aan hoe déze sessie is begonnen. Supabase schrijft dat
+bij het inloggen zelf op en zet het in het ondertekende token (`amr`: `oauth` via Cloudflare,
+`otp` per mail). De gebruiker kan dat niet wijzigen, en het blijft zo zolang de sessie duurt.
+De template heeft daar een functie voor, `sessie_via_cloudflare()`, en een voorbeeld
+(`supabase/migrations/20261114100000_klantportaal.sql`):
+
+```sql
+-- Goed: alleen een sessie via Cloudflare ziet alle klanten.
+create policy "klanten_select_eigen_of_medewerker" on public.klanten
+  for select to authenticated
+  using ((select auth.uid()) = user_id or (select public.is_medewerker()));
+
+-- Fout: het adres kan iedereen met toegang tot die mailbox claimen.
+--   using (auth.jwt() ->> 'email' like '%@bedrijf.nl')
+-- Fout: user_metadata vult de gebruiker zelf in.
+--   using (auth.jwt() -> 'user_metadata' ->> 'rol' = 'medewerker')
+```
+
+Drie dingen die daarbij horen:
+
+- **Per mail is een medewerker gewoon klant.** Dat is de bedoeling: wie meer wil mogen, logt
+  in met de knop voor medewerkers.
+- **Een nieuwe klant mag niets tot een medewerker hem goedkeurt.** Iedereen kan per mail een
+  account maken, dus een account alleen is geen recht. In het voorbeeld meldt een klant zich
+  aan (`klant_aanmelden()`), zet een medewerker `goedgekeurd` aan, en gebruiken de policies
+  van de eigen tabellen `is_goedgekeurde_klant()`. Het adres in die tabel komt uit het
+  account zelf, niet uit wat de browser meestuurt.
+- **Cloudflare is de enige inlogdienst naast mail.** Het token zegt "via een inlogdienst",
+  niet welke. Zet daarom in Supabase niet ook Google of Microsoft rechtstreeks aan; hangt er
+  een tweede dienst aan een account, dan zegt de functie nee.
+
+Test het zoals RLS: `tests/rls/klantportaal.test.ts` logt echt in per mail op het adres van
+een medewerker en verwacht geen medewerkerrechten; dezelfde persoon via Cloudflare krijgt ze
+wel. Elke tabel die medewerkers meer laat zien dan klanten, krijgt zo'n test.
+
 In de tijdelijke stand draait de app alleen op `<worker>.<subdomein>.workers.dev`; een
 Access-app op een hostname is er nog niet. Het is een overbrugging, geen keuze voor de
 lange termijn: is het domein er, dan komt de route erbij. Dat overstappen gaat met de

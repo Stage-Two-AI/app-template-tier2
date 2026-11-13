@@ -49,12 +49,37 @@ export type Database = {
         };
         Relationships: [];
       };
+      klanten: {
+        Row: {
+          aangemeld_op: string;
+          e_mail: string;
+          goedgekeurd: boolean;
+          user_id: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          aangemeld_op?: string;
+          e_mail: string;
+          goedgekeurd?: boolean;
+          user_id: string;
+        };
+        Update: {
+          aangemeld_op?: string;
+          e_mail?: string;
+          goedgekeurd?: boolean;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      is_goedgekeurde_klant: { Args: never; Returns: boolean };
+      is_medewerker: { Args: never; Returns: boolean };
+      klant_aanmelden: { Args: never; Returns: undefined };
+      sessie_via_cloudflare: { Args: never; Returns: boolean };
     };
     Enums: {
       [_ in never]: never;
