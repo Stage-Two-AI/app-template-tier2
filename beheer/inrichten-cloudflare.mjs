@@ -1416,6 +1416,7 @@ export async function richtIn(arg, d) {
       // dicht. Het merk staat in de lijst Access-apps die de verkenning toch al leest; een app
       // die nooit klantportaal was heeft het niet en krijgt hier geen woord meer dan op 42.
       resultaat.waarschuwingen.push(portaalDicht(arg, v));
+      d.meldPortaal?.();
     }
     return resultaat;
   }
@@ -1525,6 +1526,7 @@ export async function richtIn(arg, d) {
       heeftPortaalMerk(v.workerAccess) ||
       wasKlantportaal(vorig, portaalHookFuncties(arg.voorvoegsel));
     if (!sluit) return {};
+    d.meldPortaal?.();
     if (!v.tijdelijk && !deur) {
       deur = await cf.maakApp(
         deurApp({ naam: v.namen.deur, hostname: v.hostname, policyIds, idps: v.idps }),
@@ -2116,6 +2118,9 @@ export async function werkToegangBij(arg, d) {
   // Het merk van een klantportaal, uit de lijst Access-apps die hierboven toch al is gelezen.
   const merkVan = (app) => heeftPortaalMerk(apps.find((a) => a.name === appNamen(app, vv).worker));
   const alsPortaal = (app) => isKlantportaal(t, app) || merkVan(app);
+  // Een portaal dat nog dicht moet (merk, maar geen klantportaal meer in het bestand): de
+  // samenvatting van het script hoort erbij.
+  if (doelApps.some((app) => !isKlantportaal(t, app) && merkVan(app))) d.meldPortaal?.();
   const projectVan = (app) => projecten.find((p) => p.name === appNamen(app, vv).project);
   const testProjectVan = (app) => projecten.find((p) => p.name === appNamen(app, vv).test);
   if (arg.droogloop) {
@@ -2383,6 +2388,13 @@ export function schrijfSamenvatting(tekst, geheimen = [], env = process.env) {
   }
 }
 
+/** Staat er in toegang.json minstens één klantportaal? Leest ook een ongeldig bestand zonder te gooien. */
+export function heeftKlantportaal(t) {
+  const apps = t?.apps;
+  if (!apps || typeof apps !== "object") return false;
+  return Object.keys(apps).some((app) => isKlantportaal(t, app));
+}
+
 function eis(naam) {
   const w = process.env[naam];
   if (!w) throw new Error(`${naam} ontbreekt; zie beheer/README.md (voorwaarden P1 tot en met P4)`);
@@ -2402,6 +2414,7 @@ if (
   new URL(`file://${process.argv[1]}`).pathname === new URL(import.meta.url).pathname
 ) {
   const geheimen = [];
+  let portaalInSpel = false;
   const maskeer = (waarde) => {
     if (!waarde) return;
     geheimen.push(waarde);
@@ -2426,8 +2439,6 @@ if (
       "SUPABASE_ACCESS_TOKEN",
       "GH_TOKEN",
       "SENTRY_AUTH_TOKEN",
-      "SMTP_WACHTWOORD",
-      "TURNSTILE_GEHEIM",
     ])
       maskeer(process.env[naam]);
     const ghNodig = !arg.droogloop && ["inrichten", "opruimen"].includes(modus);
@@ -2463,7 +2474,20 @@ if (
       smtpWachtwoord: process.env.SMTP_WACHTWOORD?.trim() || undefined,
       captchaGeheim: process.env.TURNSTILE_GEHEIM?.trim() || undefined,
       maskeer,
+      meldPortaal: () => {
+        portaalInSpel = true;
+      },
     };
+    // De twee geheimen van een klantportaal maskeren (getrimd; leeg slaat maskeer over) en de
+    // eigen samenvatting schrijven gebeurt alleen als er in toegang.json een klantportaal staat,
+    // of als deze run een portaal ziet dat dicht moet (meldPortaal). Zonder klantportaal zijn
+    // stdout en de samenvatting gelijk aan versie 42, ook als die secrets toevallig bestaan; de
+    // workflow schrijft dan zelf zijn samenvatting.
+    portaalInSpel = heeftKlantportaal(d.toegang);
+    if (portaalInSpel) {
+      maskeer(d.smtpWachtwoord);
+      maskeer(d.captchaGeheim);
+    }
     const uitvoeren = {
       inrichten: richtIn,
       opruimen: ruimOp,
@@ -2473,12 +2497,12 @@ if (
     const resultaat = await uitvoeren(arg, d);
     const eind = eindstatus(modus, resultaat);
     process.stdout.write(uitvoerRegel(eind, geheimen));
-    schrijfSamenvatting(samenvatting(modus, eind), geheimen);
+    if (portaalInSpel) schrijfSamenvatting(samenvatting(modus, eind), geheimen);
     if (eind.status !== "gelukt") process.exitCode = 1;
   } catch (fout) {
     const eind = { status: "mislukt", modus, reden: fout.message };
     process.stdout.write(uitvoerRegel(eind, geheimen));
-    schrijfSamenvatting(samenvatting(modus, eind), geheimen);
+    if (portaalInSpel) schrijfSamenvatting(samenvatting(modus, eind), geheimen);
     process.exitCode = 1;
   }
 }

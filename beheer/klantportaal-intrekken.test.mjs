@@ -790,3 +790,127 @@ test("een gewone app met een eigen hook die op <voorvoegsel>portaal_voor_token e
   assert.deepEqual(bans(w), [ID(2)]);
   assert.equal(r2.klanten, undefined);
 });
+
+// ---------------------------------------------------------------- de eigen samenvatting
+
+test("het script schrijft zijn eigen samenvatting alleen bij een portaal: App inrichten en Toegang bijwerken melden een portaal dat dicht moet (meldPortaal), een gewone app die nooit klantportaal was nooit", async () => {
+  const meldingen = (w, toegang) => {
+    const d = opzet(w, toegang);
+    d.gemeld = 0;
+    d.meldPortaal = () => {
+      d.gemeld += 1;
+    };
+    return d;
+  };
+  // Een gewone app die nooit klantportaal was: in geen enkele modus een melding.
+  const w = nepWolk({ gebruikers: [klant(2, "vreemd@elders.example")], workerBestaat: true });
+  for (const draai of [
+    (d) => richtIn(ARG, d),
+    (d) => richtIn({ ...ARG, droogloop: true }, d),
+    (d) => tweedeDoorgang(ARG, d),
+    (d) => werkToegangBij({ voorvoegsel: "vb-" }, d),
+    (d) => werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, d),
+  ]) {
+    const d = meldingen(w, DEUR);
+    await draai(d);
+    assert.equal(d.gemeld, 0);
+  }
+  // Een portaal dat dicht moet: de droogloop en de echte run van Toegang bijwerken en App
+  // inrichten melden het.
+  const p = await portaalMet([klant(1, "inkoop@bloemist.nl")]);
+  for (const draai of [
+    (d) => werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, d),
+    (d) => werkToegangBij({ voorvoegsel: "vb-" }, d),
+    (d) => richtIn({ ...ARG, droogloop: true }, d),
+    (d) => richtIn(ARG, d),
+  ]) {
+    const d = meldingen(p, DEUR);
+    await draai(d);
+    assert.ok(d.gemeld > 0);
+  }
+});
+
+// ---------------------------------------------------------------- het merk tegen de echte API
+
+/**
+ * Doel 5 van de vierde aanval (het merk tegen de echte API) is een open punt (KLANTPORTAAL.md):
+ * dat kan alleen op een echt account. Wat hier wel vaststaat: een gewone app merkt niets van
+ * de twee manieren waarop de API anders kan zijn dan de nep-wolk aanneemt.
+ */
+function wolkMetAfwijking(soort) {
+  const w = nepWolk({
+    workerBestaat: true,
+    gebruikers: [medewerker(1, "piet@voorbeeld.nl"), klant(2, "klant@elders.nl")],
+  });
+  const echt = w.fetchFn;
+  w.fetchFn = async (url, o = {}) => {
+    const methode = o.method ?? "GET";
+    if (soort === "leeg-negeert" && methode === "PUT" && /\/access\/apps\//.test(url)) {
+      const body = JSON.parse(o.body);
+      if (body.custom_deny_message === "") delete body.custom_deny_message;
+      return echt(url, { ...o, body: JSON.stringify(body) });
+    }
+    const a = await echt(url, o);
+    if (
+      soort === "niet-in-lijst" &&
+      methode === "GET" &&
+      /\/access\/apps$/.test(new URL(url).pathname)
+    ) {
+      const data = JSON.parse(await a.text());
+      for (const x of data.result ?? []) delete x.custom_deny_message;
+      return { ...a, text: async () => JSON.stringify(data) };
+    }
+    return a;
+  };
+  return w;
+}
+
+test("een gewone app merkt niets van hoe de echte API het merk teruggeeft of wist: ook als de lijst het veld weglaat of een lege tekst negeert, zijn de aanroepen gelijk", async () => {
+  const beeld = async (soort) => {
+    const w = wolkMetAfwijking(soort);
+    await richtIn(ARG, opzet(w, DEUR));
+    await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
+    return JSON.stringify(
+      w.aanroepen.map((a) => [
+        a.soort,
+        a.methode,
+        a.url ?? a.args,
+        a.body instanceof FormData ? "" : a.body,
+      ]),
+    );
+  };
+  const gewoon = await beeld("gewoon");
+  assert.equal(await beeld("niet-in-lijst"), gewoon);
+  assert.equal(await beeld("leeg-negeert"), gewoon);
+});
+
+// ---------------------------------------------------------------- klantportaal: false
+
+test('"klantportaal": false is geldig (op 42 geweigerd als onbekend veld) en onschuldig: App inrichten, de tweede doorgang en Toegang bijwerken doen precies hetzelfde als zonder het veld', async () => {
+  const lang = (extra) => ({
+    groepen: GROEPEN,
+    apps: { direct: { groepen: ["kantoor"], ...extra } },
+  });
+  const beeld = async (toegang) => {
+    const w = nepWolk({
+      gebruikers: [medewerker(1, "piet@voorbeeld.nl"), klant(2, "vreemd@elders.example")],
+      workerBestaat: true,
+    });
+    const r = [
+      await richtIn(ARG, opzet(w, toegang)),
+      await tweedeDoorgang(ARG, opzet(w, toegang)),
+      await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, toegang)),
+      await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, toegang)),
+    ];
+    const aanroepen = w.aanroepen.map((a) => [
+      a.soort,
+      a.methode,
+      a.url ?? a.args,
+      a.body instanceof FormData ? "" : a.body,
+    ]);
+    return JSON.stringify({ r, aanroepen });
+  };
+  const zonder = await beeld(lang({}));
+  assert.equal(await beeld(lang({ klantportaal: false })), zonder);
+  assert.match(zonder, /vreemd@elders\.example/, "de vreemde is ingetrokken");
+});

@@ -93,5 +93,6 @@ jobs:
           if [ "$OPRUIMEN" = "true" ]; then args+=(--opruimen); fi
           if [ "$TWEEDE_DOORGANG" = "true" ]; then args+=(--tweede-doorgang); fi
           if [ "$DEUR_WEGHALEN" = "true" ]; then args+=(--deur-weghalen); fi
-          # Het script schrijft zelf een leesbare samenvatting bij de run (GITHUB_STEP_SUMMARY).
+          # Bij een klantportaal, of een portaal dat dicht moet, schrijft het script zelf een
+          # leesbare samenvatting bij de run (GITHUB_STEP_SUMMARY); anders niet, zoals op 42.
           node beheer/inrichten-cloudflare.mjs "${args[@]}"
