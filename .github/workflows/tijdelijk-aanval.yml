@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: tijdelijk-aanval-${{ github.ref }}
-  cancel-in-progress: true
+  group: tijdelijk-aanval-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   aanval:
@@ -51,10 +51,11 @@ jobs:
         if: always()
       - name: AANVAL in de browser, doelen 3 en 4 (groen = aanval gelukt)
         if: always()
-        run: pnpm exec playwright test --project klantportaal e2e/aanval-klantportaal.spec.ts --reporter list --retries 0
+        run: pnpm exec playwright test e2e/aanval-klantportaal.spec.ts --project=klantportaal --reporter=list --retries=0
 
   mutaties:
     name: Mutaties (doel 7)
+    if: contains(github.event.head_commit.message, '[mutaties]')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

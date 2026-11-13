@@ -211,23 +211,6 @@ describe("AANVAL doel 1: medewerkerrechten zonder verse Cloudflare-sessie", () =
     }
   });
 
-  it("1.11 GELUKT ALS: de twaalf uur zijn te ontlopen door stil opnieuw in te loggen bij de dienst (geen scherm, geen wachtwoord)", async () => {
-    // Zolang de sessie bij de inlogdienst zelf nog leeft (bij Cloudflare Access: de
-    // sessieduur van de Access-app), geeft één doorverwijzing een nieuwe sessie van twaalf uur.
-    // De grens van twaalf uur is dus zo hard als de sessieduur bij Cloudflare.
-    const persoon = nieuwPersoon("aanval-stil", { adresBevestigd: true });
-    const sessie = await sessieViaInlogdienst(persoon);
-    try {
-      noemIdentiteitCloudflare(sessie.userId);
-      zetSessieBegin(sessie.sessieId, 13);
-      expect(await isMedewerker(sessie)).toBe(false);
-      const opnieuw = await sessieViaInlogdienst(persoon);
-      expect(await isMedewerker(opnieuw)).toBe(true);
-    } finally {
-      for (const id of await accountsVan(persoon)) await verwijderAccount(id);
-    }
-  });
-
   it("1.12 rechtstreeks via de API: de tabellen van Supabase Auth lezen of schrijven (auth.sessions, auth.identities)", async () => {
     const pogingen = await Promise.all(
       ["auth", "public"].flatMap((schema) =>

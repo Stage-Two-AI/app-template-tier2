@@ -119,7 +119,9 @@ describe("AANVAL doel 4: de inloglink in de mail", () => {
     const uitkomsten = await Promise.all(
       Array.from({ length: 6 }, () => nieuweClient().auth.verifyOtp({ token_hash: tokenHash, type: "email" })),
     );
-    expect(uitkomsten.filter((uitkomst) => uitkomst.data.session).length).toBeGreaterThan(1);
+    const sessies = uitkomsten.filter((uitkomst) => uitkomst.data.session).length;
+    console.log(`4.3: ${sessies} van de 6 gelijktijdige pogingen met dezelfde link gaven een sessie`);
+    expect(sessies).toBeGreaterThan(1);
   });
 
   it("4.4 meerdere keren bruikbaar: na de link werkt de code uit dezelfde mail nog, of andersom", async () => {
@@ -188,13 +190,21 @@ describe("AANVAL: een nieuwe medewerker buitensluiten", () => {
       // Daarna logt de medewerker voor het eerst in via Cloudflare.
       const eerste = await inloggenViaInlogdienst(medewerker);
       expect(eerste.ok).toBe(false);
+      console.log(`K.1 eerste inlog via de dienst: ${JSON.stringify(eerste)}`);
       expect(eerste.ok ? "" : eerste.tekst).not.toContain("confirmation email has been sent");
       // Ook nadat hij zijn adres per mail heeft bevestigd, blijft de dienst hem weigeren.
-      await wacht(1200);
+      await wacht(1500);
       const lees = await wachtOpMailHtml(medewerker.email);
-      await vraagCodeAan(nieuweClient(), medewerker.email);
-      await inloggenMetCode(medewerker.email, codeUit((await lees()) ?? "") ?? "");
+      const opnieuw = await vraagCodeAan(nieuweClient(), medewerker.email);
+      console.log(`K.1 code aanvragen na de weigering: ${JSON.stringify(opnieuw.error)}`);
+      const html = await lees();
+      const code = codeUit(html ?? "");
+      console.log(`K.1 mail: ${html === null ? "geen" : "wel"}, code: ${code ? "wel" : "geen"}`);
+      if (code) await inloggenMetCode(medewerker.email, code);
       const tweede = await inloggenViaInlogdienst(medewerker);
+      console.log(`K.1 tweede inlog via de dienst: ${JSON.stringify(tweede.ok ? "gelukt" : tweede)}`);
+      const accounts = await accountsVan(medewerker);
+      console.log(`K.1 accounts voor deze persoon: ${accounts.length}`);
       expect(tweede.ok).toBe(false);
     } finally {
       for (const id of await accountsVan(medewerker)) await verwijderAccount(id);
