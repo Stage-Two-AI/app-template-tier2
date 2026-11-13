@@ -7,13 +7,17 @@ import {
   fout,
   foutUitAdres,
   herstel,
+  isDienstInlogBegonnen,
+  isHierAangevraagd,
   leesAdres,
   leesLink,
   type MailcodeAuth,
+  merkAangevraagd,
   type Toestand,
   volgende,
   vraagCode,
   wachtNog,
+  wisAangevraagd,
 } from "@/features/auth/mailcode";
 
 /**
@@ -30,6 +34,11 @@ export type Mailcode = {
   opnieuw: () => Promise<void>;
   anderAdres: () => void;
   bevestigLink: () => Promise<void>;
+  /**
+   * Alleen van belang op de stap `link`: heeft deze browser de mail zelf net aangevraagd?
+   * Zo niet, dan waarschuwt de pagina vóór de knop.
+   */
+  linkHierAangevraagd: boolean;
 };
 
 function opslag(): Storage | null {
@@ -40,13 +49,39 @@ function opslag(): Storage | null {
   }
 }
 
-function beginToestand(): { toestand: Toestand; tokenHash: string | null } {
-  const link = leesLink(window.location.search);
-  if (link) return { toestand: { ...BEGIN, stap: "link" }, tokenHash: link.tokenHash };
-  const uitAdres = foutUitAdres(window.location.search, window.location.hash);
-  if (uitAdres) return { toestand: { ...BEGIN, fout: uitAdres }, tokenHash: null };
+/** Gedeeld door de tabbladen van deze browser; zie `merkAangevraagd` in mailcode.ts. */
+function gedeeldeOpslag(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+type Begin = { toestand: Toestand; tokenHash: string | null; linkHierAangevraagd: boolean };
+
+function beginToestand(): Begin {
+  const nu = Date.now();
   const kluis = opslag();
-  return { toestand: kluis ? herstel(kluis, Date.now()) : BEGIN, tokenHash: null };
+  const link = leesLink(window.location.search);
+  if (link) {
+    const gedeeld = gedeeldeOpslag();
+    return {
+      toestand: { ...BEGIN, stap: "link" },
+      tokenHash: link.tokenHash,
+      linkHierAangevraagd: gedeeld !== null && isHierAangevraagd(gedeeld, nu),
+    };
+  }
+  const zelfBegonnen = kluis !== null && isDienstInlogBegonnen(kluis, nu);
+  const uitAdres = foutUitAdres(window.location.search, window.location.hash, zelfBegonnen);
+  if (uitAdres) {
+    return { toestand: { ...BEGIN, fout: uitAdres }, tokenHash: null, linkHierAangevraagd: false };
+  }
+  return {
+    toestand: kluis ? herstel(kluis, nu) : BEGIN,
+    tokenHash: null,
+    linkHierAangevraagd: false,
+  };
 }
 
 /** Haalt de eenmalige link of de fout uit de adresbalk, zodat verversen niets herhaalt. */
@@ -104,6 +139,8 @@ export function useMailcode(
       const op = Date.now();
       setNu(op);
       if (uitkomst.ok) {
+        const gedeeld = gedeeldeOpslag();
+        if (gedeeld) merkAangevraagd(gedeeld, op);
         stuur({ soort: "verstuurd", email: leesAdres(adres) ?? adres, op, opnieuw });
       } else {
         stuur({ soort: "mislukt", fout: uitkomst.fout });
@@ -129,8 +166,11 @@ export function useMailcode(
       // Gelukt: Supabase meldt de sessie zelf (use-session.ts) en de app stuurt door. De
       // pagina blijft tot dat moment op "bezig" staan.
       if (uitkomst.ok) {
+        // Ingelogd: het tabblad onthoudt het adres niet langer.
         const kluis = opslag();
         if (kluis) bewaar(kluis, BEGIN);
+        const gedeeld = gedeeldeOpslag();
+        if (gedeeld) wisAangevraagd(gedeeld);
       } else {
         stuur({ soort: "mislukt", fout: uitkomst.fout });
       }
@@ -144,7 +184,10 @@ export function useMailcode(
     if (!begin.tokenHash) return;
     stuur({ soort: "bezig", waarmee: "controleren" });
     const uitkomst = await controleerLink(auth, begin.tokenHash);
-    if (!uitkomst.ok) {
+    if (uitkomst.ok) {
+      const gedeeld = gedeeldeOpslag();
+      if (gedeeld) wisAangevraagd(gedeeld);
+    } else {
       maakAdresSchoon();
       stuur({ soort: "link-mislukt", fout: uitkomst.fout });
     }
@@ -155,5 +198,14 @@ export function useMailcode(
     if (begin.toestand.fout) maakAdresSchoon();
   }, [begin.toestand.fout]);
 
-  return { toestand, wachtNog: rest, verstuur, controleer, opnieuw, anderAdres, bevestigLink };
+  return {
+    toestand,
+    wachtNog: rest,
+    verstuur,
+    controleer,
+    opnieuw,
+    anderAdres,
+    bevestigLink,
+    linkHierAangevraagd: begin.linkHierAangevraagd,
+  };
 }

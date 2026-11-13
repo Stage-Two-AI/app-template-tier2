@@ -7,16 +7,23 @@ import {
   controleerLink,
   foutUitAdres,
   herstel,
+  isDienstInlogBegonnen,
   isHeleCode,
+  isHierAangevraagd,
   leesAdres,
   leesCode,
   leesLink,
   type MailcodeAuth,
+  merkAangevraagd,
+  merkDienstInlog,
+  ONTHOUD_ADRES_MS,
   type Toestand,
   volgende,
   vraagCode,
   WACHT_OPNIEUW_MS,
   wachtNog,
+  wisAangevraagd,
+  wisDienstInlog,
 } from "./mailcode";
 
 type Fout = { message: string; status?: number; code?: string; name?: string } | null;
@@ -105,12 +112,27 @@ describe("vraagCode", () => {
     const gevallen: [Fout, string][] = [
       [{ message: "rate limit", status: 429, code: "over_email_send_rate_limit" }, "te-vaak"],
       [{ message: "Failed to fetch", status: 0, name: "AuthRetryableFetchError" }, "verbinding"],
-      [{ message: "boem", status: 500 }, "verbinding"],
+      [{ message: "Failed to fetch", name: "AuthRetryableFetchError" }, "verbinding"],
       [{ message: "uit", status: 400, code: "email_provider_disabled" }, "uit"],
     ];
     for (const [otp, soort] of gevallen) {
       const uitkomst = await vraagCode(nepAuth({ otp }), "piet@klant.nl", TERUG);
       expect(uitkomst).toMatchObject({ ok: false, fout: { soort } });
+    }
+  });
+
+  it("een antwoord met een storing (5xx) ziet er hetzelfde uit als een verstuurde mail", async () => {
+    // Een hook van de inrichting die één adres weigert, komt bij Supabase soms terug als
+    // storing. Zou de pagina dan "geen verbinding" zeggen, dan is aan dat adres iets te zien.
+    for (const otp of [
+      { message: "weigering", status: 500, code: "hook_failed" },
+      { message: "boem", status: 500 },
+      { message: "bad gateway", status: 502, name: "AuthRetryableFetchError" },
+      { message: "time-out", status: 504, code: "hook_timeout" },
+    ]) {
+      expect(await vraagCode(nepAuth({ otp }), "medewerker@bedrijf.nl", TERUG)).toEqual({
+        ok: true,
+      });
     }
   });
 
@@ -170,6 +192,12 @@ describe("controleerCode", () => {
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "verlopen" } });
   });
 
+  it("zegt bij een storing niet dat de code fout is", async () => {
+    const verify = { message: "boem", status: 500 };
+    const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "12345678", vers);
+    expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "dienst" } });
+  });
+
   it("zegt het bij te veel pogingen", async () => {
     const verify = { message: "rate limit", status: 429, code: "over_request_rate_limit" };
     const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "12345678", vers);
@@ -220,11 +248,17 @@ describe("foutUitAdres", () => {
     expect(foutUitAdres("", "#error_description=Bel+0900")?.tekst).not.toContain("0900");
   });
 
+  const ONBEVESTIGD =
+    "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent+to+your+custom%3Acloudflare+email";
+  const BEZET =
+    "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+Verify+the+email+with+custom%3Acloudflare+in+order+to+sign+in";
+
   it("legt uit wat een nieuwe medewerker moet doen na 'Unverified email' van Supabase", () => {
     // Zo komt Supabase terug na de knop voor medewerkers (internal/api/external.go).
-    const terug =
-      "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent+to+your+custom%3Acloudflare+email";
-    for (const uitkomst of [foutUitAdres(terug, ""), foutUitAdres("", `#${terug.slice(1)}`)]) {
+    for (const uitkomst of [
+      foutUitAdres(ONBEVESTIGD, "", true),
+      foutUitAdres("", `#${ONBEVESTIGD.slice(1)}`, true),
+    ]) {
       expect(uitkomst?.soort).toBe("bevestig-adres");
       expect(uitkomst?.tekst).toContain("klik op de link in die mail");
       expect(uitkomst?.tekst).toContain("Inloggen voor medewerkers");
@@ -232,12 +266,13 @@ describe("foutUitAdres", () => {
     }
   });
 
-  it("zegt bij 'Unverified email' zonder mail dat de beheerder het moet oplossen", () => {
-    const terug =
-      "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+Verify+the+email+with+custom%3Acloudflare+in+order+to+sign+in";
-    const uitkomst = foutUitAdres(terug, "");
+  it("zegt bij 'Unverified email' zonder mail eerlijk wat er is en wat de beheerder moet doen", () => {
+    const uitkomst = foutUitAdres(BEZET, "", true);
     expect(uitkomst?.soort).toBe("adres-bezet");
-    expect(uitkomst?.tekst).toContain("Vraag je beheerder");
+    expect(uitkomst?.tekst).toContain("bestaat al een account dat nog niet bevestigd is");
+    expect(uitkomst?.tekst).toContain(
+      "Vraag je beheerder om dat account in Supabase (Authentication, Users) te bevestigen of te verwijderen",
+    );
     expect(uitkomst?.tekst).not.toMatch(/unverified|custom:cloudflare|verify/i);
   });
 
@@ -245,9 +280,22 @@ describe("foutUitAdres", () => {
     const uitkomst = foutUitAdres(
       "?error=access_denied&error_description=Unverified+email+with+custom%3Acloudflare.+Bel+0900-1234",
       "",
+      true,
     );
     expect(uitkomst?.soort).toBe("adres-bezet");
     expect(uitkomst?.tekst).not.toContain("0900");
+  });
+
+  it("geeft die uitleg alleen als deze browser de inlog zelf begon; een link van een ander kiest geen melding", () => {
+    // Een vreemde vraagt een code aan op het adres van het slachtoffer (dat krijgt een echte
+    // inlogmail) en stuurt daarna deze link. Zonder eigen poging zegt de pagina niets over
+    // "klik op de link in die mail".
+    for (const adres of [ONBEVESTIGD, BEZET]) {
+      for (const uitkomst of [foutUitAdres(adres, ""), foutUitAdres(adres, "", false)]) {
+        expect(uitkomst?.soort).toBe("dienst");
+        expect(uitkomst?.tekst).toBe("Inloggen is niet gelukt. Probeer het opnieuw.");
+      }
+    }
   });
 
   it("herkent een verlopen link", () => {
@@ -338,6 +386,18 @@ describe("onthouden tijdens het wisselen naar de mail-app", () => {
     });
   });
 
+  it("onthoudt het adres vijf minuten, niet zo lang als de code geldig is", () => {
+    // Op een gedeelde computer ziet de volgende het adres van de vorige anders een kwartier.
+    const opslag = nepOpslag();
+    bewaar(opslag, { ...BEGIN, stap: "code", email: "piet@klant.nl", verstuurdOp: nu });
+    expect(ONTHOUD_ADRES_MS).toBe(5 * 60 * 1000);
+    expect(ONTHOUD_ADRES_MS).toBeLessThan(CODE_GELDIG_MS);
+    expect(herstel(opslag, nu + ONTHOUD_ADRES_MS).stap).toBe("code");
+    expect(herstel(opslag, nu + ONTHOUD_ADRES_MS + 1)).toEqual(BEGIN);
+    // Een tijdstip in de toekomst (een verzette klok, of zelf ingevuld) telt niet.
+    expect(herstel(opslag, nu - 1)).toEqual(BEGIN);
+  });
+
   it("begint opnieuw als de code verlopen is of er niets bruikbaars staat", () => {
     const opslag = nepOpslag();
     bewaar(opslag, { ...BEGIN, stap: "code", email: "piet@klant.nl", verstuurdOp: nu });
@@ -353,5 +413,49 @@ describe("onthouden tijdens het wisselen naar de mail-app", () => {
     bewaar(opslag, { ...BEGIN, stap: "code", email: "piet@klant.nl", verstuurdOp: nu });
     bewaar(opslag, BEGIN);
     expect(opslag.inhoud.size).toBe(0);
+  });
+
+  it("onthoudt dat deze browser een code aanvroeg: alleen het tijdstip, een kwartier lang", () => {
+    const opslag = nepOpslag();
+    expect(isHierAangevraagd(opslag, nu)).toBe(false);
+    merkAangevraagd(opslag, nu);
+    expect([...opslag.inhoud.values()]).toEqual([String(nu)]);
+    expect(isHierAangevraagd(opslag, nu + CODE_GELDIG_MS)).toBe(true);
+    expect(isHierAangevraagd(opslag, nu + CODE_GELDIG_MS + 1)).toBe(false);
+    expect(isHierAangevraagd(opslag, nu - 1)).toBe(false);
+    wisAangevraagd(opslag);
+    expect(opslag.inhoud.size).toBe(0);
+    opslag.setItem("inlogcode-aangevraagd", "geen getal");
+    expect(isHierAangevraagd(opslag, nu)).toBe(false);
+  });
+
+  it("onthoudt dat dit tabblad naar de inlogdienst ging, los van de aanvraag van een code", () => {
+    const opslag = nepOpslag();
+    expect(isDienstInlogBegonnen(opslag, nu)).toBe(false);
+    merkDienstInlog(opslag, nu);
+    expect(isDienstInlogBegonnen(opslag, nu + 60_000)).toBe(true);
+    expect(isHierAangevraagd(opslag, nu + 60_000)).toBe(false);
+    expect(isDienstInlogBegonnen(opslag, nu + CODE_GELDIG_MS + 1)).toBe(false);
+    wisDienstInlog(opslag);
+    expect(isDienstInlogBegonnen(opslag, nu)).toBe(false);
+  });
+
+  it("werkt ook zonder opslag: dan is niets hier begonnen", () => {
+    const kapot = {
+      getItem: () => {
+        throw new Error("geen opslag");
+      },
+      setItem: () => {
+        throw new Error("geen opslag");
+      },
+      removeItem: () => {
+        throw new Error("geen opslag");
+      },
+    };
+    merkAangevraagd(kapot, nu);
+    merkDienstInlog(kapot, nu);
+    wisAangevraagd(kapot);
+    expect(isHierAangevraagd(kapot, nu)).toBe(false);
+    expect(isDienstInlogBegonnen(kapot, nu)).toBe(false);
   });
 });

@@ -8,10 +8,14 @@
   De link gaat naar de inlogpagina van de app met token_hash, niet naar Supabase zelf. Zo
   werkt hij ook in de ingebouwde browser van een mailprogramma of WhatsApp, en logt de
   pagina pas in na een klik (een virusscanner die links vooraf opent, verbruikt hem niet).
+
+  Het adres van de app komt uit SiteURL (site_url in supabase/config.toml), net als in de mail
+  die de inrichting in productie zet. Bewust niet uit RedirectTo: dat geeft de aanvrager zelf
+  op, en iedereen kan voor elk adres een mail aanvragen.
 -->
 <h2>Je inlogcode</h2>
 <p>Vul deze code in op de inlogpagina:</p>
 <p style="font-size: 28px; font-weight: bold; letter-spacing: 6px"><span id="code">{{ .Token }}</span></p>
-<p>De code is een kwartier geldig en werkt één keer.</p>
-<p>Of <a id="link" href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email">log in met deze link</a>.</p>
-<p>Heb je dit niet zelf aangevraagd? Dan hoef je niets te doen; zonder de code kan niemand inloggen.</p>
+<p>De code is een kwartier geldig.</p>
+<p>Of <a id="link" href="{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=email">log in met deze link</a>.</p>
+<p>Heb je dit niet zelf aangevraagd? Dan hoef je niets te doen. Klik niet op de link en geef de code aan niemand door.</p>

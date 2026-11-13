@@ -156,12 +156,17 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# De link in de inlogmail gaat altijd hierheen (supabase/templates/inlogcode.html gebruikt
+# SiteURL, net als de mail in productie), wat de aanvrager ook opgeeft. Lokaal is dat de poort
+# waarop de browsertest de app als klantportaal draait (playwright.config.ts). Logt jouw app
+# alleen met `mailcode` in, zet hier dan de poort waarop jouw browsertest draait.
+site_url = "http://127.0.0.1:4174"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # Erbij: de adressen waarop de app lokaal en in de browsertest draait (dev-server, gebouwde app,
-# en de gebouwde app als klantportaal). De link in de inlogmail mag alleen daarheen terug.
+# en de gebouwde app als klantportaal). Na inloggen via een inlogdienst mag Supabase alleen
+# daarheen terug.
 additional_redirect_urls = [
   "https://127.0.0.1:3000",
   "http://127.0.0.1:5173/login",

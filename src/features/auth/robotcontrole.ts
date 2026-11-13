@@ -83,6 +83,10 @@ export type Robotcontrole = {
 /**
  * Geeft null zonder sleutel: dan staat de controle uit. Met sleutel: de widget in `vak` en
  * het bewijs via `haalToken`.
+ *
+ * Laden kan mislukken (een blokkeerder, geen verbinding). Dan zegt `haalToken` dat meteen, en
+ * probeert elke volgende klik het laden opnieuw: wie zijn blokkeerder uitzet, hoeft de pagina
+ * niet te verversen.
  */
 export function useRobotcontrole(
   sitekey: string | undefined,
@@ -92,6 +96,9 @@ export function useRobotcontrole(
   const token = useRef<string | null>(null);
   const wachters = useRef<((token: string | null) => void)[]>([]);
   const widget = useRef<{ api: TurnstileApi; id: string } | null>(null);
+  const element = useRef<HTMLDivElement | null>(null);
+  /** De lopende of laatste poging om de widget neer te zetten; `mislukt` als die niet lukte. */
+  const poging = useRef<{ klaar: Promise<boolean>; mislukt: boolean } | null>(null);
 
   const meld = useCallback((nieuw: string | null) => {
     token.current = nieuw;
@@ -99,14 +106,17 @@ export function useRobotcontrole(
     for (const wachter of wachters.current.splice(0)) wachter(nieuw);
   }, []);
 
-  const vak = useCallback(
-    (element: HTMLDivElement | null) => {
-      if (!element || !sitekey) return undefined;
-      let weg = false;
-      laad()
+  /** Laadt het script en zet de widget in het vak. Geeft false als dat niet lukt. */
+  const zetNeer = useCallback((): Promise<boolean> => {
+    const doel = element.current;
+    if (!doel || !sitekey) return Promise.resolve(false);
+    const deze: { klaar: Promise<boolean>; mislukt: boolean } = {
+      mislukt: false,
+      klaar: laad()
         .then((api) => {
-          if (weg) return;
-          const id = api.render(element, {
+          // Het vak is intussen weg of vervangen: deze poging telt niet meer.
+          if (element.current !== doel || poging.current !== deze) return false;
+          const id = api.render(doel, {
             sitekey,
             callback: (nieuw) => meld(nieuw),
             "expired-callback": () => meld(null),
@@ -119,14 +129,31 @@ export function useRobotcontrole(
             size: "flexible",
             action: "inlogcode",
           });
-          if (id) widget.current = { api, id };
+          if (!id) throw new Error("Turnstile zette geen widget neer.");
+          widget.current = { api, id };
+          return true;
         })
         .catch(() => {
-          // Geen script (blokkeerder, geen verbinding): wie wacht, hoort meteen dat het niet lukt.
-          for (const wachter of wachters.current.splice(0)) wachter(null);
-        });
+          deze.mislukt = true;
+          // Geen widget: wie wacht, hoort meteen dat het niet lukt.
+          if (poging.current === deze) {
+            for (const wachter of wachters.current.splice(0)) wachter(null);
+          }
+          return false;
+        }),
+    };
+    poging.current = deze;
+    return deze.klaar;
+  }, [sitekey, laad, meld]);
+
+  const vak = useCallback(
+    (nieuw: HTMLDivElement | null) => {
+      if (!nieuw || !sitekey) return undefined;
+      element.current = nieuw;
+      void zetNeer();
       return () => {
-        weg = true;
+        if (element.current === nieuw) element.current = null;
+        poging.current = null;
         token.current = null;
         const huidige = widget.current;
         widget.current = null;
@@ -137,11 +164,15 @@ export function useRobotcontrole(
         }
       };
     },
-    [sitekey, laad, meld],
+    [sitekey, zetNeer],
   );
 
-  const haalToken = useCallback((): Promise<string | null> => {
-    if (token.current) return Promise.resolve(token.current);
+  const haalToken = useCallback(async (): Promise<string | null> => {
+    if (token.current) return token.current;
+    // Was het laden al mislukt, probeer het dan nu opnieuw; lukt het weer niet, dan weet de
+    // gebruiker dat meteen en niet pas na de hele wachttijd.
+    if (poging.current?.mislukt && !(await zetNeer())) return null;
+    if (token.current) return token.current;
     return new Promise((klaar) => {
       const wachter = (nieuw: string | null) => {
         window.clearTimeout(klok);
@@ -153,7 +184,7 @@ export function useRobotcontrole(
       }, wachtMs);
       wachters.current.push(wachter);
     });
-  }, [wachtMs]);
+  }, [wachtMs, zetNeer]);
 
   const verbruikt = useCallback(() => {
     token.current = null;

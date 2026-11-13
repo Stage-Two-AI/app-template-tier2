@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const signInWithOAuth = vi.fn();
 const signInWithOtp = vi.fn();
 const signInWithPassword = vi.fn();
+const verifyOtp = vi.fn();
 
 vi.mock("@/lib/supabase", () => ({
-  supabase: { auth: { signInWithOAuth, signInWithOtp, signInWithPassword } },
+  supabase: { auth: { signInWithOAuth, signInWithOtp, signInWithPassword, verifyOtp } },
 }));
 
 const { LoginPage } = await import("./login-page");
@@ -16,12 +17,16 @@ beforeEach(() => {
   signInWithOAuth.mockResolvedValue({ data: {}, error: null });
   signInWithOtp.mockResolvedValue({ data: {}, error: null });
   signInWithPassword.mockResolvedValue({ data: {}, error: null });
+  verifyOtp.mockResolvedValue({ data: {}, error: null });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  window.sessionStorage.clear();
+  window.localStorage.clear();
   window.history.replaceState(null, "", "/login");
+  for (const script of document.head.querySelectorAll("script")) script.remove();
 });
 
 describe("LoginPage met cloudflare", () => {
@@ -39,9 +44,50 @@ describe("LoginPage met cloudflare", () => {
       "/login?error=access_denied&error_description=geen+toegang",
     );
     render(<LoginPage dienst="cloudflare" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("geen toegang");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Inloggen is niet gelukt. Probeer het opnieuw of vraag je beheerder om toegang.",
+    );
     expect(signInWithOAuth).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Opnieuw proberen" })).toBeInTheDocument();
+  });
+
+  it("toont een vaste tekst, nooit de tekst uit het adres", async () => {
+    // Anders zet iedereen met een link eigen tekst op het echte inlogscherm.
+    const vanEenAnder = encodeURIComponent("Uw account is geblokkeerd. Bel 0900-1234.");
+    window.history.replaceState(
+      null,
+      "",
+      `/login?error=${vanEenAnder}&error_description=${vanEenAnder}#error_description=${vanEenAnder}`,
+    );
+    render(<LoginPage dienst="cloudflare" />);
+    const melding = await screen.findByRole("alert");
+    expect(melding).toHaveTextContent("Inloggen is niet gelukt");
+    expect(document.body).not.toHaveTextContent(/0900|geblokkeerd/);
+  });
+
+  it("legt een nieuwe medewerker uit wat te doen, alleen als dit tabblad zelf naar Cloudflare ging", async () => {
+    const onbevestigd =
+      "/login?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent";
+    window.history.replaceState(null, "", onbevestigd);
+    render(<LoginPage dienst="cloudflare" />);
+    expect(await screen.findByRole("alert")).not.toHaveTextContent("klik op de link");
+    cleanup();
+
+    // Nu wel zelf begonnen: de pagina stuurt door, Supabase komt terug met de weigering.
+    window.history.replaceState(null, "", "/login");
+    render(<LoginPage dienst="cloudflare" />);
+    await waitFor(() => expect(signInWithOAuth).toHaveBeenCalledTimes(1));
+    cleanup();
+    window.history.replaceState(null, "", onbevestigd);
+    render(<LoginPage dienst="cloudflare" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("klik op de link in die mail");
+    expect(document.body).not.toHaveTextContent(/unverified|custom:cloudflare/i);
+  });
+
+  it("laadt geen controle tegen robots, ook niet als de sleutel gezet is", async () => {
+    render(<LoginPage dienst="cloudflare" robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(signInWithOAuth).toHaveBeenCalled());
+    expect(document.head.querySelector('script[src*="turnstile"]')).toBeNull();
   });
 
   it("laat Supabase terugsturen naar /login, zodat een weigering daar zichtbaar blijft", async () => {
@@ -55,7 +101,7 @@ describe("LoginPage met cloudflare", () => {
   it("stuurt ook zonder uitleg niet opnieuw door na ?error=access_denied", async () => {
     window.history.replaceState(null, "", "/login?error=access_denied");
     render(<LoginPage dienst="cloudflare" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("access_denied");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Inloggen is niet gelukt");
     expect(signInWithOAuth).not.toHaveBeenCalled();
   });
 
@@ -84,6 +130,24 @@ describe("LoginPage met andere diensten", () => {
       `${window.location.origin}/login`,
     );
     expect(await screen.findByRole("status")).toHaveTextContent("mail");
+  });
+
+  it("verwerkt bij mailcode ook de link uit de inlogmail (token_hash), pas na een klik", async () => {
+    // Lokaal en in CI wijst de link in de mail naar /login?token_hash=...&type=email
+    // (supabase/templates/inlogcode.html), ook voor een app met alleen mailcode.
+    window.history.replaceState(
+      null,
+      "",
+      "/login?token_hash=pkce_0123456789abcdef0123456789abcdef&type=email",
+    );
+    render(<LoginPage dienst="mailcode" />);
+    expect(verifyOtp).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Stuur inloglink" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen" }));
+    expect(verifyOtp).toHaveBeenCalledWith({
+      token_hash: "pkce_0123456789abcdef0123456789abcdef",
+      type: "email",
+    });
   });
 
   it("controleert bij mailcode eerst het adres, zonder Supabase aan te roepen", async () => {

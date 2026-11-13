@@ -53,7 +53,7 @@ describe("AppMetDatabase op /login", () => {
   it("toont zonder sessie de fout van Supabase en stuurt niet opnieuw door", async () => {
     sessie.mockReturnValue({ session: null, loading: false });
     renderOp("/login?error=access_denied");
-    expect(await screen.findByRole("alert")).toHaveTextContent("access_denied");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Inloggen is niet gelukt");
     expect(screen.getByTestId("adres")).toHaveTextContent("/login?error=access_denied");
     expect(signInWithOAuth).not.toHaveBeenCalled();
   });
@@ -64,5 +64,7 @@ describe("AppMetDatabase op /login", () => {
     expect(await screen.findByText("Startpagina")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("adres").textContent).toBe("/"));
     expect(signInWithOAuth).not.toHaveBeenCalled();
+    // Eén dienst blijft als vanouds: geen tussenpagina en geen melding bovenin.
+    expect(screen.queryByText(/Je bent/)).toBeNull();
   });
 });

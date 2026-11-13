@@ -44,13 +44,27 @@ describe("supabase/config.toml: de mailcode lokaal", () => {
     }
     const mail = lees("supabase/templates/inlogcode.html");
     expect(mail).toContain('<span id="code">{{ .Token }}</span>');
+    // Zoals de mail in productie: het adres van de app zelf, nooit wat de aanvrager opgeeft.
     expect(mail).toContain(
-      'id="link" href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email"',
+      'id="link" href="{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=email"',
     );
+    expect(mail.split("-->")[1]).not.toContain("RedirectTo");
   });
 
-  it("de link mag terug naar de inlogpagina van de browsertest", () => {
-    expect(toml).toContain('"http://127.0.0.1:4174/login"');
+  it("de mail belooft niet dat de code of de link maar één keer werkt", () => {
+    // Na elkaar is dat zo, maar gelijktijdig gebruik kan Supabase niet uitsluiten.
+    const mail = lees("supabase/templates/inlogcode.html").split("-->")[1] ?? "";
+    expect(mail).not.toMatch(/één keer|eenmalig/i);
+    expect(mail).toContain("een kwartier geldig");
+  });
+
+  it("de link in de mail gaat naar de poort waarop de browsertest het klantportaal draait", () => {
+    const poort = /const PORT_KLANTPORTAAL = (\d+);/.exec(lees("playwright.config.ts"))?.[1];
+    expect(poort).toBeDefined();
+    expect(blok(toml, "auth")).toMatch(
+      new RegExp(`^site_url = "http://127\\.0\\.0\\.1:${poort}"$`, "m"),
+    );
+    expect(toml).toContain(`"http://127.0.0.1:${poort}/login"`);
   });
 });
 

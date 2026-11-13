@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 const { LoginPage } = await import("./login-page");
+const { useMailcode } = await import("./use-mailcode");
 
 const KLANTPORTAAL = ["cloudflare", "mailcode"] as const;
 const AFGEWEZEN = { message: "Token has expired or is invalid", status: 403, code: "otp_expired" };
@@ -27,6 +28,7 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
   window.sessionStorage.clear();
+  window.localStorage.clear();
   window.history.replaceState(null, "", "/login");
 });
 
@@ -74,6 +76,17 @@ describe("klantportaal: de knop voor medewerkers", () => {
     expect(signInWithOtp).not.toHaveBeenCalled();
   });
 
+  it("wijst een medewerker onder het vak voor klanten op de knop: één account per adres", () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(
+      screen.getByText("Werk je hier? Gebruik de knop Inloggen voor medewerkers."),
+    ).toBeInTheDocument();
+    cleanup();
+    // Zonder knop voor medewerkers is er niets om naar te wijzen.
+    render(<LoginPage dienst={["mailcode", "google"]} />);
+    expect(screen.queryByText(/Werk je hier/)).toBeNull();
+  });
+
   it("zegt het als doorsturen naar Cloudflare mislukt", async () => {
     signInWithOAuth.mockResolvedValue({ data: {}, error: { message: "provider niet gevonden" } });
     render(<LoginPage dienst={KLANTPORTAAL} />);
@@ -100,21 +113,39 @@ describe("klantportaal: Supabase weigert een medewerker na de knop van Cloudflar
   const ONBEVESTIGD =
     "/login?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent+to+your+custom%3Acloudflare+email";
 
-  it("zegt in gewoon Nederlands wat de medewerker moet doen, zonder de ruwe tekst", async () => {
-    window.history.replaceState(null, "", ONBEVESTIGD);
+  /** De medewerker klikt op de knop; Supabase stuurt hem daarna terug met een weigering. */
+  async function naDeKnop(terug: string) {
     render(<LoginPage dienst={KLANTPORTAAL} />);
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen voor medewerkers" }));
+    cleanup();
+    window.history.replaceState(null, "", terug);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+  }
+
+  it("zegt in gewoon Nederlands wat de medewerker moet doen, zonder de ruwe tekst", async () => {
+    await naDeKnop(ONBEVESTIGD);
     const melding = await screen.findByRole("alert");
     expect(melding).toHaveTextContent(
-      "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Log daarna uit en kies opnieuw Inloggen voor medewerkers.",
+      "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Kom daarna terug op deze pagina en kies opnieuw Inloggen voor medewerkers.",
     );
     expect(document.body).not.toHaveTextContent(/unverified|custom:cloudflare|access_denied/i);
     expect(window.location.search).toBe("");
-    expect(signInWithOAuth).not.toHaveBeenCalled();
+    expect(signInWithOAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it("toont die uitleg niet aan wie alleen een link kreeg: dan de neutrale melding", async () => {
+    // Een vreemde vraagt een code aan op het adres van het slachtoffer (dat krijgt een echte
+    // inlogmail) en stuurt daarna deze link. De echte inlogpagina zegt dan niet zelf dat het
+    // slachtoffer op de link in die mail moet klikken.
+    window.history.replaceState(null, "", ONBEVESTIGD);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    const melding = await screen.findByRole("alert");
+    expect(melding).toHaveTextContent("Inloggen is niet gelukt. Probeer het opnieuw.");
+    expect(document.body).not.toHaveTextContent(/klik op de link|beheerder/);
   });
 
   it("hangt die melding niet aan het adresveld van de klant", async () => {
-    window.history.replaceState(null, "", ONBEVESTIGD);
-    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naDeKnop(ONBEVESTIGD);
     await screen.findByRole("alert");
     const veld = screen.getByLabelText("E-mailadres");
     expect(veld).not.toHaveAttribute("aria-describedby");
@@ -124,20 +155,27 @@ describe("klantportaal: Supabase weigert een medewerker na de knop van Cloudflar
     expect(screen.getByRole("button", { name: "Doorgaan" })).toBeEnabled();
   });
 
-  it("zegt het als alleen de beheerder het kan oplossen", async () => {
-    window.history.replaceState(
-      null,
-      "",
+  it("zegt eerlijk wat er aan de hand is als alleen de beheerder het kan oplossen", async () => {
+    await naDeKnop(
       "/login#error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+Verify+the+email+with+custom%3Acloudflare+in+order+to+sign+in",
     );
-    render(<LoginPage dienst={KLANTPORTAAL} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Vraag je beheerder");
+    const melding = await screen.findByRole("alert");
+    expect(melding).toHaveTextContent("bestaat al een account dat nog niet bevestigd is");
+    expect(melding).toHaveTextContent(
+      "Vraag je beheerder om dat account in Supabase (Authentication, Users) te bevestigen of te verwijderen",
+    );
     expect(document.body).not.toHaveTextContent(/unverified|custom:cloudflare/i);
   });
 });
 
 describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", () => {
-  type Opties = { sitekey: string; callback: (token: string) => void; appearance: string };
+  type Opties = {
+    sitekey: string;
+    callback: (token: string) => void;
+    "expired-callback": () => void;
+    appearance: string;
+    action: string;
+  };
   let widgets: { vak: HTMLElement; opties: Opties }[] = [];
   const reset = vi.fn();
   const remove = vi.fn();
@@ -184,6 +222,8 @@ describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", ()
     await waitFor(() => expect(widgets).toHaveLength(1));
     expect(widgets[0]?.opties.sitekey).toBe("sleutel-van-de-site");
     expect(widgets[0]?.opties.appearance).toBe("interaction-only");
+    // Het bewijs geldt alleen voor deze actie; Supabase en Cloudflare zien waar het voor was.
+    expect(widgets[0]?.opties.action).toBe("inlogcode");
     expect(widgets[0]?.vak).toBe(screen.getByTestId("robotcontrole"));
     widgets[0]?.opties.callback("bewijs-1");
 
@@ -210,6 +250,22 @@ describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", ()
     widgets[0]?.opties.callback("bewijs-laat");
     await screen.findByLabelText("Code van acht cijfers");
     expect(signInWithOtp.mock.calls[0]?.[0].options.captchaToken).toBe("bewijs-laat");
+  });
+
+  it("stuurt een verlopen bewijs niet mee: de pagina wacht op een nieuw", async () => {
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(widgets).toHaveLength(1));
+    widgets[0]?.opties.callback("oud-bewijs");
+    // Turnstile meldt na vijf minuten dat het bewijs verlopen is.
+    widgets[0]?.opties["expired-callback"]();
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
+    expect(screen.getByRole("button", { name: "Bezig…" })).toBeDisabled();
+    expect(signInWithOtp).not.toHaveBeenCalled();
+    widgets[0]?.opties.callback("nieuw-bewijs");
+    await screen.findByLabelText("Code van acht cijfers");
+    expect(signInWithOtp.mock.calls[0]?.[0].options.captchaToken).toBe("nieuw-bewijs");
   });
 
   it("gebruikt voor een nieuwe code een nieuw bewijs: elk bewijs werkt één keer", async () => {
@@ -305,6 +361,28 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     });
   });
 
+  it("vergeet na het inloggen naar welk adres de code ging", async () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    const code = await naarCodestap("vorige@klant.nl");
+    expect(JSON.stringify({ ...window.sessionStorage })).toContain("vorige@klant.nl");
+    expect(window.localStorage.length).toBe(1);
+    await userEvent.type(code, "12345678");
+    await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.sessionStorage.length).toBe(0));
+    expect(window.localStorage.length).toBe(0);
+    // De volgende op dit tabblad begint bij een leeg formulier.
+    cleanup();
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByLabelText("E-mailadres")).toHaveValue("");
+    expect(document.body).not.toHaveTextContent("vorige@klant.nl");
+  });
+
+  it("bewaart buiten het tabblad alleen dat er een code is aangevraagd, niet het adres", async () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naarCodestap("piet@klant.nl");
+    expect(JSON.stringify({ ...window.localStorage })).not.toContain("piet");
+  });
+
   it("neemt een geplakte code met een spatie aan", async () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);
     const code = await naarCodestap();
@@ -353,6 +431,18 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     expect(document.body.innerHTML.replaceAll("onbekend@", "x@")).toBe(bekend);
   });
 
+  it("toont ook bij een weigering die als storing terugkomt hetzelfde scherm", async () => {
+    // Een hook van de inrichting die het adres van een medewerker weigert, kan als 500
+    // terugkomen. De pagina zegt dan niet "geen verbinding": daaraan zou het adres te zien zijn.
+    signInWithOtp.mockResolvedValue({
+      data: {},
+      error: { status: 500, code: "hook_failed", message: "weigering" },
+    });
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naarCodestap("medewerker@bedrijf.nl");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("zegt het bij te veel pogingen en blijft op het adres staan", async () => {
     signInWithOtp.mockResolvedValue({
       data: {},
@@ -371,6 +461,21 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     await userEvent.click(screen.getByRole("button", { name: "Ander e-mailadres" }));
     expect(screen.getByLabelText("E-mailadres")).toHaveValue("piet@klnat.nl");
     expect(screen.getByRole("button", { name: "Inloggen voor medewerkers" })).toBeInTheDocument();
+  });
+
+  it("toont het adres van de vorige niet meer als die vijf minuten geleden een code aanvroeg", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-11-14T10:00:00Z") });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await user.type(screen.getByLabelText("E-mailadres"), "vorige@klant.nl");
+    await user.click(screen.getByRole("button", { name: "Doorgaan" }));
+    await screen.findByLabelText("Code van acht cijfers");
+    cleanup();
+    // Een ander gaat op dezelfde computer in hetzelfde tabblad naar de inlogpagina.
+    vi.setSystemTime(new Date("2026-11-14T10:05:01Z"));
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByLabelText("E-mailadres")).toHaveValue("");
+    expect(document.body).not.toHaveTextContent("vorige@klant.nl");
   });
 
   it("komt na opnieuw laden (wisselen naar de mail-app) terug op het codevak", async () => {
@@ -417,6 +522,18 @@ describe("klantportaal: nieuwe code en verlopen code", () => {
     expect(screen.getByRole("button", { name: /Nieuwe code kan over/ })).toBeDisabled();
   });
 
+  it("vraagt binnen de minuut geen tweede code aan, ook niet buiten de knop om", async () => {
+    // De knop staat dan uit, maar de wachttijd zit ook in de stap zelf.
+    const auth = { signInWithOtp, verifyOtp, signInWithOAuth };
+    const { result } = renderHook(() => useMailcode(auth, () => "https://app.test/login"));
+    await result.current.verstuur("piet@klant.nl");
+    await waitFor(() => expect(result.current.toestand.stap).toBe("code"));
+    await result.current.opnieuw();
+    await result.current.opnieuw();
+    expect(signInWithOtp).toHaveBeenCalledTimes(1);
+    expect(result.current.wachtNog).toBeGreaterThan(0);
+  });
+
   it("zegt na een kwartier dat de code verlopen is", async () => {
     verifyOtp.mockResolvedValue({ data: {}, error: AFGEWEZEN });
     const user = metKlok();
@@ -433,6 +550,47 @@ describe("klantportaal: nieuwe code en verlopen code", () => {
 
 describe("klantportaal: de link uit de mail", () => {
   const LINK = "/login?token_hash=pkce_0123456789abcdef0123456789abcdef&type=email";
+
+  it("waarschuwt vóór de knop als de mail niet in deze browser is aangevraagd", async () => {
+    // Een ander kan je de link uit zíjn inlogmail sturen: dan log je in op zijn account.
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    const waarschuwing = screen.getByTestId("link-waarschuwing");
+    expect(waarschuwing).toHaveTextContent("Heb je deze mail zelf aangevraagd?");
+    expect(waarschuwing).toHaveTextContent("dan kom je in het account van die ander");
+    // De knop staat er nog: wie het zelf aanvroeg in een andere browser, kan gewoon door.
+    expect(verifyOtp).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen" }));
+    expect(verifyOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it("waarschuwt niet als deze browser de code zelf net aanvroeg, ook in een nieuw tabblad", async () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naarCodestap();
+    cleanup();
+    // De link uit de mail opent in een nieuw tabblad: zonder wat het eerste tabblad onthield.
+    window.sessionStorage.clear();
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.queryByTestId("link-waarschuwing")).toBeNull();
+    expect(screen.getByText("Je bent er bijna. Klik op de knop om in te loggen.")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Inloggen" }));
+    await waitFor(() => expect(window.localStorage.length).toBe(0));
+  });
+
+  it("waarschuwt weer als de aanvraag ouder is dan de mail geldig is", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-11-14T10:00:00Z") });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await user.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await user.click(screen.getByRole("button", { name: "Doorgaan" }));
+    await screen.findByLabelText("Code van acht cijfers");
+    cleanup();
+    vi.setSystemTime(new Date("2026-11-14T10:15:01Z"));
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByTestId("link-waarschuwing")).toBeInTheDocument();
+  });
 
   it("logt pas in na een klik, niet vanzelf bij het openen", async () => {
     window.history.replaceState(null, "", LINK);

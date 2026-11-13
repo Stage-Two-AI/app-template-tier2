@@ -9,6 +9,7 @@ import {
   isHeleCode,
   leesCode,
   type MailcodeAuth,
+  merkDienstInlog,
 } from "@/features/auth/mailcode";
 import { type Robotcontrole, useRobotcontrole } from "@/features/auth/robotcontrole";
 import { useMailcode } from "@/features/auth/use-mailcode";
@@ -91,6 +92,13 @@ export function InlogMetCode({
     <Pagina kop="Inloggen">
       {toestand.fout && (vanDienst || !metMail) ? <Melding>{toestand.fout.tekst}</Melding> : null}
       {metMail ? <AdresStap mailcode={mailcode} robot={robot} toonFout={!vanDienst} /> : null}
+      {metMail && knoppen.includes("cloudflare") ? (
+        // Supabase kent één account per adres. Een medewerker die hier zijn werkadres invult,
+        // maakt een klantaccount op dat adres en loopt daarna vast bij de knop.
+        <p className="text-sm text-muted-foreground">
+          Werk je hier? Gebruik de knop Inloggen voor medewerkers.
+        </p>
+      ) : null}
       {metMail && knoppen.length > 0 ? (
         <div className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />
@@ -265,9 +273,25 @@ function LinkStap({ mailcode }: StapProps) {
   const bezig = mailcode.toestand.bezig !== null;
   return (
     <Pagina kop="Inloggen">
-      <p className="text-sm text-muted-foreground">
-        Je bent er bijna. Klik op de knop om in te loggen.
-      </p>
+      {mailcode.linkHierAangevraagd ? (
+        <p className="text-sm text-muted-foreground">
+          Je bent er bijna. Klik op de knop om in te loggen.
+        </p>
+      ) : (
+        // De mail is niet in deze browser aangevraagd. Meestal is dat onschuldig (de link
+        // opent in de browser van het mailprogramma), maar een ander kan je ook zíjn link
+        // sturen: dan log je in op zijn account en ziet hij wat je daar invult.
+        <div
+          data-testid="link-waarschuwing"
+          className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"
+        >
+          <p className="font-medium">Heb je deze mail zelf aangevraagd?</p>
+          <p>
+            Log alleen in als je zojuist zelf om deze inlogmail hebt gevraagd. Kreeg je de link van
+            iemand anders, dan kom je in het account van die ander: sluit dan deze pagina.
+          </p>
+        </div>
+      )}
       <Button
         size="lg"
         className="h-12 text-base"
@@ -296,6 +320,12 @@ function Dienstknoppen({
     setMislukt(false);
     setBezig(dienst);
     try {
+      // Onthoud dat dit tabblad zelf naar de dienst ging; zie merkDienstInlog in mailcode.ts.
+      try {
+        merkDienstInlog(window.sessionStorage, Date.now());
+      } catch {
+        // Geen opslag: de pagina toont bij terugkomst dan de neutrale melding.
+      }
       await startInloggen(dienst, auth, { terugNaar: terugNaar() });
     } catch {
       setMislukt(true);

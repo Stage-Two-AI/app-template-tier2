@@ -13,7 +13,9 @@ import { z } from "zod";
  * 1. Hetzelfde antwoord bij een bekend en een onbekend adres. Wie een adres invult, komt
  *    altijd bij "vul de code in" uit, ook als Supabase het adres weigert. Zo is aan deze
  *    pagina niet te zien wie een account heeft. Alleen wat niets over het adres zegt, wordt
- *    getoond: te veel pogingen, geen verbinding, of inloggen per mail staat helemaal uit.
+ *    getoond: te veel pogingen, geen verbinding (er kwam helemaal geen antwoord), of inloggen
+ *    per mail staat helemaal uit. Een antwoord met een storing (5xx) hoort daar niet bij: een
+ *    hook van de inrichting die één adres weigert, kan er zo uitzien.
  * 2. Deze pagina geeft niemand rechten. Wat iemand na het inloggen mag, bepaalt de database
  *    (zie `sessie_via_cloudflare()` in supabase/migrations).
  */
@@ -23,6 +25,11 @@ export const CODE_LENGTE = 8;
 export const CODE_GELDIG_MS = 15 * 60 * 1000;
 /** Zo lang wacht de knop "nieuwe code". Supabase zelf weigert een tweede mail binnen een minuut. */
 export const WACHT_OPNIEUW_MS = 60 * 1000;
+/**
+ * Zo lang onthoudt het tabblad naar welk adres de code ging. Kort: genoeg om naar de mail-app
+ * te wisselen, en op een gedeelde computer staat het adres van de vorige er niet lang.
+ */
+export const ONTHOUD_ADRES_MS = 5 * 60 * 1000;
 
 /** Het deel van de Supabase-auth dat hier nodig is; zo is het los te testen. */
 export type MailcodeAuth = Pick<SupabaseClient["auth"], "signInWithOtp" | "verifyOtp">;
@@ -53,9 +60,9 @@ const TEKST: Record<FoutSoort, string> = {
     "De controle of je geen robot bent is niet gelukt. Wacht even tot de controle klaar is en probeer het opnieuw. Blijft het zo, ververs dan de pagina.",
   dienst: "Inloggen is niet gelukt. Probeer het opnieuw.",
   "bevestig-adres":
-    "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Log daarna uit en kies opnieuw Inloggen voor medewerkers.",
+    "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Kom daarna terug op deze pagina en kies opnieuw Inloggen voor medewerkers.",
   "adres-bezet":
-    "Inloggen voor medewerkers lukt nog niet, omdat je e-mailadres niet bevestigd kon worden. Vraag je beheerder om dit op te lossen.",
+    "Inloggen voor medewerkers lukt nog niet. Op dit e-mailadres bestaat al een account dat nog niet bevestigd is, bijvoorbeeld omdat het adres eerder in het formulier voor klanten is ingevuld. Vraag je beheerder om dat account in Supabase (Authentication, Users) te bevestigen of te verwijderen. Daarna werkt de knop.",
 };
 
 /** Fouten die niet over het e-mailadres van een klant gaan en dus niet bij dat veld horen. */
@@ -105,9 +112,15 @@ function zichtbareFout(error: AuthFout): Fout | null {
   if (error.code === "email_provider_disabled") return fout("uit");
   // De controle tegen robots (captcha) staat aan bij Supabase en keurde deze aanvraag af.
   if (error.code === "captcha_failed") return fout("robot");
-  const geenAntwoord = error.status === undefined || error.status === 0 || error.status >= 500;
-  if (geenAntwoord || error.name === "AuthRetryableFetchError") return fout("verbinding");
+  // Alleen als er helemaal geen antwoord kwam, is het de verbinding. Een antwoord met een
+  // storing (5xx) kan van één adres afhangen en mag er dus niet anders uitzien dan een ander.
+  if (error.status === undefined || error.status === 0) return fout("verbinding");
   return null;
+}
+
+/** Bij het controleren van een code of link: een storing is geen "code klopt niet". */
+function storing(error: AuthFout): Fout | null {
+  return error.status !== undefined && error.status >= 500 ? fout("dienst") : null;
 }
 
 export type Uitkomst = { ok: true } | { ok: false; fout: Fout };
@@ -140,8 +153,9 @@ export async function vraagCode(
     });
     if (!error) return { ok: true };
     const zichtbaar = zichtbareFout(error);
-    // Elke andere weigering (onbekend adres, geen nieuwe accounts, een hook die nee zegt)
-    // ziet er voor de gebruiker hetzelfde uit als een verstuurde mail.
+    // Elke andere weigering (onbekend adres, geen nieuwe accounts, een hook die nee zegt, ook
+    // als die als storing terugkomt) ziet er voor de gebruiker hetzelfde uit als een
+    // verstuurde mail.
     return zichtbaar ? { ok: false, fout: zichtbaar } : { ok: true };
   } catch {
     return { ok: false, fout: fout("verbinding") };
@@ -164,7 +178,7 @@ export async function controleerCode(
   try {
     const { error } = await auth.verifyOtp({ email, token, type: "email" });
     if (!error) return { ok: true };
-    const zichtbaar = zichtbareFout(error);
+    const zichtbaar = zichtbareFout(error) ?? storing(error);
     if (zichtbaar) return { ok: false, fout: zichtbaar };
     return { ok: false, fout: fout(isVerlopen(tijd.verstuurdOp, tijd.nu) ? "verlopen" : "code") };
   } catch {
@@ -196,7 +210,7 @@ export async function controleerLink(auth: MailcodeAuth, tokenHash: string): Pro
   try {
     const { error } = await auth.verifyOtp({ token_hash: tokenHash, type: "email" });
     if (!error) return { ok: true };
-    return { ok: false, fout: zichtbareFout(error) ?? fout("link") };
+    return { ok: false, fout: zichtbareFout(error) ?? storing(error) ?? fout("link") };
   } catch {
     return { ok: false, fout: fout("verbinding") };
   }
@@ -215,8 +229,13 @@ export async function controleerLink(auth: MailcodeAuth, tokenHash: string): Pro
  * bij een ander account, dan komt er geen mail ("... Verify the email with custom:cloudflare
  * in order to sign in"); dat kan alleen de beheerder oplossen. De Engelse tekst dient hier
  * alleen om die twee uit elkaar te houden.
+ *
+ * Die uitleg komt er alleen als deze browser de inlog via de dienst zelf net is begonnen
+ * (`zelfBegonnen`, zie `merkDienstInlog`). Anders kan een vreemde met een link kiezen welke
+ * melding iemand op de echte inlogpagina ziet ("klik op de link in die mail"), en krijgt
+ * iedereen de neutrale melding.
  */
-export function foutUitAdres(zoekdeel: string, hash: string): Fout | null {
+export function foutUitAdres(zoekdeel: string, hash: string, zelfBegonnen = false): Fout | null {
   const params = new URLSearchParams(zoekdeel);
   const anker = new URLSearchParams(hash.replace(/^#/, ""));
   const lees = (naam: string) => params.get(naam) ?? anker.get(naam);
@@ -224,7 +243,9 @@ export function foutUitAdres(zoekdeel: string, hash: string): Fout | null {
   const uitleg = lees("error_description") ?? "";
   if (!lees("error") && !code && !uitleg) return null;
   if (code === "otp_expired") return fout("link");
-  if (code === "provider_email_needs_verification" || /^Unverified email with /i.test(uitleg)) {
+  const onbevestigd =
+    code === "provider_email_needs_verification" || /^Unverified email with /i.test(uitleg);
+  if (zelfBegonnen && onbevestigd) {
     return fout(
       /confirmation email has been sent/i.test(uitleg) ? "bevestig-adres" : "adres-bezet",
     );
@@ -293,7 +314,8 @@ const bewaardSchema = z.object({ email: z.email(), verstuurdOp: z.number() });
 /**
  * Op een telefoon wisselt iemand naar de mail-app om de code te lezen, en de browser laadt
  * de pagina daarna soms opnieuw. Daarom onthoudt dit tabblad (sessionStorage, dus alleen dit
- * tabblad en tot het sluit) naar welk adres de code ging. Er wordt geen code bewaard.
+ * tabblad en tot het sluit) vijf minuten naar welk adres de code ging. Er wordt geen code
+ * bewaard.
  */
 export function bewaar(opslag: Opslag, toestand: Toestand): void {
   try {
@@ -311,11 +333,78 @@ export function bewaar(opslag: Opslag, toestand: Toestand): void {
 export function herstel(opslag: Opslag, nu: number): Toestand {
   try {
     const bewaard = bewaardSchema.safeParse(JSON.parse(opslag.getItem(SLEUTEL) ?? "null"));
-    if (bewaard.success && !isVerlopen(bewaard.data.verstuurdOp, nu)) {
+    const oud = bewaard.success ? nu - bewaard.data.verstuurdOp : -1;
+    if (bewaard.success && oud >= 0 && oud <= ONTHOUD_ADRES_MS) {
       return { ...BEGIN, stap: "code", ...bewaard.data };
     }
   } catch {
     // Onleesbaar: begin gewoon opnieuw.
   }
   return BEGIN;
+}
+
+// --- Is deze inlog hier begonnen? ---------------------------------------------------------
+
+const SLEUTEL_AANGEVRAAGD = "inlogcode-aangevraagd";
+const SLEUTEL_DIENST = "inlog-via-dienst";
+
+function zetTijd(opslag: Opslag, sleutel: string, nu: number): void {
+  try {
+    opslag.setItem(sleutel, String(nu));
+  } catch {
+    // Geen opslag: dan weten we het straks niet, en kiest de pagina de voorzichtige kant.
+  }
+}
+
+function binnenTijd(opslag: Opslag, sleutel: string, nu: number): boolean {
+  try {
+    const op = Number(opslag.getItem(sleutel) ?? Number.NaN);
+    return Number.isFinite(op) && nu - op >= 0 && nu - op <= CODE_GELDIG_MS;
+  } catch {
+    return false;
+  }
+}
+
+function wis(opslag: Opslag, sleutel: string): void {
+  try {
+    opslag.removeItem(sleutel);
+  } catch {
+    // Niets te wissen.
+  }
+}
+
+/**
+ * Deze browser heeft net een code aangevraagd. Alleen het tijdstip wordt bewaard, geen adres,
+ * en in localStorage: een link uit de mail opent meestal in een nieuw tabblad van dezelfde
+ * browser, en dat tabblad moet dit kunnen zien. Komt iemand binnen via een link terwijl dit
+ * ontbreekt, dan is de mail niet in deze browser aangevraagd en waarschuwt de pagina eerst
+ * (inlog-met-code.tsx): zo'n link kan van een ander komen, die je in zíjn account laat inloggen.
+ */
+export function merkAangevraagd(opslag: Opslag, nu: number): void {
+  zetTijd(opslag, SLEUTEL_AANGEVRAAGD, nu);
+}
+
+export function isHierAangevraagd(opslag: Opslag, nu: number): boolean {
+  return binnenTijd(opslag, SLEUTEL_AANGEVRAAGD, nu);
+}
+
+export function wisAangevraagd(opslag: Opslag): void {
+  wis(opslag, SLEUTEL_AANGEVRAAGD);
+}
+
+/**
+ * Dit tabblad is net naar de inlogdienst gestuurd (de knop voor medewerkers). Bij terugkomst
+ * weet de pagina zo dat een melding van de dienst bij een eigen poging hoort, en de app dat
+ * een sessie op /login van een verse inlog komt.
+ */
+export function merkDienstInlog(opslag: Opslag, nu: number): void {
+  zetTijd(opslag, SLEUTEL_DIENST, nu);
+}
+
+export function isDienstInlogBegonnen(opslag: Opslag, nu: number): boolean {
+  return binnenTijd(opslag, SLEUTEL_DIENST, nu);
+}
+
+export function wisDienstInlog(opslag: Opslag): void {
+  wis(opslag, SLEUTEL_DIENST);
 }
