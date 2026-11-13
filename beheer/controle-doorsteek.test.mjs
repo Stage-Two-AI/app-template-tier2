@@ -194,24 +194,42 @@ test("klantportaal: workers.dev en de preview open is nog steeds gezakt", async 
   }
 });
 
-test("klantportaal: zonder workers.dev-adres is de controle gezakt, niet overgeslagen", async () => {
+test("klantportaal: zonder workers.dev-adres of zonder preview-adres is de controle gezakt, niet overgeslagen", async () => {
+  const { fetchFn } = nepNet(PORTAAL);
+  for (const [veld, ae, vlag] of [
+    ["workersDev", "AE6", "--workers-dev"],
+    ["previewUrl", "AE5", "--preview-url"],
+  ]) {
+    const rapport = await controleer({ ...OPTIES, [veld]: undefined, klantportaal: true, fetchFn });
+    const [regel] = uitkomst(rapport, ae);
+    assert.equal(regel.geslaagd, false, veld);
+    assert.ok(regel.bewijs.includes(`bij een klantportaal verplicht (${vlag})`), regel.bewijs);
+    // Zonder klantportaal blijft dat een overgeslagen controle, zoals altijd.
+    const gewoon = await controleer({
+      ...OPTIES,
+      [veld]: undefined,
+      fetchFn: nepNet(DICHT).fetchFn,
+    });
+    assert.equal(uitkomst(gewoon, ae)[0].geslaagd, null, veld);
+  }
+});
+
+test("klantportaal: een goedkeuring zonder dat één preview is bekeken bestaat niet", async () => {
+  // Alles dicht en het domein open, maar geen preview-adres opgegeven: pr-12-<worker>... kan
+  // wagenwijd open staan zonder dat deze controle het ziet. Dan is het rapport gezakt.
   const { fetchFn } = nepNet(PORTAAL);
   const rapport = await controleer({
     ...OPTIES,
-    workersDev: undefined,
+    previewUrl: undefined,
+    versieUrl: undefined,
     klantportaal: true,
     fetchFn,
   });
-  const [workersDev] = uitkomst(rapport, "AE6");
-  assert.equal(workersDev.geslaagd, false);
-  assert.match(workersDev.bewijs, /bij een klantportaal verplicht/);
-  // Zonder klantportaal blijft dat een overgeslagen controle, zoals altijd.
-  const gewoon = await controleer({
-    ...OPTIES,
-    workersDev: undefined,
-    fetchFn: nepNet(DICHT).fetchFn,
-  });
-  assert.equal(uitkomst(gewoon, "AE6")[0].geslaagd, null);
+  const gezakt = rapport.filter((r) => r.geslaagd === false);
+  assert.deepEqual(
+    gezakt.map((r) => r.wat),
+    ["preview zonder login"],
+  );
 });
 
 test("zonder --klantportaal is een open domein nog steeds gezakt (AE2)", async () => {

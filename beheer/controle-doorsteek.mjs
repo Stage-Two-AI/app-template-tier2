@@ -16,14 +16,17 @@
  * Met --klantportaal (de app staat als klantportaal in toegang.json) draait AE2 om: het
  * eigen domein hoort dan juist open te zijn (KP1). De rest blijft: de inlog voor medewerkers
  * loopt nog steeds langs de loginpagina van Access, en het workers.dev-adres, het
- * versie-adres en de preview zijn dicht. Het workers.dev-adres is dan verplicht: zonder dat
- * adres is niet te zien of alleen het domein open ging.
+ * versie-adres en de preview zijn dicht. Het workers.dev-adres en een preview-adres zijn dan
+ * verplicht (--workers-dev en --preview-url, bijvoorbeeld het vaste adres
+ * https://actueel-<worker>.<sub>.workers.dev/): zonder die twee is niet te zien of alleen het
+ * domein open ging. Een preview heeft een eigen adres; dat workers.dev dicht is, zegt daar
+ * niets over.
  *
  * Gebruik:
  *   node beheer/controle-doorsteek.mjs --hostname cf-proef.stagetwo.nl \
  *     --project-ref <ref> --workers-dev https://cf-proef.<sub>.workers.dev/ \
  *     [--versie-url <url>] [--preview-url <url>] [--tabel proef_zonder_grant]
- *     [--klantportaal]
+ *     [--klantportaal]   (dan zijn --workers-dev en --preview-url verplicht)
  *   met SUPABASE_ANON_KEY in de omgeving.
  */
 import { parseArgs } from "node:util";
@@ -84,13 +87,12 @@ async function openControle(fetchFn, url) {
 }
 
 /** Bij een klantportaal mag een adres dat dicht hoort te zijn niet ontbreken. */
-function verplichtDicht(r, klantportaal) {
+function verplichtDicht(r, klantportaal, vlag) {
   if (!klantportaal || r.geslaagd !== null) return r;
   return {
     ...r,
     geslaagd: false,
-    bewijs:
-      "niet opgegeven; bij een klantportaal verplicht (--workers-dev), want daar moet de deur blijven",
+    bewijs: `niet opgegeven; bij een klantportaal verplicht (${vlag}), want daar moet de deur blijven`,
   };
 }
 
@@ -166,9 +168,14 @@ export async function controleer({
     verplichtDicht(
       await deurControle(fetchFn, "AE6", "workers.dev-adres", workersDev),
       klantportaal,
+      "--workers-dev",
     ),
     await deurControle(fetchFn, "AE6", "versie-adres van productie", versieUrl),
-    await deurControle(fetchFn, "AE5", "preview zonder login", previewUrl),
+    verplichtDicht(
+      await deurControle(fetchFn, "AE5", "preview zonder login", previewUrl),
+      klantportaal,
+      "--preview-url",
+    ),
     await tabelControle(fetchFn, { projectRef, anonKey, tabelZonderGrant }),
   ];
 }
