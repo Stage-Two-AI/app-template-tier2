@@ -89,6 +89,7 @@
       "scripts/preview.mjs",
       "scripts/apparaat-nieuw.mjs",
       "scripts/testlogin.mjs",
+      "scripts/klantportaal-overnemen.mjs",
       "supabase/functions/_shared/apparaat.ts",
       "supabase/functions/_shared/apparaat-kern.ts",
       "supabase/functions/_shared/mail.ts",
