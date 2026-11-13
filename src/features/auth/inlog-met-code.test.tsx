@@ -309,9 +309,9 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);
     const code = await naarCodestap();
     await userEvent.click(code);
-    await userEvent.paste("654 321");
+    await userEvent.paste("8765 4321");
     await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(1));
-    expect(verifyOtp.mock.calls[0]?.[0].token).toBe("654321");
+    expect(verifyOtp.mock.calls[0]?.[0].token).toBe("87654321");
   });
 
   it("zegt het bij een foute code en laat opnieuw proberen", async () => {
