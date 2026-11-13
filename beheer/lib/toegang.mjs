@@ -7,7 +7,8 @@
  *                  of { "<app>": { "groepen": ["<groep>", ...], "publiek": ["/bekijk/*"],
  *                                  "gegevens_naar_test": false } }
  *                  of { "<app>": { "groepen": ["<groep>", ...], "klantportaal": true,
- *                                  "afzender": "Naam <adres>", "captcha": false } },
+ *                                  "afzender": "Naam <adres>",
+ *                                  "turnstile_sitekey": "0x4AAA..." } },
  *     "testaccounts": { "<app>": ["<adres>", ...] }
  *   }
  *
@@ -22,8 +23,10 @@
  * eigen domein, klanten loggen in per mail (link of code) en de groepen zijn alleen nog de
  * medewerkers, die via Cloudflare blijven inloggen. Het workers.dev-adres en de previews
  * blijven dicht. Hoort bij: `afzender` (verplicht, het adres waar de inlogmail vandaan komt)
- * en `captcha` (optioneel, Turnstile op het inlogformulier). `publiek` kan er niet naast:
- * het hele domein is dan al open. Zie "Klantportaal" in beheer/README.md.
+ * en `turnstile_sitekey` (de openbare sleutel van de Turnstile-widget). De captcha staat bij
+ * een klantportaal standaard aan; alleen met een uitdrukkelijke `"captcha": false` gaat hij
+ * uit, en dan waarschuwt het resultaat. `publiek` kan er niet naast: het hele domein is dan
+ * al open. Zie "Klantportaal" in beheer/README.md.
  *
  * `testaccounts` is optioneel en geldt alleen voor de testdatabase van die app
  * (`<vv><app>-test`): accounts met e-mail en wachtwoord, zodat iemand (of Claude) de
@@ -60,7 +63,10 @@ const APP_VELDEN = [
   "klantportaal",
   "afzender",
   "captcha",
+  "turnstile_sitekey",
 ];
+/** De openbare sleutel van een Turnstile-widget (begint bij Cloudflare met 0x4). */
+const SITEKEY = /^[A-Za-z0-9_-]{10,100}$/;
 /**
  * De afzender van de inlogmail: een adres, of "Naam <adres>". De naam komt in het onderwerp
  * en in de tekst van de mail; daarom alleen letters, cijfers, spaties en . & ' ( ) -, zodat
@@ -112,9 +118,17 @@ export function afzenderVanApp(t, app) {
   return { adres: a.adres, naam: a.naam ?? app };
 }
 
-/** Staat Turnstile (captcha) aan op het inlogformulier van dit klantportaal? */
+/**
+ * Staat Turnstile (captcha) aan op het inlogformulier van dit klantportaal? Standaard ja:
+ * alleen een uitdrukkelijke `"captcha": false` zet hem uit.
+ */
 export function captchaVanApp(t, app) {
-  return isKlantportaal(t, app) && t.apps[app].captcha === true;
+  return isKlantportaal(t, app) && t.apps[app].captcha !== false;
+}
+
+/** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
+export function sitekeyVanApp(t, app) {
+  return captchaVanApp(t, app) ? (t.apps[app].turnstile_sitekey ?? null) : null;
 }
 
 /** Kopieert Testdatabase verversen gegevens en bestanden voor deze app? Standaard ja. */
@@ -226,7 +240,21 @@ export function valideerToegang(t) {
       if (waarde.captcha !== undefined && typeof waarde.captcha !== "boolean") {
         fouten.push(`app "${app}": captcha is true of false`);
       }
+      if (
+        waarde.turnstile_sitekey !== undefined &&
+        (typeof waarde.turnstile_sitekey !== "string" || !SITEKEY.test(waarde.turnstile_sitekey))
+      ) {
+        fouten.push(
+          `app "${app}": turnstile_sitekey is de openbare sleutel van de Turnstile-widget (letters, cijfers, - en _), niet de geheime`,
+        );
+      }
       if (waarde.klantportaal === true) {
+        // De captcha staat standaard aan; uitzetten kan alleen uitdrukkelijk.
+        if (waarde.captcha !== false && waarde.turnstile_sitekey === undefined) {
+          fouten.push(
+            `app "${app}": een klantportaal heeft standaard een captcha (Turnstile) op het inlogformulier. Zet "turnstile_sitekey" (de openbare sleutel van de widget; de geheime staat als secret TURNSTILE_GEHEIM in de beheeromgeving), of zet uitdrukkelijk "captcha": false als het portaal zonder captcha moet`,
+          );
+        }
         // Ook een lege lijst: wie later een pad toevoegt, moet eerst deze keuze zien.
         if (waarde.publiek !== undefined) {
           fouten.push(
@@ -243,7 +271,7 @@ export function valideerToegang(t) {
           );
         }
       } else {
-        for (const veld of ["afzender", "captcha"]) {
+        for (const veld of ["afzender", "captcha", "turnstile_sitekey"]) {
           if (waarde[veld] !== undefined) {
             fouten.push(
               `app "${app}": ${veld} hoort bij een klantportaal; zet "klantportaal": true erbij of haal ${veld} weg`,
@@ -501,6 +529,14 @@ function heeftCloudflareInlog(g, cloudflare) {
   return (g.identities ?? []).some((i) => i?.provider === PROVIDER_CLOUDFLARE);
 }
 
+/** Kan dit account ook per mail inloggen (een e-mailinlog naast die van Cloudflare)? */
+function heeftMailInlog(g) {
+  const meta = g.app_metadata ?? {};
+  if (meta.provider === "email") return true;
+  if (Array.isArray(meta.providers) && meta.providers.includes("email")) return true;
+  return (g.identities ?? []).some((i) => i?.provider === "email");
+}
+
 /**
  * De adressen waarop een account met een Cloudflare-inlog beoordeeld wordt: het adres
  * waarmee Cloudflare hem binnenliet (uit de identiteit). Dat is het adres waar de
@@ -551,7 +587,8 @@ function strengsteOordeel(oordelen) {
  * alleen de Cloudflare-kant dichtgaan, dan hield een vertrokken medewerker een werkend
  * account over, en hing alles af van de regels in elke app. Een account met een
  * Cloudflare-inlog zonder enig adres staat in `onbekend`, als `id:<gebruikers-id>`.
- * `zonderAdres` noemt de accounts met een Cloudflare-inlog die zelf geen adres hebben.
+ * `zonderAdres` noemt de accounts met een Cloudflare-inlog die zelf geen adres hebben;
+ * `ookPerMail` de ingetrokken accounts die daarnaast per mail konden inloggen.
  */
 export async function trekIn({
   gebruikers,
@@ -578,6 +615,8 @@ export async function trekIn({
     // Accounts met een Cloudflare-inlog maar zonder eigen adres (zie klantportaalInstellingen
     // in supabase.mjs): zo iemand kan niet als medewerker inloggen tot de owner het oplost.
     uit.zonderAdres = [];
+    // Ingetrokken accounts die daarnaast per mail konden inloggen: het hele account is dicht.
+    uit.ookPerMail = [];
   }
   for (const g of gebruikers) {
     let naam = g.email;
@@ -620,6 +659,7 @@ export async function trekIn({
     await ban(g.id);
     await afmelden(g.id);
     uit.ingetrokken.push(naam);
+    if (klantportaal && heeftMailInlog(g)) uit.ookPerMail.push(naam);
   }
   return uit;
 }
@@ -709,7 +749,8 @@ function groepRegels(t, app, inspringen = "  ") {
  *   - elke andere provider (ook anoniem, zonder provider) wordt geweigerd.
  * Zonder die controle kan iemand die een toegelaten adres kent met een zelfgekozen
  * wachtwoord een account op dat adres maken, want `mailer_autoconfirm` staat aan.
- * Productie heeft geen hook: daar staat inloggen met e-mail uit.
+ * Productie van een gewone app heeft geen hook: daar staat inloggen met e-mail uit. Productie
+ * van een klantportaal heeft eigen hooks (portaalAanmeldHookSql en portaalTokenHookSql).
  *
  * De vaste testgebruiker (TESTGEBRUIKER) staat hier bewust níet in: Testdatabase
  * verversen maakt hem met de admin-API, en die gaat niet langs deze hook (in de broncode
@@ -750,6 +791,143 @@ begin
   end if;
 ${groepRegels(t, app).join("\n")}
   ${WEIGER}
+end;
+$hook$;
+
+grant execute on function ${naam}(jsonb) to supabase_auth_admin;
+revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
+`;
+}
+
+// ---------------------------------------------------------------- hooks van een klantportaal (productie)
+
+/**
+ * De namen van de twee hookfuncties in de productiedatabase van een klantportaal, afgeleid
+ * van het voorvoegsel: `wi-` geeft `wi_portaal_voor_aanmelden` en `wi_portaal_voor_token`.
+ */
+export function portaalHookFuncties(voorvoegsel) {
+  const p = valideerVoorvoegsel(voorvoegsel).replaceAll("-", "_");
+  return { aanmelden: `${p}portaal_voor_aanmelden`, token: `${p}portaal_voor_token` };
+}
+
+const weiger = (melding) =>
+  `return jsonb_build_object('error', jsonb_build_object('http_code', 403, 'message', ${sqlTekst(melding)}));`;
+
+export const MELDING_MEDEWERKER =
+  "Dit adres hoort bij een medewerker. Log in via Inloggen voor medewerkers.";
+export const MELDING_GEEN_WACHTWOORD =
+  "Inloggen met een wachtwoord kan hier niet. Vraag een inlogcode aan.";
+
+/**
+ * De before-user-created-hook van de productiedatabase van een klantportaal. Daar mag
+ * iedereen per mail een account maken, behalve op een adres van een medewerker:
+ *   - `custom:cloudflare`: toegelaten. De poort is daar de Access-policy van de inlogdienst,
+ *     net als bij een gewone app (IdP-groepen kent alleen Cloudflare);
+ *   - `email`: geweigerd voor elk domein en elk adres uit de groepen van de app, toegelaten
+ *     voor ieder ander. `uitsluiten` telt hier niet: wie op het domein van het bedrijf zit maar
+ *     is uitgesloten, is geen klant;
+ *   - elke andere manier (ook anoniem): geweigerd.
+ * Zonder deze hook kan een vreemde het adres van een toekomstige medewerker per mail
+ * aanmelden. Die medewerker krijgt dan bij zijn eerste inlog via Cloudflare een tweede account
+ * zonder adres en kan niet als medewerker inloggen (nagespeeld tegen Supabase Auth, 13-11-2026).
+ *
+ * Wat de hook niet tegenhoudt: een bestaand account van een medewerker opent ook met een
+ * mailcode op zijn werkadres (de hook loopt alleen bij een nieuw account). Dat is hetzelfde
+ * account met een andere sessie; de app geeft medewerkerrechten alleen aan een sessie die
+ * via Cloudflare kwam. Een groep met alleen `idp_groepen` heeft geen adressen om te weigeren;
+ * daarvoor waarschuwt de inrichting.
+ *
+ * Toegang bijwerken schrijft de functie bij elke run opnieuw, zodat hij de groepen volgt.
+ */
+export function portaalAanmeldHookSql(toegang, app, functie) {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
+    throw new Error(`ongeldige functienaam "${functie}"`);
+  const t = valideerToegang(toegang);
+  if (!isKlantportaal(t, app)) throw new Error(`app "${app}" is geen klantportaal`);
+  const groepen = groepenVanApp(t, app).map((g) => t.groepen[g]);
+  const domeinen = [...new Set(groepen.flatMap((g) => klein(g.domeinen)))];
+  const adressen = [...new Set(groepen.flatMap((g) => klein(g.adressen)))];
+  const naam = `public.${functie}`;
+  return `create or replace function ${naam}(event jsonb)
+returns jsonb
+language plpgsql
+set search_path = ''
+as $hook$
+declare
+  adres text := lower(coalesce(event->'user'->>'email', ''));
+  domein text := split_part(adres, '@', 2);
+  aanbieder text := coalesce(event->'user'->'app_metadata'->>'provider', '');
+begin
+  -- via Cloudflare Access: de Access-policy van de inlogdienst is de poort
+  if aanbieder = ${sqlTekst(PROVIDER_CLOUDFLARE)} then
+    return '{}'::jsonb;
+  end if;
+  if aanbieder <> 'email' or adres !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
+    ${weiger("Een account maken kan hier alleen met een e-mailadres.")}
+  end if;
+  -- per mail: iedereen, behalve de adressen van medewerkers (de groepen uit toegang.json)
+  if domein = any (${sqlLijst(domeinen)}) or adres = any (${sqlLijst(adressen)}) then
+    ${weiger(MELDING_MEDEWERKER)}
+  end if;
+  return '{}'::jsonb;
+end;
+$hook$;
+
+grant execute on function ${naam}(jsonb) to supabase_auth_admin;
+revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
+`;
+}
+
+/** Heeft een groep van dit klantportaal alleen `idp_groepen`? Dan kan de hook hem niet weigeren. */
+export function groepenZonderAdressen(t, app) {
+  return groepenVanApp(t, app).filter((g) => {
+    const groep = t.groepen[g];
+    return !(groep.domeinen?.length || groep.adressen?.length);
+  });
+}
+
+/**
+ * De custom-access-token-hook van de productiedatabase van een klantportaal: geen sessie met
+ * een wachtwoord. Supabase Auth heeft geen instelling die alleen het wachtwoord uitzet terwijl
+ * de mailcode aan blijft, en de hook die daarvoor bedoeld is (password verification) bestaat
+ * alleen op het Team- en Enterprise-plan. Deze hook loopt bij elk token dat wordt uitgegeven,
+ * binnen dezelfde transactie als de nieuwe sessie (internal/tokens/service.go); weigert hij,
+ * dan is er geen token en geen sessie. Hij weigert als de inlog van nu met een wachtwoord was
+ * (`authentication_method`) of als de sessie ooit met een wachtwoord begon (`amr` in de
+ * claims; dat vangt ook het verversen van zo'n sessie). Alle andere tokens gaan ongewijzigd
+ * door: de claims komen terug zoals ze binnenkwamen, dus `amr` en de rest blijven wat de
+ * regels in de database (RLS) verwachten.
+ *
+ * Waarom: bij een open portaal kan iemand het adres van een klant aanmelden met een eigen
+ * wachtwoord. Gebruikt de klant daarna de mail die daarvan komt, dan was het wachtwoord van de
+ * ander geldig. Met deze hook is een wachtwoord nooit genoeg voor een sessie.
+ *
+ * Een project heeft maar één zo'n hook. Heeft de app er zelf een nodig (extra claims), dan
+ * moet die deze weigering overnemen; de inrichting zet bij elke run deze functie terug.
+ */
+export function portaalTokenHookSql(functie) {
+  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
+    throw new Error(`ongeldige functienaam "${functie}"`);
+  const naam = `public.${functie}`;
+  return `create or replace function ${naam}(event jsonb)
+returns jsonb
+language plpgsql
+stable
+set search_path = ''
+as $hook$
+declare
+  amr jsonb := event->'claims'->'amr';
+begin
+  if coalesce(event->>'authentication_method', '') = 'password' then
+    ${weiger(MELDING_GEEN_WACHTWOORD)}
+  end if;
+  if jsonb_typeof(amr) = 'array' and exists (
+    select 1 from jsonb_array_elements(amr) as a
+    where a->>'method' = 'password' or (jsonb_typeof(a) = 'string' and a #>> '{}' = 'password')
+  ) then
+    ${weiger(MELDING_GEEN_WACHTWOORD)}
+  end if;
+  return jsonb_build_object('claims', event->'claims');
 end;
 $hook$;
 

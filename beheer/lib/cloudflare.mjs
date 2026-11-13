@@ -298,6 +298,21 @@ export function afwijkingen(app, policyIds, idps) {
   return uit;
 }
 
+/**
+ * Dekt een bestaande Access-app dezelfde adressen als `gewenst` (een body van workerApp)?
+ * Vergeleken worden `domain` en de adressen in `destinations`, zonder op volgorde of
+ * hoofdletters te letten. Een Access op de Worker die naar een andere Worker wijst (de Worker
+ * is hernoemd, of de app is met de hand verbogen) bewaakt de echte Worker niet.
+ */
+export function zelfdeAdressen(app, gewenst) {
+  const klein = (x) => String(x ?? "").toLowerCase();
+  const uris = (a) => [...new Set((a?.destinations ?? []).map((d) => klein(d?.uri)))].sort();
+  return (
+    klein(app?.domain) === klein(gewenst.domain) &&
+    JSON.stringify(uris(app)) === JSON.stringify(uris(gewenst))
+  );
+}
+
 /** De body voor een bestaande app met de gewenste policies én inlogmethoden. */
 export function metGewenst(app, policyIds, idps) {
   return { ...metPolicies(app, policyIds), ...inlogmethoden(idps) };

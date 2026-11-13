@@ -17,9 +17,12 @@ import {
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import {
   CODE_GELDIG_SECONDEN,
+  CODE_LENGTE,
+  INLOGLINK,
   inlogmail,
   klantportaalInstellingen,
   REM,
+  SESSIE,
   supabaseBeheer,
 } from "./lib/supabase.mjs";
 import { CLOUDFLARE_IDENTITEITEN_SQL } from "./lib/toegang.mjs";
@@ -28,10 +31,19 @@ import { nepWolk } from "./nep-wolk.mjs";
 const GROEPEN = { kantoor: { domeinen: ["winco.nl"], uitsluiten: ["oud@winco.nl"] } };
 const AFZENDER = "Winco Direct <noreply@wincoapps.com>";
 const DEUR = { groepen: GROEPEN, apps: { direct: ["kantoor"] } };
+const SITEKEY = "0x4AAAAAAAOpenbareSleutel";
 const PORTAAL = {
   groepen: GROEPEN,
-  apps: { direct: { groepen: ["kantoor"], klantportaal: true, afzender: AFZENDER } },
+  apps: {
+    direct: {
+      groepen: ["kantoor"],
+      klantportaal: true,
+      afzender: AFZENDER,
+      turnstile_sitekey: SITEKEY,
+    },
+  },
 };
+const HOOKS = { aanmelden: "wi_portaal_voor_aanmelden", token: "wi_portaal_voor_token" };
 const ARG = {
   app: "direct",
   hostname: "direct.wincoapps.com",
@@ -73,6 +85,7 @@ function opzet(w, toegang, extra = {}) {
     maskeer: (waarde) => geheimen.push(waarde),
     geheimen,
     smtpWachtwoord: SMTP,
+    captchaGeheim: TURNSTILE,
     ...extra,
   };
 }
@@ -82,6 +95,15 @@ const project = (w, naam = "wi-direct") => w.staat.projecten.find((p) => p.name 
 const auth = (w, naam) => w.staat.auth[project(w, naam).ref];
 const stap = (r, naam) => r.stappen.find((s) => s.stap === naam)?.actie;
 const cfSchrijf = (w) => w.schrijfacties().filter((s) => / cf\//.test(s));
+
+/**
+ * Van deur naar klantportaal gaat in twee runs: de eerste zet alles klaar en laat de deur
+ * staan, de tweede (na een uitrol van de app) haalt hem weg. Geeft het resultaat van de tweede.
+ */
+async function naarPortaal(w, toegang = PORTAAL, arg = ARG) {
+  await richtIn(arg, opzet(w, toegang));
+  return richtIn(arg, opzet(w, toegang));
+}
 
 /** De Access op de Worker dekt workers.dev en elk preview-adres, met de groep als policy. */
 function eisWorkerDicht(w) {
@@ -99,16 +121,34 @@ function eisWorkerDicht(w) {
 
 // ---------------------------------------------------------------- de deur
 
-test("deur weg: van deur naar klantportaal haalt de inrichting de deur weg, als laatste, en laat de rest staan", async () => {
+test("deur weg: van deur naar klantportaal gaat in twee runs; de deur gaat pas in de tweede weg, als allerlaatste, en de rest blijft staan", async () => {
   const w = nepWolk();
   await richtIn(ARG, opzet(w, DEUR));
   const deurId = app(w, NAMEN.deur).id;
   const inlogVoor = structuredClone(app(w, NAMEN.inlog));
   assert.equal(app(w, NAMEN.deur).domain, "direct.wincoapps.com");
 
+  // Run 1: alles staat klaar (mail, hooks, variabelen), de deur blijft.
+  w.aanroepen.length = 0;
+  const r1 = await richtIn(ARG, opzet(w, PORTAAL));
+  assert.equal(app(w, NAMEN.deur)?.id, deurId, "na de eerste run staat de deur er nog");
+  assert.deepEqual(cfSchrijf(w), []);
+  assert.equal(auth(w).external_email_enabled, true);
+  assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "cloudflare,mailcode");
+  assert.match(stap(r1, "3.5 Access-app op de hostname"), /blijft nog staan/);
+  assert.equal(r1.cloudflare.deur, deurId);
+  assert.ok(
+    r1.waarschuwingen.some((x) =>
+      /deur wi-direct staat er nog.*rol de app opnieuw uit.*draai App inrichten.*nog een keer/.test(
+        x,
+      ),
+    ),
+    JSON.stringify(r1.waarschuwingen),
+  );
+
+  // Run 2: productie stond al op de mail-inlog; nu gaat de deur weg.
   w.aanroepen.length = 0;
   const r = await richtIn(ARG, opzet(w, PORTAAL));
-
   assert.equal(app(w, NAMEN.deur), undefined, "de deur op het domein is weg");
   assert.ok(
     !w.staat.apps.some(
@@ -123,24 +163,21 @@ test("deur weg: van deur naar klantportaal haalt de inrichting de deur weg, als 
   assert.equal(app(w, NAMEN.inlog).type, "saas");
   eisWorkerDicht(w);
 
-  // Volgorde: eerst de inlogmail aan (PATCH auth), dan pas de deur weg; en de deur is de
-  // laatste schrijfactie op Cloudflare.
-  const acties = w.schrijfacties();
-  const patch = acties.findIndex((s) => /^PATCH sb\/projects\/[^/]+\/config\/auth/.test(s));
-  const weg = acties.indexOf(`DELETE cf/access/apps/${deurId}`);
-  assert.ok(patch !== -1 && weg !== -1, JSON.stringify(acties));
-  assert.ok(patch < weg, "de mail staat aan vóór de deur weggaat");
+  // De deur is de allerlaatste aanroep van de hele run, na Supabase, Sentry en GitHub.
+  const laatste = w.aanroepen.at(-1);
+  assert.equal(laatste.methode, "DELETE");
+  assert.match(laatste.pad, new RegExp(`/access/apps/${deurId}$`));
   assert.deepEqual(cfSchrijf(w), [`DELETE cf/access/apps/${deurId}`]);
 
   assert.match(stap(r, "3.5 Access-app op de hostname"), /weggehaald.*klantportaal.*open/);
   assert.equal(r.cloudflare.deur, null);
   assert.ok(r.waarschuwingen.some((x) => /klantportaal.*RLS.*enige grens/.test(x)));
 
-  // Een tweede run verandert niets op Cloudflare en maakt geen deur.
+  // Een derde run verandert niets op Cloudflare en maakt geen deur.
   w.aanroepen.length = 0;
-  const r2 = await richtIn(ARG, opzet(w, PORTAAL));
+  const r3 = await richtIn(ARG, opzet(w, PORTAAL));
   assert.deepEqual(cfSchrijf(w), []);
-  assert.match(stap(r2, "3.5 Access-app op de hostname"), /^geen deur/);
+  assert.match(stap(r3, "3.5 Access-app op de hostname"), /^geen deur/);
 });
 
 test("deur weg: een nieuwe app die meteen klantportaal is, krijgt nooit een deur op het domein, wel de Access op de Worker", async () => {
@@ -219,16 +256,17 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   );
   const mail = stap(r, "3.4 auth-config");
   assert.match(mail, /klantportaal: inloggen per mail aan/);
-  assert.match(mail, /zes cijfers.*15 minuten/);
+  assert.match(mail, /code van 8 cijfers.*15 minuten/);
   assert.match(mail, /Winco Direct <noreply@wincoapps\.com>/);
   assert.match(mail, /mailer_autoconfirm uit/);
-  assert.match(mail, /captcha uit/);
+  assert.match(mail, /captcha aan \(Turnstile/);
+  assert.match(mail, /wi_portaal_voor_aanmelden.*wi_portaal_voor_token.*30 dagen/);
   assert.ok(!mail.includes("e-mail-inlog uit"));
   assert.ok(app(w, NAMEN.deur), "de deur staat er nog");
   assert.deepEqual(r.waarschuwingen, []);
 
   // En terug: de deur staat gepland.
-  await richtIn(ARG, opzet(w, PORTAAL));
+  await naarPortaal(w);
   w.aanroepen.length = 0;
   r = await richtIn({ ...ARG, droogloop: true }, opzet(w, DEUR));
   assert.deepEqual(w.schrijfacties(), []);
@@ -259,7 +297,7 @@ test("droogloop zonder SMTP_WACHTWOORD: schrijft niets en waarschuwt dat de echt
 test("workers.dev en previews blijven dicht bij een klantportaal, ook na Toegang bijwerken en een gewijzigde groep", async () => {
   const w = nepWolk();
   await richtIn(ARG, opzet(w, DEUR));
-  await richtIn(ARG, opzet(w, PORTAAL));
+  await naarPortaal(w);
   eisWorkerDicht(w);
   await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
   eisWorkerDicht(w);
@@ -295,7 +333,7 @@ test("workers.dev en previews: een klantportaal zonder Access op de Worker (oude
   w.staat.apps = w.staat.apps.filter((a) => a.name !== NAMEN.worker);
   const deurId = app(w, NAMEN.deur).id;
   w.aanroepen.length = 0;
-  await richtIn(ARG, opzet(w, PORTAAL));
+  await naarPortaal(w);
   eisWorkerDicht(w);
   assert.deepEqual(cfSchrijf(w), [
     "POST cf/access/apps self_hosted",
@@ -346,7 +384,7 @@ test("van publieke paden naar klantportaal: de app met de bypass gaat weg, de by
   await richtIn(ARG, opzet(w, metPaden));
   assert.ok(app(w, NAMEN.publiek));
   const bypass = w.staat.policies.find((p) => p.decision === "bypass");
-  await richtIn(ARG, opzet(w, PORTAAL));
+  await naarPortaal(w);
   assert.equal(app(w, NAMEN.publiek), undefined);
   assert.equal(app(w, NAMEN.deur), undefined);
   for (const naam of [NAMEN.worker, NAMEN.inlog]) {
@@ -397,11 +435,16 @@ const BEKENDE_VELDEN = [
   "security_captcha_enabled",
   "security_captcha_provider",
   "security_captcha_secret",
+  "hook_before_user_created_enabled",
+  "hook_before_user_created_uri",
+  "hook_custom_access_token_enabled",
+  "hook_custom_access_token_uri",
+  "sessions_inactivity_timeout",
 ];
 
-test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, code en link, de rem, en autoconfirm uit", async () => {
+test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, code en link, de rem, de hooks en autoconfirm uit", async () => {
   const w = nepWolk();
-  await richtIn(ARG, opzet(w, PORTAAL));
+  await naarPortaal(w);
   const a = auth(w);
   assert.equal(a.external_email_enabled, true);
   assert.equal(a.mailer_autoconfirm, false, "een adres moet eerst bewezen worden");
@@ -413,24 +456,24 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
   assert.equal(a.smtp_pass, SMTP);
   assert.equal(a.smtp_admin_email, "noreply@wincoapps.com");
   assert.equal(a.smtp_sender_name, "Winco Direct");
-  assert.equal(a.mailer_otp_length, 6);
+  assert.equal(a.mailer_otp_length, 8);
   assert.equal(a.mailer_otp_exp, 900);
-  for (const sjabloon of ["confirmation", "magic_link"]) {
-    const tekst = a[`mailer_templates_${sjabloon}_content`];
-    assert.match(tekst, /\{\{ \.Token \}\}/, `${sjabloon}: de code`);
-    assert.match(tekst, /href="\{\{ \.ConfirmationURL \}\}"/, `${sjabloon}: de link`);
-    assert.match(tekst, /15 minuten/);
-    assert.equal(a[`mailer_subjects_${sjabloon}`], "Inloggen bij Winco Direct");
-  }
-  assert.match(a.mailer_templates_recovery_content, /\{\{ \.ConfirmationURL \}\}/);
-  assert.ok(!a.mailer_templates_recovery_content.includes(".Token"));
   // De rem.
   assert.equal(a.rate_limit_email_sent, 100);
   assert.equal(a.smtp_max_frequency, 60);
-  assert.equal(a.rate_limit_otp, 15);
-  assert.equal(a.rate_limit_verify, 15);
-  assert.equal(a.security_captcha_enabled, false);
-  assert.ok(!("security_captcha_secret" in a));
+  assert.equal(a.rate_limit_otp, 5);
+  assert.equal(a.rate_limit_verify, 5);
+  // De captcha staat standaard aan.
+  assert.equal(a.security_captcha_enabled, true);
+  assert.equal(a.security_captcha_provider, "turnstile");
+  assert.equal(a.security_captcha_secret, TURNSTILE);
+  // De hooks en de sessieduur.
+  assert.equal(a.hook_before_user_created_enabled, true);
+  assert.equal(a.hook_before_user_created_uri, `pg-functions://postgres/public/${HOOKS.aanmelden}`);
+  assert.equal(a.hook_custom_access_token_enabled, true);
+  assert.equal(a.hook_custom_access_token_uri, `pg-functions://postgres/public/${HOOKS.token}`);
+  assert.equal(a.sessions_inactivity_timeout, 720);
+  assert.deepEqual(SESSIE, { sessions_inactivity_timeout: 720 });
   // De adressen om naar terug te keren: het domein en de previews van dit account.
   assert.equal(a.site_url, "https://direct.wincoapps.com");
   assert.equal(
@@ -446,32 +489,61 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
     gestuurd.filter((k) => !BEKENDE_VELDEN.includes(k)),
     [],
   );
-  // Productie toont beide manieren van inloggen; de previews (testdatabase) alleen Cloudflare.
+  // Productie toont beide manieren van inloggen en de widget; de previews (testdatabase)
+  // alleen Cloudflare, zonder widget.
   assert.equal(KLANTPORTAAL_INLOGDIENST, "cloudflare,mailcode");
   assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "cloudflare,mailcode");
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, SITEKEY);
   assert.equal(w.staat.ghVariabelen.preview.VITE_INLOGDIENST, "cloudflare");
+  assert.equal(w.staat.ghVariabelen.preview.VITE_TURNSTILE_SITEKEY, undefined);
   assert.equal(w.staat.ghVariabelen.repo.PREVIEW_VITE_INLOGDIENST, "cloudflare");
 });
 
-test("mail: de getallen van de rem en de geldigheid van de code staan op één plek", () => {
+test("mail: één sjabloon voor de drie soorten, in de vorm van het lokale sjabloon van de app: de code in id=code en een link met token_hash naar /login", async () => {
+  const m = inlogmail("Winco Direct");
+  assert.equal(INLOGLINK, "{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=email");
+  assert.equal(m.onderwerp, "Inloggen bij Winco Direct");
+  assert.match(m.inhoud, /<span id="code">\{\{ \.Token \}\}<\/span>/);
+  assert.ok(m.inhoud.includes(`<a id="link" href="${INLOGLINK}">`));
+  assert.match(m.inhoud, /15 minuten/);
+  // Nooit de link van Supabase zelf (die logt in bij het openen, ook door een linkscanner),
+  // en nooit een adres dat de aanvrager kan sturen.
+  assert.ok(!/ConfirmationURL|RedirectTo/.test(m.inhoud));
+  const w = nepWolk();
+  await richtIn(ARG, opzet(w, PORTAAL));
+  for (const soort of ["confirmation", "magic_link", "recovery"]) {
+    assert.equal(auth(w)[`mailer_templates_${soort}_content`], m.inhoud, soort);
+    assert.equal(auth(w)[`mailer_subjects_${soort}`], m.onderwerp, soort);
+  }
+});
+
+test("mail: de getallen van de rem en de code staan op één plek", () => {
   assert.deepEqual(REM, {
     rate_limit_email_sent: 100,
     smtp_max_frequency: 60,
-    rate_limit_otp: 15,
-    rate_limit_verify: 15,
+    rate_limit_otp: 5,
+    rate_limit_verify: 5,
   });
   assert.equal(CODE_GELDIG_SECONDEN, 900);
+  assert.equal(CODE_LENGTE, 8);
 });
 
 test("mail: de naam van de afzender kan geen HTML of sjabloonopdracht worden", () => {
   const m = inlogmail("Jansen & Zn. (Direct)");
-  assert.match(m.metCode, /Jansen &amp; Zn\. \(Direct\)/);
+  assert.match(m.inhoud, /Inloggen bij Jansen &amp; Zn\. \(Direct\)/);
+  assert.ok(!m.inhoud.includes("Jansen & Zn"));
   assert.equal(m.onderwerp, "Inloggen bij Jansen & Zn. (Direct)");
   assert.throws(() => inlogmail("x {{ .Token }}"), /ongeldig teken/);
   assert.throws(() => inlogmail("<b>x</b>"), /ongeldig teken/);
+  const afzender = { adres: "a@b.nl", naam: "A" };
+  assert.throws(() => klantportaalInstellingen({ afzender }), /SMTP_WACHTWOORD ontbreekt/);
   assert.throws(
-    () => klantportaalInstellingen({ afzender: { adres: "a@b.nl", naam: "A" } }),
-    /SMTP_WACHTWOORD ontbreekt/,
+    () => klantportaalInstellingen({ afzender, smtpWachtwoord: "x", hooks: HOOKS }),
+    /TURNSTILE_GEHEIM ontbreekt/,
+  );
+  assert.throws(
+    () => klantportaalInstellingen({ afzender, smtpWachtwoord: "x", captchaGeheim: "y" }),
+    /hookfuncties ontbreken/,
   );
 });
 
@@ -480,7 +552,12 @@ test("mail: zonder naam in de afzender is de naam die van de app", async () => {
   const t = {
     groepen: GROEPEN,
     apps: {
-      direct: { groepen: ["kantoor"], klantportaal: true, afzender: "Noreply@WincoApps.com" },
+      direct: {
+        groepen: ["kantoor"],
+        klantportaal: true,
+        afzender: "Noreply@WincoApps.com",
+        turnstile_sitekey: SITEKEY,
+      },
     },
   };
   await richtIn(ARG, opzet(w, t));
@@ -563,38 +640,110 @@ test("geheimen: het SMTP-wachtwoord staat alleen in de aanroep naar Supabase, no
   );
 });
 
-test("captcha: de schakelaar zet Turnstile aan met het geheim, en stopt vóór wijzigingen als het geheim ontbreekt", async () => {
-  const aan = {
-    groepen: GROEPEN,
-    apps: { direct: { ...PORTAAL.apps.direct, captcha: true } },
-  };
+test("captcha: staat standaard aan; zonder geheim stopt de inrichting vóór de eerste wijziging", async () => {
   const leeg = nepWolk();
   await assert.rejects(
-    () => richtIn(ARG, opzet(leeg, aan)),
-    /gestopt zonder wijzigingen.*captcha staat aan.*TURNSTILE_GEHEIM ontbreekt/,
+    () => richtIn(ARG, opzet(leeg, PORTAAL, { captchaGeheim: undefined })),
+    /gestopt zonder wijzigingen.*de captcha staat aan \(de standaard bij een klantportaal\).*TURNSTILE_GEHEIM ontbreekt/,
   );
   assert.deepEqual(leeg.schrijfacties(), []);
+  const droog = await richtIn(
+    { ...ARG, droogloop: true },
+    opzet(leeg, PORTAAL, { captchaGeheim: undefined }),
+  );
+  assert.ok(
+    droog.waarschuwingen.some((x) => /de echte run stopt hierop.*TURNSTILE_GEHEIM/.test(x)),
+  );
 
   const w = nepWolk();
-  const d = opzet(w, aan, { captchaGeheim: TURNSTILE });
+  const d = opzet(w, PORTAAL);
+  await richtIn(ARG, opzet(w, PORTAAL));
   const r = await richtIn(ARG, d);
   assert.equal(auth(w).security_captcha_enabled, true);
   assert.equal(auth(w).security_captcha_provider, "turnstile");
   assert.equal(auth(w).security_captcha_secret, TURNSTILE);
+  assert.equal(stap(r, "3.4 captcha"), "aan (Turnstile)");
   assert.ok(!uitvoerRegel(r, d.geheimen).includes(TURNSTILE));
   assert.ok(!JSON.stringify(r).includes(TURNSTILE));
+  assert.ok(!r.waarschuwingen.some((x) => /captcha staat uit/.test(x)));
+  // Het geheim gaat alleen naar Supabase; naar GitHub gaat alleen de openbare sleutel.
+  assert.ok(!w.aanroepen.some((a) => a.soort === "gh" && String(a.invoer).includes(TURNSTILE)));
+});
 
-  // Weer uit: de schakelaar gaat uit; het geheim wordt niet meer meegestuurd.
+test("captcha: gaat pas aan in de run nadat de sleutel voor de app klaarstond, zodat de uitgerolde app de widget al toont", async () => {
+  const w = nepWolk();
+  await richtIn(ARG, opzet(w, DEUR));
+  // Run 1: de sleutel gaat naar de app-repo, de captcha in Supabase nog niet.
   w.aanroepen.length = 0;
-  await richtIn(ARG, opzet(w, PORTAAL, { captchaGeheim: TURNSTILE }));
-  assert.equal(auth(w).security_captcha_enabled, false);
+  const r1 = await richtIn(ARG, opzet(w, PORTAAL));
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, SITEKEY);
+  assert.equal(auth(w).security_captcha_enabled, undefined, "nog niet aangeraakt");
   assert.ok(!w.aanroepen.some((a) => JSON.stringify(a.body ?? "").includes(TURNSTILE)));
-
-  const droog = await richtIn(
-    { ...ARG, droogloop: true },
-    opzet(w, aan, { captchaGeheim: TURNSTILE }),
+  assert.match(stap(r1, "3.4 captcha"), /nog niet aangezet/);
+  assert.ok(
+    r1.waarschuwingen.some((x) =>
+      /captcha is in deze run nog NIET aangezet.*Rol de app opnieuw uit/.test(x),
+    ),
   );
-  assert.match(stap(droog, "3.4 auth-config"), /captcha aan \(Turnstile\)/);
+  assert.ok(app(w, NAMEN.deur), "en de deur staat er nog");
+  // Run 2 (na de uitrol): captcha aan, en pas daarna de deur weg.
+  w.aanroepen.length = 0;
+  await richtIn(ARG, opzet(w, PORTAAL));
+  assert.equal(auth(w).security_captcha_enabled, true);
+  const acties = w.schrijfacties();
+  assert.ok(
+    acties.findIndex((s) => /^PATCH sb\/.*config\/auth/.test(s)) <
+      acties.findIndex((s) => s.startsWith("DELETE cf/access/apps/")),
+  );
+  assert.equal(app(w, NAMEN.deur), undefined);
+
+  // Een nieuwe widget (andere sleutel) op een draaiend portaal: de oude captcha blijft staan
+  // tot de app met de nieuwe sleutel is uitgerold; niemand wordt buitengesloten.
+  const nieuw = {
+    groepen: GROEPEN,
+    apps: { direct: { ...PORTAAL.apps.direct, turnstile_sitekey: "0x4AAAAAAANieuweSleutel" } },
+  };
+  const nieuwGeheim = "0x4NieuwGeheimVanTurnstile";
+  await richtIn(ARG, opzet(w, nieuw, { captchaGeheim: nieuwGeheim }));
+  assert.equal(auth(w).security_captcha_enabled, true);
+  assert.equal(auth(w).security_captcha_secret, TURNSTILE, "nog het oude geheim");
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, "0x4AAAAAAANieuweSleutel");
+  await richtIn(ARG, opzet(w, nieuw, { captchaGeheim: nieuwGeheim }));
+  assert.equal(auth(w).security_captcha_secret, nieuwGeheim);
+});
+
+test('captcha: uitzetten kan alleen met een uitdrukkelijke "captcha": false, en dan waarschuwt elke run', async () => {
+  const uit = {
+    groepen: GROEPEN,
+    apps: { direct: { ...PORTAAL.apps.direct, captcha: false } },
+  };
+  const w = nepWolk();
+  await naarPortaal(w);
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, SITEKEY);
+  assert.equal(auth(w).security_captcha_enabled, true);
+
+  w.aanroepen.length = 0;
+  const r = await richtIn(ARG, opzet(w, uit, { captchaGeheim: undefined }));
+  assert.equal(
+    auth(w).security_captcha_enabled,
+    false,
+    "uit gaat meteen: dat sluit niemand buiten",
+  );
+  assert.ok(!w.aanroepen.some((a) => JSON.stringify(a.body ?? "").includes(TURNSTILE)));
+  assert.ok(
+    r.waarschuwingen.some((x) => /captcha staat uit.*mailgrens/.test(x)),
+    JSON.stringify(r.waarschuwingen),
+  );
+  // De app toont de widget dan ook niet meer.
+  assert.equal(w.staat.ghVariabelen.production.VITE_TURNSTILE_SITEKEY, undefined);
+  const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, uit));
+  assert.match(stap(droog, "3.4 auth-config"), /captcha UIT/);
+  assert.ok(droog.waarschuwingen.some((x) => /captcha staat uit/.test(x)));
+  // En weer aan: in twee runs.
+  await richtIn(ARG, opzet(w, PORTAAL));
+  assert.equal(auth(w).security_captcha_enabled, false);
+  await richtIn(ARG, opzet(w, PORTAAL));
+  assert.equal(auth(w).security_captcha_enabled, true);
 });
 
 // ---------------------------------------------------------------- de testdatabase
@@ -850,6 +999,12 @@ test("een account met een Cloudflare- én een e-mailinlog: een vertrokken medewe
   assert.deepEqual(afgemeld(w).sort(), [ID(1), ID(3)]);
   assert.deepEqual(r.ingetrokken, { direct: ["oud@winco.nl", "prive@gmail.com"] });
   assert.deepEqual(r.klanten, { direct: 0 }, "geen van de vier telt als klant");
+  // Dat het hele account dicht is, ook de klantkant, staat in het resultaat.
+  const ookPerMail = r.waarschuwingen.filter((x) =>
+    /kon met hetzelfde account ook per mail/.test(x),
+  );
+  assert.equal(ookPerMail.length, 1);
+  assert.match(ookPerMail[0], /oud@winco\.nl/);
 });
 
 test("een Cloudflare-account zonder eigen adres wordt beoordeeld op het adres van Cloudflare, en gemeld", async () => {
@@ -982,9 +1137,27 @@ test("klantportaal geldt per app: een gewone app in hetzelfde bestand trekt in z
   assert.deepEqual(bans(w), [ID(2)]);
 });
 
-test("terug naar de deur (gedocumenteerd gevolg): zodra klantportaal uit toegang.json is, zijn de klanten gewone vreemden en trekt Toegang bijwerken ze in", async () => {
+test("terug naar een gewone app is geen massaban: zolang App inrichten niet heeft gedraaid, trekt Toegang bijwerken bij die app niemand in en zegt dat", async () => {
   const w = await portaalMet(MENSEN());
   const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  assert.deepEqual(bans(w), []);
+  assert.deepEqual(afgemeld(w), []);
+  assert.deepEqual(r.ingetrokken, {});
+  assert.deepEqual(r.niet_ingetrokken, ["direct"]);
+  assert.ok(
+    r.waarschuwingen.some((x) =>
+      /direct: NIEMAND INGETROKKEN.*inloggen per mail staat in productie nog aan.*Draai eerst App inrichten/.test(
+        x,
+      ),
+    ),
+    JSON.stringify(r.waarschuwingen),
+  );
+  // Pas na App inrichten (deur terug, mail uit) is het een gewone app, met het gedocumenteerde
+  // gevolg: wie niet in een groep staat, wordt ingetrokken.
+  await richtIn(ARG, opzet(w, DEUR));
+  w.aanroepen.length = 0;
+  const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w).sort(), [ID(1), ID(2), ID(4), ID(6), ID(8)]);
-  assert.equal(r.klanten, undefined);
+  assert.equal(r2.klanten, undefined);
+  assert.equal(r2.niet_ingetrokken, undefined);
 });

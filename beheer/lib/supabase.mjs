@@ -78,34 +78,74 @@ export const SMTP_HOST = "smtp.resend.com";
 export const SMTP_POORT = "465";
 export const SMTP_GEBRUIKER = "resend";
 
-/** De inlogcode: zes cijfers, een kwartier geldig (standaardkeuze 9). */
-export const CODE_LENGTE = 6;
+/**
+ * De inlogcode: acht cijfers, een kwartier geldig. Acht in plaats van zes omdat een fout
+ * antwoord de code niet ongeldig maakt en Supabase Auth geen teller per account heeft: met
+ * zes cijfers en een paar honderd IP-adressen was een account in een dag te raden (zie REM).
+ * De inlogpagina van de app moet dezelfde lengte verwachten.
+ */
+export const CODE_LENGTE = 8;
 export const CODE_GELDIG_SECONDEN = 15 * 60;
 
 /**
+ * Supabase Auth geeft elke teller per IP-adres een voorraad van 30 verzoeken die meteen op
+ * mogen (de "burst", vast in de broncode), en vult die daarna aan met de ingestelde waarde
+ * per vijf minuten.
+ */
+export const BURST = 30;
+
+/**
  * De rem op een open inlogformulier. De eenheden komen uit de broncode van Supabase Auth
- * (internal/api/apilimiter en internal/conf), nagelezen op 13-11-2026:
+ * (internal/api/apilimiter/apilimiter.go en internal/api/api.go, commit 8872586 van
+ * 11-11-2026):
  *
- *   rate_limit_email_sent  mails per uur, voor het hele project samen. 100: ruim voor een
- *                          drukke ochtend (een klant logt zelden opnieuw in, een sessie
- *                          blijft staan), en een mailbom kost hoogstens 2400 mails per dag.
- *                          Is de grens bereikt, dan krijgt dat uur niemand meer een mail;
- *                          daarvoor is de schakelaar `captcha`.
- *   smtp_max_frequency     seconden tussen twee mails naar hetzelfde adres. 60: één adres
- *                          krijgt hoogstens één mail per minuut.
- *   rate_limit_otp         aanvragen (code, aanmelding, opnieuw sturen) per vijf minuten per
- *                          IP-adres. 15: één mens heeft er één of twee nodig, een kantoor
- *                          achter één adres kan ermee vooruit.
- *   rate_limit_verify      pogingen om een code of link in te wisselen, per vijf minuten per
- *                          IP-adres. 15: in het kwartier dat een code geldt zijn dat 45
- *                          gokken per IP-adres op een miljoen mogelijkheden.
+ *   rate_limit_email_sent  mails per uur, voor het hele project samen, vast venster. 100:
+ *                          ruim voor een drukke ochtend (een klant logt zelden opnieuw in),
+ *                          en een mailbom kost hoogstens 2400 mails per dag. Is de grens
+ *                          bereikt, dan krijgt dat uur niemand meer een mail.
+ *   smtp_max_frequency     seconden tussen twee mails naar hetzelfde adres. 60.
+ *   rate_limit_otp         aanvullen per vijf minuten per IP-adres, voor ZES tellers die elk
+ *                          hun eigen voorraad van 30 hebben: /signup, /otp, /magiclink,
+ *                          /recover, /resend en het wijzigen van een account. De eerste drie
+ *                          sturen een mail naar elk adres dat de aanvrager noemt. Eén
+ *                          IP-adres kan dus zonder captcha in een paar seconden 90 mails naar
+ *                          verzonnen adressen laten sturen, en haalt de grens van 100 binnen
+ *                          een paar minuten, welk getal hier ook staat (de voorraad van 30
+ *                          is niet in te stellen). 5: de laagste waarde waarmee een mens die
+ *                          zich vertypt nog verder kan (één nieuwe poging per minuut na de
+ *                          eerste 30).
+ *   rate_limit_verify      aanvullen per vijf minuten per IP-adres voor het inwisselen van
+ *                          een code of link, ook met een voorraad van 30. 5: in het kwartier
+ *                          dat een code geldt zijn dat 30 + 3 x 5 = 45 gokken per IP-adres,
+ *                          op honderd miljoen mogelijkheden (acht cijfers). Met honderd
+ *                          IP-adressen een hele dag lang is de kans op één goede gok
+ *                          ongeveer een half procent; met zes cijfers was dat ruim een derde.
+ *
+ * De tellers per IP-adres houden dus één mens tegen, geen aanvaller die de mailgrens wil
+ * opmaken. Daarvoor is de captcha, die bij een klantportaal standaard aan staat: Supabase Auth
+ * controleert hem op /signup, /otp, /magiclink, /recover, /resend en /token (wachtwoord), en
+ * stuurt zonder geldig bewijs geen mail. Met `"captcha": false` vervalt die bescherming; het
+ * resultaat van de inrichting zegt dat dan elke run.
  */
 export const REM = {
   rate_limit_email_sent: 100,
   smtp_max_frequency: 60,
-  rate_limit_otp: 15,
-  rate_limit_verify: 15,
+  rate_limit_otp: 5,
+  rate_limit_verify: 5,
 };
+
+/**
+ * De sessieduur van een klantportaal: een sessie die 30 dagen niet is gebruikt, vervalt
+ * (`sessions_inactivity_timeout`, in uren; hetzelfde als de 30 dagen van de deur bij een
+ * gewone app). Alleen inactiviteit, geen vaste einddatum (`sessions_timebox`): die zou elke
+ * klant op een vaste dag uitloggen, ook midden in het werk. Zonder grens bleef de sessie van
+ * een vertrokken medewerker op een groep met een domein voorgoed geldig. De 12 uur voor
+ * medewerkerrechten dwingt de app af, niet Supabase: die kent maar één duur voor iedereen.
+ *
+ * Supabase biedt dit alleen op het Pro-plan en hoger. Daarom gaat het in een eigen aanroep,
+ * na de rest: weigert Supabase hem, dan is de rest al gezet en meldt de inrichting het.
+ */
+export const SESSIE = { sessions_inactivity_timeout: 30 * 24 };
 
 function htmlTekst(tekst) {
   return String(tekst)
@@ -117,11 +157,31 @@ function htmlTekst(tekst) {
 }
 
 /**
- * De inlogmail: de code én de link in dezelfde mail. Een link uit WhatsApp of Gmail opent
- * vaak in een ingebouwde browser, waar de sessie daarna niet in de echte browser staat; de
- * code werkt altijd. `{{ .Token }}` en `{{ .ConfirmationURL }}` vult Supabase Auth in. De
- * naam komt uit toegang.json en mag geen HTML of sjabloonopdracht kunnen worden: het
- * patroon van de afzender laat dat niet toe, en hier wordt hij nog eens als tekst gezet.
+ * De link in de mail gaat naar de inlogpagina van de app (`/login`) met `token_hash`, niet
+ * naar Supabase zelf. De pagina logt pas in na een klik op een knop: een virusscanner of een
+ * mailprogramma dat links vooraf opent, verbruikt de link dan niet en logt niemand in.
+ * `{{ .SiteURL }}` is het eigen domein (site_url); een aanvrager kan het adres dus niet
+ * sturen, anders dan bij `{{ .RedirectTo }}`. Dezelfde vorm als het lokale sjabloon van de
+ * app (supabase/templates/inlogcode.html): de code in `id="code"`, de link in `id="link"`.
+ */
+export const INLOGLINK = "{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=email";
+
+/**
+ * De mail van een klantportaal: één sjabloon voor alle drie de soorten die Supabase Auth
+ * verstuurt, in dezelfde vorm als het lokale sjabloon van de app. `{{ .Token }}`,
+ * `{{ .TokenHash }}` en `{{ .SiteURL }}` vult Supabase Auth in. De naam komt uit
+ * toegang.json en mag geen HTML of sjabloonopdracht kunnen worden: het patroon van de
+ * afzender laat dat niet toe, en hier wordt hij nog eens als tekst gezet.
+ *
+ *   magic_link    een bekend adres vraagt een code;
+ *   confirmation  een adres zonder account: de eerste keer van een nieuwe klant, de eerste
+ *                 inlog van een nieuwe medewerker via Cloudflare, en ook als een ander dit
+ *                 adres opgeeft;
+ *   recovery      iemand roept /recover aan. De code daaruit werkt in hetzelfde codevak.
+ *
+ * Omdat een ander de mail kan uitlokken, zegt de tekst wat je doet als je er niet om vroeg:
+ * niets, niet klikken, de code aan niemand geven. Dat een vooraf door een ander gezet
+ * wachtwoord na jouw bevestiging geen sessie oplevert, regelt de token-hook, niet deze tekst.
  */
 export function inlogmail(naam) {
   if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
@@ -129,57 +189,81 @@ export function inlogmail(naam) {
   const minuten = CODE_GELDIG_SECONDEN / 60;
   return {
     onderwerp: `Inloggen bij ${naam}`,
-    metCode: [
+    inhoud: [
       `<h2>Inloggen bij ${n}</h2>`,
-      "<p>Vul deze code in op het inlogscherm:</p>",
-      '<p style="font-size: 28px; letter-spacing: 4px;"><strong>{{ .Token }}</strong></p>',
-      "<p>Of klik op de link om meteen in te loggen:</p>",
-      `<p><a href="{{ .ConfirmationURL }}">Inloggen bij ${n}</a></p>`,
-      `<p>De code en de link zijn ${minuten} minuten geldig en werken één keer. Heb je dit niet aangevraagd, dan hoef je niets te doen.</p>`,
+      "<p>Vul deze code in op de inlogpagina:</p>",
+      '<p style="font-size: 28px; font-weight: bold; letter-spacing: 6px"><span id="code">{{ .Token }}</span></p>',
+      `<p>De code is ${minuten} minuten geldig en werkt één keer.</p>`,
+      `<p>Of <a id="link" href="${INLOGLINK}">log in met deze link</a>.</p>`,
+      `<p>Heb je dit niet zelf, zojuist, op de inlogpagina van ${n} aangevraagd? Dan hoef je niets te doen. Klik niet op de link en geef de code aan niemand; zonder de code kan niemand inloggen.</p>`,
     ].join("\n"),
-    // Voor de herstelmail (iemand roept /recover aan): alleen een link. De code uit zo'n
-    // mail is van een ander soort en werkt niet in het codevak van de app.
-    alleenLink: [
-      `<h2>Inloggen bij ${n}</h2>`,
-      `<p><a href="{{ .ConfirmationURL }}">Inloggen bij ${n}</a></p>`,
-      `<p>De link is ${minuten} minuten geldig en werkt één keer. Heb je dit niet aangevraagd, dan hoef je niets te doen.</p>`,
-    ].join("\n"),
+  };
+}
+
+/**
+ * De twee hooks van een klantportaal in productie (zie portaalAanmeldHookSql en
+ * portaalTokenHookSql in toegang.mjs). Schrijf de functies altijd eerst: een hook die naar een
+ * functie wijst die niet bestaat, laat elke inlog mislukken.
+ */
+export function portaalHookInstellingen(functies) {
+  for (const f of [functies?.aanmelden, functies?.token]) {
+    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(f ?? "")) throw new Error("de hookfuncties ontbreken");
+  }
+  return {
+    hook_before_user_created_enabled: true,
+    hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
+    hook_custom_access_token_enabled: true,
+    hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
   };
 }
 
 /**
  * De auth-instellingen van een klantportaal, alleen voor productie; ze komen bovenop
  * authInstellingen. Veldnamen nagelopen tegen de Management API (UpdateAuthConfigBody in
- * https://api.supabase.com/api/v1-json, 13-11-2026).
+ * https://api.supabase.com/api/v1-json, 13-11-2026) en tegen de CLI van Supabase
+ * (pkg/config/auth.go), die dezelfde velden zet.
  *
  * `mailer_autoconfirm` gaat hier UIT. Bij een gewone app staat hij aan omdat Cloudflare geen
  * email_verified meestuurt (zie authInstellingen), en dat is daar veilig omdat inloggen met
  * e-mail uit staat. Hier staat e-mail aan. Met autoconfirm aan zou iedereen via /signup met
  * een zelfgekozen wachtwoord een account op andermans adres kunnen maken en meteen een
- * sessie krijgen, zonder ooit de mailbox te zien; logt de echte klant later in en keurt het
- * bedrijf hem goed, dan zit de ander al binnen. Met autoconfirm uit moet elk adres eerst
+ * sessie krijgen, zonder ooit de mailbox te zien. Met autoconfirm uit moet elk adres eerst
  * bewezen worden met de link of de code uit de mail.
  *
- * De prijs, uit de broncode van Supabase Auth (internal/api/external.go en
- * internal/models/linking.go), niet tegen een echt project getest:
+ * Dat alleen is niet genoeg: wie het adres van een klant aanmeldt met een eigen wachtwoord,
+ * hoeft alleen te wachten tot de klant de mail gebruikt die daarvan komt. Daarom twee hooks
+ * (`hooks`, verplicht): geen sessie met een wachtwoord, en geen aanmelding per mail op een
+ * adres van een medewerker.
+ *
+ * De prijs voor medewerkers, nagespeeld tegen Supabase Auth (13-11-2026):
  *   - een medewerker die al een account had (van vóór het klantportaal) merkt niets;
  *   - een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer de melding
- *     dat zijn adres nog bevestigd moet worden, met een mail; daarna werkt het;
- *   - een medewerker die eerst per mail een klantaccount op zijn werkadres maakte, krijgt
- *     via Cloudflare een tweede account zonder adres dat niet te bevestigen is. Toegang
- *     bijwerken meldt zulke accounts (zie trekIn); de README zegt wat de owner dan doet.
+ *     dat zijn adres nog bevestigd moet worden, met de inlogmail; daarna werkt het.
  *
  * `mailer_allow_unverified_email_sign_ins` blijft uit: dat is de andere schakelaar waarmee
  * een onbevestigd adres toch kan inloggen. `disable_signup` blijft onaangeroerd.
  *
+ * De captcha staat standaard aan (`captcha` is alleen uit met een uitdrukkelijke false). Met
+ * CAPTCHA_LATER blijven de captcha-instellingen zoals ze zijn: de inrichting zet de captcha
+ * pas aan als de app in productie de widget al toont, anders kan geen klant nog een code
+ * aanvragen. Het geheim moet er dan wel al zijn.
  * `smtpWachtwoord` en `captchaGeheim` zijn geheimen. Ze staan alleen in de body van de PATCH
  * en nooit in een melding of in het resultaat.
  */
-export function klantportaalInstellingen({ afzender, smtpWachtwoord, captcha, captchaGeheim }) {
+/** De captcha moet aan, maar nog niet in deze run (zie klantportaalInstellingen). */
+export const CAPTCHA_LATER = "later";
+
+export function klantportaalInstellingen({
+  afzender,
+  smtpWachtwoord,
+  captcha = true,
+  captchaGeheim,
+  hooks,
+}) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
   if (!smtpWachtwoord) throw new Error("SMTP_WACHTWOORD ontbreekt");
-  if (captcha && !captchaGeheim) throw new Error("TURNSTILE_GEHEIM ontbreekt");
+  if (captcha !== false && !captchaGeheim) throw new Error("TURNSTILE_GEHEIM ontbreekt");
   const mail = inlogmail(afzender.naam);
   return {
     external_email_enabled: true,
@@ -189,6 +273,7 @@ export function klantportaalInstellingen({ afzender, smtpWachtwoord, captcha, ca
     // medewerker zijn Cloudflare-inlog loskoppelen, als "klant" verder gaan met dezelfde
     // sessie, en bij zijn vertrek aan Toegang bijwerken ontsnappen.
     security_manual_linking_enabled: false,
+    ...portaalHookInstellingen(hooks),
     smtp_host: SMTP_HOST,
     smtp_port: SMTP_POORT,
     smtp_user: SMTP_GEBRUIKER,
@@ -198,19 +283,23 @@ export function klantportaalInstellingen({ afzender, smtpWachtwoord, captcha, ca
     mailer_otp_length: CODE_LENGTE,
     mailer_otp_exp: CODE_GELDIG_SECONDEN,
     // Een nieuw adres krijgt het sjabloon "confirmation", een bekend adres "magic_link"
-    // (internal/api/magic_link.go). Allebei dezelfde mail, anders ziet een nieuwe klant
-    // de Engelse standaardtekst zonder code.
+    // (internal/api/magic_link.go), /recover het sjabloon "recovery". Alle drie dezelfde mail.
     mailer_subjects_confirmation: mail.onderwerp,
-    mailer_templates_confirmation_content: mail.metCode,
+    mailer_templates_confirmation_content: mail.inhoud,
     mailer_subjects_magic_link: mail.onderwerp,
-    mailer_templates_magic_link_content: mail.metCode,
+    mailer_templates_magic_link_content: mail.inhoud,
     mailer_subjects_recovery: mail.onderwerp,
-    mailer_templates_recovery_content: mail.alleenLink,
+    mailer_templates_recovery_content: mail.inhoud,
     ...REM,
-    security_captcha_enabled: Boolean(captcha),
-    ...(captcha
-      ? { security_captcha_provider: "turnstile", security_captcha_secret: captchaGeheim }
-      : {}),
+    ...(captcha === CAPTCHA_LATER
+      ? {}
+      : captcha !== false
+        ? {
+            security_captcha_enabled: true,
+            security_captcha_provider: "turnstile",
+            security_captcha_secret: captchaGeheim,
+          }
+        : { security_captcha_enabled: false }),
   };
 }
 

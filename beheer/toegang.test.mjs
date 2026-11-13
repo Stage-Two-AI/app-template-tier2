@@ -17,6 +17,7 @@ import {
   policyIdsVoorApp,
   policyVoorGroep,
   publiekVanApp,
+  sitekeyVanApp,
   sqlTekst,
   synchroniseerPolicies,
   TESTGEBRUIKER,
@@ -598,6 +599,7 @@ const PORTAAL_APP = {
   groepen: ["klant"],
   klantportaal: true,
   afzender: "Winco Direct <noreply@wincoapps.com>",
+  turnstile_sitekey: "0x4AAAAAAAOpenbareSleutel",
 };
 const metApp = (app) => ({ groepen: KLANT.groepen, apps: { direct: app } });
 
@@ -651,6 +653,50 @@ test("klantportaal: alleen true of false; een tekst, een getal of een object is 
   assert.throws(
     () => valideerToegang(metApp({ ...PORTAAL_APP, captcha: "aan" })),
     /captcha is true of false/,
+  );
+});
+
+test('klantportaal: de captcha staat standaard aan; uit kan alleen met een uitdrukkelijke "captcha": false', () => {
+  const { turnstile_sitekey: _weg, ...zonder } = PORTAAL_APP;
+  // Zonder sitekey en zonder uitdrukkelijke keuze: een fout die beide uitwegen noemt.
+  assert.throws(
+    () => valideerToegang(metApp(zonder)),
+    /app "direct": een klantportaal heeft standaard een captcha.*turnstile_sitekey.*TURNSTILE_GEHEIM.*"captcha": false/,
+  );
+  assert.throws(() => valideerToegang(metApp({ ...zonder, captcha: true })), /turnstile_sitekey/);
+  const aan = valideerToegang(metApp(PORTAAL_APP));
+  assert.equal(captchaVanApp(aan, "direct"), true);
+  assert.equal(sitekeyVanApp(aan, "direct"), "0x4AAAAAAAOpenbareSleutel");
+  const uit = valideerToegang(metApp({ ...zonder, captcha: false }));
+  assert.equal(captchaVanApp(uit, "direct"), false);
+  assert.equal(sitekeyVanApp(uit, "direct"), null);
+  // Uit met de sleutel er nog bij (tijdelijk uitgezet): geldig, en de sleutel telt niet.
+  assert.equal(
+    sitekeyVanApp(valideerToegang(metApp({ ...PORTAAL_APP, captcha: false })), "direct"),
+    null,
+  );
+  // Rare waarden zetten de captcha nooit stil uit.
+  for (const raar of [0, null, "false", "nee"]) {
+    assert.throws(
+      () => valideerToegang(metApp({ ...PORTAAL_APP, captcha: raar })),
+      /captcha is true of false/,
+    );
+    assert.equal(captchaVanApp(metApp({ ...PORTAAL_APP, captcha: raar }), "direct"), true);
+  }
+  // De geheime sleutel hoort niet in het bestand; een sleutel met rare tekens is een fout.
+  for (const fout of ["", "kort", "met spatie erin", "<script>", 12345678901]) {
+    assert.throws(
+      () => valideerToegang(metApp({ ...PORTAAL_APP, turnstile_sitekey: fout })),
+      /turnstile_sitekey is de openbare sleutel/,
+      JSON.stringify(fout),
+    );
+  }
+  assert.throws(
+    () =>
+      valideerToegang(
+        metApp({ groepen: ["klant"], turnstile_sitekey: "0x4AAAAAAAOpenbareSleutel" }),
+      ),
+    /turnstile_sitekey hoort bij een klantportaal/,
   );
 });
 
