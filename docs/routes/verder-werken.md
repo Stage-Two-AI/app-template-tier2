@@ -81,6 +81,9 @@ on conflict (user_id) do nothing;
 De rol is er na de merge en de eerstvolgende verversing. Een app zonder rollen heeft dit
 bestand niet nodig.
 
+Moet de app open voor klanten, die zelf met een code per mail inloggen? Dat is een
+klantportaal: volg dan `docs/routes/klantportaal.md`.
+
 Verstuurt je wijziging mail (in een Edge Function)? Gebruik dan `richtMail` uit
 `supabase/functions/_shared/mail.ts`. Buiten productie gaat de mail dan alleen naar het
 testadres uit `stack.config.json` (`testmail`), nooit naar echte mensen.

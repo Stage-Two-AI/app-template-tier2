@@ -96,6 +96,7 @@
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",
       "docs/routes/lokaal-kijken.md",
+      "docs/routes/klantportaal.md",
       "biome.json",
       "tests/unit/apparaat.test.ts",
       "tests/unit/cloudflare-config.test.ts",
@@ -121,6 +122,7 @@
       "e2e/stack-config.ts",
       "tests/unit/template-afhankelijk.test.ts",
       "tests/unit/afgeleide-app.test.ts",
+      "tests/unit/routes.test.ts",
       "e2e/inloggen.ts"
     ],
     "sleutelsSamenvoegen": {

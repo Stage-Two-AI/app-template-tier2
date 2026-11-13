@@ -240,7 +240,8 @@ hoort aan te roepen, raakt het recht kwijt met
 `with (security_invoker = true)`. Kent de app soorten medewerkers, maak dan een eigen functie
 die zelf `public.is_medewerker()` aanroept en zet hem met een reden in `klantportaal_poorten`.
 De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft de poort
-niet. Zonder de schakelaar verandert er voor een app niets.
+niet. Zonder de schakelaar verandert er voor een app niets. Een bestaande app een klantportaal
+maken gaat stap voor stap met de route `docs/routes/klantportaal.md`.
 
 **Een klant wijzigt zijn e-mailadres niet zelf.** Dat loopt via een medewerker, en de
 inrichting zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past
