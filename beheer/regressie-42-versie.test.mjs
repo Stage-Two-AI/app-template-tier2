@@ -102,6 +102,13 @@ const nu = {
   nepWolk,
   valideerToegang,
 };
+// In de Kwaliteitspoort mag deze vergelijking nooit stil overgeslagen worden: daar is de
+// geschiedenis er (fetch-depth 0) en zijn de pakketten van beheer/ geïnstalleerd.
+if (!v42 && process.env.CI) {
+  throw new Error(
+    "de code van versie 42 kon niet geladen worden (git archive of beheer/node_modules ontbreekt); in CI is dat een fout",
+  );
+}
 const sla = v42 ? false : "geen git of geen commit van versie 42 in deze kopie";
 
 const GROEPEN = {
