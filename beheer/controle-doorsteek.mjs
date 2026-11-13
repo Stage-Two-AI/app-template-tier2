@@ -13,10 +13,17 @@
  *
  * AE1, AE3 en de koppeltest (R16) vragen een echte login en doet Christijn met de hand.
  *
+ * Met --klantportaal (de app staat als klantportaal in toegang.json) draait AE2 om: het
+ * eigen domein hoort dan juist open te zijn (KP1). De rest blijft: de inlog voor medewerkers
+ * loopt nog steeds langs de loginpagina van Access, en het workers.dev-adres, het
+ * versie-adres en de preview zijn dicht. Het workers.dev-adres is dan verplicht: zonder dat
+ * adres is niet te zien of alleen het domein open ging.
+ *
  * Gebruik:
  *   node beheer/controle-doorsteek.mjs --hostname cf-proef.stagetwo.nl \
  *     --project-ref <ref> --workers-dev https://cf-proef.<sub>.workers.dev/ \
  *     [--versie-url <url>] [--preview-url <url>] [--tabel proef_zonder_grant]
+ *     [--klantportaal]
  *   met SUPABASE_ANON_KEY in de omgeving.
  */
 import { parseArgs } from "node:util";
@@ -53,6 +60,38 @@ async function deurControle(fetchFn, ae, wat, url) {
   if (!url) return { ae, wat, geslaagd: null, bewijs: "overgeslagen: geen adres opgegeven" };
   const r = await haal(fetchFn, url);
   return { ae, wat, geslaagd: isDicht(r), bewijs: bewijsVan(r) };
+}
+
+/**
+ * Bij een klantportaal: het eigen domein is zonder inlog bereikbaar. Geslaagd bij een
+ * gewone pagina (2xx), of een doorverwijzing die niet naar Cloudflare Access gaat. Een
+ * loginpagina van Access, een weigering of een onbereikbaar adres betekent dat er nog een
+ * deur staat (of dat de app er niet is): dan kan geen klant erbij.
+ */
+async function openControle(fetchFn, url) {
+  const r = await haal(fetchFn, url);
+  const naarAccess = ACCESS.test(r.naar);
+  const open =
+    !r.fout &&
+    !naarAccess &&
+    ((r.status >= 200 && r.status < 300) || (r.status >= 300 && r.status < 400));
+  return {
+    ae: "KP1",
+    wat: "klantportaal: het domein is open zonder login",
+    geslaagd: open,
+    bewijs: naarAccess ? `${bewijsVan(r)} (er staat nog een deur van Access)` : bewijsVan(r),
+  };
+}
+
+/** Bij een klantportaal mag een adres dat dicht hoort te zijn niet ontbreken. */
+function verplichtDicht(r, klantportaal) {
+  if (!klantportaal || r.geslaagd !== null) return r;
+  return {
+    ...r,
+    geslaagd: false,
+    bewijs:
+      "niet opgegeven; bij een klantportaal verplicht (--workers-dev), want daar moet de deur blijven",
+  };
 }
 
 /**
@@ -117,11 +156,17 @@ export async function controleer({
   versieUrl,
   previewUrl,
   tabelZonderGrant = "proef_zonder_grant",
+  klantportaal = false,
 }) {
   return [
-    await deurControle(fetchFn, "AE2", "app zonder login", `https://${hostname}/`),
+    klantportaal
+      ? await openControle(fetchFn, `https://${hostname}/`)
+      : await deurControle(fetchFn, "AE2", "app zonder login", `https://${hostname}/`),
     await inlogrouteControle(fetchFn, { projectRef, hostname }),
-    await deurControle(fetchFn, "AE6", "workers.dev-adres", workersDev),
+    verplichtDicht(
+      await deurControle(fetchFn, "AE6", "workers.dev-adres", workersDev),
+      klantportaal,
+    ),
     await deurControle(fetchFn, "AE6", "versie-adres van productie", versieUrl),
     await deurControle(fetchFn, "AE5", "preview zonder login", previewUrl),
     await tabelControle(fetchFn, { projectRef, anonKey, tabelZonderGrant }),
@@ -142,6 +187,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       "versie-url": { type: "string" },
       "preview-url": { type: "string" },
       tabel: { type: "string" },
+      klantportaal: { type: "boolean" },
     },
   });
   const anonKey = process.env.SUPABASE_ANON_KEY;
@@ -157,6 +203,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     versieUrl: values["versie-url"],
     previewUrl: values["preview-url"],
     tabelZonderGrant: values.tabel,
+    klantportaal: values.klantportaal,
   });
   console.log("| AE | Controle | Uitkomst | Bewijs |\n|---|---|---|---|");
   for (const r of rapport) console.log(regel(r));

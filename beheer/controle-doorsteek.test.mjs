@@ -142,3 +142,81 @@ test("zonder optionele adressen worden die controles overgeslagen en gemeld", as
   const overgeslagen = rapport.filter((r) => r.geslaagd === null);
   assert.equal(overgeslagen.length, 2);
 });
+
+// ---------------------------------------------------------------- klantportaal
+
+const PORTAAL = {
+  ...DICHT,
+  "https://cf-proef.stagetwo.nl/": { status: 200, body: "<html>" },
+};
+
+test("klantportaal: het domein is open en workers.dev, het versie-adres en de preview zijn dicht", async () => {
+  const { fetchFn } = nepNet(PORTAAL);
+  const rapport = await controleer({ ...OPTIES, klantportaal: true, fetchFn });
+  for (const r of rapport) assert.equal(r.geslaagd, true, `${r.ae} ${r.wat}: ${r.bewijs}`);
+  const [open] = uitkomst(rapport, "KP1");
+  assert.match(open.wat, /het domein is open/);
+  assert.match(open.bewijs, /200/);
+  assert.equal(uitkomst(rapport, "AE6").length, 2);
+  assert.equal(uitkomst(rapport, "AE5").length, 1);
+  // De inlog voor medewerkers loopt nog steeds langs de loginpagina van Access.
+  assert.equal(uitkomst(rapport, "AE2").length, 1);
+  assert.match(uitkomst(rapport, "AE2")[0].wat, /inlogroute Supabase/);
+});
+
+test("klantportaal: KP1 zakt als er nog een deur van Access op het domein staat, of als het domein niets geeft", async () => {
+  for (const route of [
+    { status: 302, naar: ACCESS },
+    { status: 403 },
+    { status: 404 },
+    { status: 500 },
+    { fout: "ENOTFOUND" },
+  ]) {
+    const { fetchFn } = nepNet({ ...PORTAAL, "https://cf-proef.stagetwo.nl/": route });
+    const [open] = uitkomst(await controleer({ ...OPTIES, klantportaal: true, fetchFn }), "KP1");
+    assert.equal(open.geslaagd, false, JSON.stringify(route));
+  }
+  const { fetchFn } = nepNet({
+    ...PORTAAL,
+    "https://cf-proef.stagetwo.nl/": { status: 302, naar: ACCESS },
+  });
+  const [open] = uitkomst(await controleer({ ...OPTIES, klantportaal: true, fetchFn }), "KP1");
+  assert.match(open.bewijs, /er staat nog een deur/);
+});
+
+test("klantportaal: workers.dev en de preview open is nog steeds gezakt", async () => {
+  for (const adres of [OPTIES.workersDev, OPTIES.versieUrl, OPTIES.previewUrl]) {
+    const { fetchFn } = nepNet({ ...PORTAAL, [adres]: { status: 200 } });
+    const rapport = await controleer({ ...OPTIES, klantportaal: true, fetchFn });
+    const gezakt = rapport.filter((r) => r.geslaagd === false);
+    assert.equal(gezakt.length, 1, adres);
+    assert.match(gezakt[0].ae, /AE5|AE6/);
+  }
+});
+
+test("klantportaal: zonder workers.dev-adres is de controle gezakt, niet overgeslagen", async () => {
+  const { fetchFn } = nepNet(PORTAAL);
+  const rapport = await controleer({
+    ...OPTIES,
+    workersDev: undefined,
+    klantportaal: true,
+    fetchFn,
+  });
+  const [workersDev] = uitkomst(rapport, "AE6");
+  assert.equal(workersDev.geslaagd, false);
+  assert.match(workersDev.bewijs, /bij een klantportaal verplicht/);
+  // Zonder klantportaal blijft dat een overgeslagen controle, zoals altijd.
+  const gewoon = await controleer({
+    ...OPTIES,
+    workersDev: undefined,
+    fetchFn: nepNet(DICHT).fetchFn,
+  });
+  assert.equal(uitkomst(gewoon, "AE6")[0].geslaagd, null);
+});
+
+test("zonder --klantportaal is een open domein nog steeds gezakt (AE2)", async () => {
+  const { fetchFn } = nepNet(PORTAAL);
+  const rapport = await controleer({ ...OPTIES, fetchFn });
+  assert.equal(uitkomst(rapport, "AE2")[0].geslaagd, false);
+  assert.equal(uitkomst(rapport, "KP1").length, 0);
+});
