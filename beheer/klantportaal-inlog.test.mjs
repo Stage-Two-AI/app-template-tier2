@@ -393,13 +393,16 @@ test("code raden: acht cijfers, en het aantal gokken per IP-adres klopt met wat 
   // De aanname: de teller telt per letterlijk IP-adres. Eén aansluiting met IPv6 heeft er
   // miljarden; telt Supabase die niet samen, dan is met 65.536 adressen de kans ruim de helft.
   assert.ok(kans(65536) > 0.5);
-  // De README zegt precies dit en belooft niet meer: de som, de aanname en wat de owner doet.
-  const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
-  assert.match(readme, /1470 gokken per IP-adres per dag/);
-  assert.match(readme, /0,15 procent/);
-  assert.match(readme, /IPv6/);
-  assert.match(readme, /[Vv]raag dit bij Supabase na vóór een klant live gaat/);
-  assert.doesNotMatch(readme, /een half procent/);
+  // KLANTPORTAAL.md zegt precies dit en belooft niet meer: de som, en de aanname als open punt
+  // vóór de eerste klant.
+  const uitleg = readFileSync(new URL("./KLANTPORTAAL.md", import.meta.url), "utf8");
+  assert.match(uitleg, /1470 gokken per IP-adres per dag/);
+  assert.match(uitleg, /0,15 procent/);
+  assert.match(
+    uitleg,
+    /Open punten vóór de eerste klant[\s\S]*IPv6[\s\S]*Vraag\s+dit bij Supabase na/,
+  );
+  assert.doesNotMatch(uitleg, /een half procent/);
 });
 
 test("de rem: elke grens ligt binnen wat de Management API aanneemt en heeft de eenheid uit de broncode", () => {

@@ -124,7 +124,7 @@ export const BURST = 30;
  *                          Aanname: de teller telt per letterlijk adres. Eén aansluiting
  *                          met IPv6 heeft er miljarden; telt het platform van Supabase die
  *                          niet samen, dan is deze grens voor zo'n aanvaller veel zwakker.
- *                          Vraag dat bij Supabase na vóór een klant live gaat (README).
+ *                          Zie "Open punten vóór de eerste klant" in KLANTPORTAAL.md.
  *
  * De tellers per IP-adres houden dus één mens tegen, geen aanvaller die de mailgrens wil
  * opmaken. Daarvoor is de captcha, die bij een klantportaal standaard aan staat: Supabase Auth

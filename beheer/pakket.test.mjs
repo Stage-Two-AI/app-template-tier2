@@ -157,3 +157,64 @@ test("geen klantnamen of klantdomeinen in beheer/: de README, voorbeelden, foutm
     }
   }
 });
+
+// ---------------------------------------------------------------- de documentatie klopt met de code
+
+test("documentatie: elke verwijzing uit de code naar een kop in README.md of KLANTPORTAAL.md bestaat, de stappen noemen de meldingen die de code geeft, en de owner leest dat droogloop uit moet", () => {
+  const readme = readFileSync(join(BEHEER, "README.md"), "utf8");
+  const achtergrond = readFileSync(join(BEHEER, "KLANTPORTAAL.md"), "utf8");
+  const koppen = (tekst) =>
+    tekst
+      .split("\n")
+      .filter((r) => /^#{1,4} /.test(r))
+      .map((r) => r.replace(/^#+ /, ""));
+  const code = [
+    "inrichten-cloudflare.mjs",
+    "controle-doorsteek.mjs",
+    "lib/toegang.mjs",
+    "lib/supabase.mjs",
+  ]
+    .map((b) => readFileSync(join(BEHEER, b), "utf8"))
+    .join("\n");
+  const verwijzingen = [
+    ...code.matchAll(/\\?"([^"\\]+)\\?" in (?:beheer\/)?(README|KLANTPORTAAL)\.md/g),
+  ];
+  assert.ok(verwijzingen.length >= 5);
+  for (const [, kop, bestand] of verwijzingen) {
+    const lijst = koppen(bestand === "README" ? readme : achtergrond);
+    assert.ok(lijst.includes(kop), `de kop "${kop}" staat niet in ${bestand}.md`);
+  }
+  // De meldingen waar de stappen op wijzen, staan letterlijk in de code.
+  const hoofdstuk = readme.slice(readme.indexOf("## Klantportaal"), readme.indexOf("## Alleen IT"));
+  for (const melding of [
+    "gestopt zonder wijzigingen",
+    "de deur gaat niet weg, want er staat nog iets anders te wijzigen",
+    "wacht op App inrichten",
+    "de app begrijpt de inlog van een",
+    "Turnstile kent dit geheim niet",
+    "Alles staat klaar",
+  ]) {
+    assert.ok(hoofdstuk.replace(/\s+/g, " ").includes(melding), `README: ${melding}`);
+    assert.ok(code.includes(melding.replace("de app begrijpt", "begrijpt")), `code: ${melding}`);
+  }
+  // Stap 3 en stap 5 zeggen uitdrukkelijk dat droogloop uit moet (het vakje staat aan).
+  for (const stap of ["Stap 3", "Stap 5"]) {
+    const a = hoofdstuk.indexOf(`**${stap}.`);
+    const tekst = hoofdstuk.slice(a, hoofdstuk.indexOf("**Stap", a + 10));
+    assert.match(tekst.replace(/\s+/g, " "), /\*\*zet "droogloop" uit\*\*/, stap);
+  }
+  if (heeftWorkflows) {
+    const inrichten = readFileSync(join(workflows, "proef-inrichten.yml"), "utf8");
+    assert.match(inrichten, /droogloop:\n(?:.*\n){2}\s+default: true/);
+  }
+  // Het hoofdstuk voor de owner is kort; de achtergrond staat één keer, in KLANTPORTAAL.md.
+  const weten = hoofdstuk.slice(hoofdstuk.indexOf("### Wat je moet weten"));
+  assert.ok(weten.split("\n").filter((r) => r.startsWith("- ")).length <= 10);
+  assert.equal(new Set(koppen(achtergrond)).size, koppen(achtergrond).length);
+  for (const tekst of [readme, achtergrond]) {
+    assert.doesNotMatch(tekst, /"eigen_hooks": true|regel JSON|—/);
+  }
+  assert.doesNotMatch(hoofdstuk, /INRICHTING|logboek als/);
+  assert.match(achtergrond, /## Open punten vóór de eerste klant\n[\s\S]*IPv6/);
+  assert.doesNotMatch(hoofdstuk, /IPv6/);
+});

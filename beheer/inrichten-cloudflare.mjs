@@ -24,10 +24,11 @@
  *   3.5 Access-app op de hostname (de deur), dezelfde policies
  *       Bij een klantportaal (`"klantportaal": true` in toegang.json) juist geen deur:
  *       3.4 zet dan ook inloggen per mail aan (eigen SMTP, code en link, de rem, de captcha
- *       en twee hooks). Een deur die er nog staat blijft staan: alleen een run met
- *       --deur-weghalen haalt hem weg, als allerlaatste stap, en alleen als alles er vóór die
- *       run al klaar voor stond. Een mens haalt de deur weg, niet de code. Zie "Klantportaal"
- *       in de README
+ *       en twee hooks), en stap 4 komt dan vóór 3.4 (met het merk van een klantportaal). Een
+ *       deur die er nog staat blijft staan: alleen een run met --deur-weghalen haalt hem weg,
+ *       en die run wijzigt verder niets (hij stopt als er nog iets anders te wijzigen is).
+ *       Een mens haalt de deur weg, niet de code. Zie "Klantportaal" in de README en
+ *       KLANTPORTAAL.md
  *   4   Access op de Worker zelf (vóór 3.6, zodat hij er staat vóór de eerste uitrol)
  *   T   met --testdatabase: een tweede Supabase-project `<vv><app>-test` met een eigen
  *       SaaS-app `<vv><app>-test-inlog`, provider en auth-config; de previews wijzen
