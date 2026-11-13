@@ -37,8 +37,14 @@ import {
   project,
   stap,
 } from "./klantportaal-opzet.mjs";
-import { PORTAAL_MERK } from "./lib/cloudflare.mjs";
-import { klantportaalInstellingen, SESSIE } from "./lib/supabase.mjs";
+import { heeftPortaalMerk, PORTAAL_MERK } from "./lib/cloudflare.mjs";
+import {
+  GEEN_CONTROLECODE,
+  klantportaalInstellingen,
+  portaalHookInstellingen,
+  SESSIE,
+  wasKlantportaal,
+} from "./lib/supabase.mjs";
 import { MELDING_MEDEWERKER, portaalAanmeldHookSql } from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
@@ -685,4 +691,102 @@ test("het merk blijft tot App inrichten het portaal heeft gesloten: de tweede do
   assert.deepEqual(bans(w), [ID(9)]);
   assert.deepEqual(r.ingetrokken, { direct: ["l***@handel.nl"] });
   assert.doesNotMatch(uitvoerRegel(eindstatus("toegang", r)), /later@|inkoop@/);
+});
+
+// ---------------------------------------------------------------- geen valse herkenning
+
+test("een gewone app wordt alleen als (gesloten) klantportaal herkend aan exact wat de inrichting zelf zet: een eigen hook met een naam die erop lijkt, een hook die uit staat of een eigen mailsjabloon telt niet", () => {
+  const echt = portaalHookInstellingen(HOOKS);
+  // Wat de inrichting zelf zet, telt.
+  assert.equal(wasKlantportaal(echt, HOOKS), true);
+  assert.equal(
+    wasKlantportaal(
+      {
+        hook_custom_access_token_enabled: true,
+        hook_custom_access_token_uri: echt.hook_custom_access_token_uri,
+      },
+      HOOKS,
+    ),
+    true,
+  );
+  assert.equal(
+    wasKlantportaal(
+      {
+        mailer_subjects_reauthentication: GEEN_CONTROLECODE.onderwerp,
+        mailer_templates_reauthentication_content: GEEN_CONTROLECODE.inhoud,
+      },
+      HOOKS,
+    ),
+    true,
+  );
+  // Wat er alleen op lijkt, telt niet.
+  const lijktErOp = [
+    // een ander schema
+    {
+      hook_custom_access_token_enabled: true,
+      hook_custom_access_token_uri: `pg-functions://postgres/auth_extra/${HOOKS.token}`,
+    },
+    {
+      hook_before_user_created_enabled: true,
+      hook_before_user_created_uri: `pg-functions://postgres/eigen/${HOOKS.aanmelden}`,
+    },
+    // een andere host, iets erachter of ervoor, een HTTP-hook met dezelfde naam
+    {
+      hook_custom_access_token_enabled: true,
+      hook_custom_access_token_uri: `pg-functions://anders/public/${HOOKS.token}`,
+    },
+    {
+      hook_custom_access_token_enabled: true,
+      hook_custom_access_token_uri: `pg-functions://postgres/public/${HOOKS.token}_oud`,
+    },
+    {
+      hook_custom_access_token_enabled: true,
+      hook_custom_access_token_uri: `pg-functions://postgres/public/x${HOOKS.token}`,
+    },
+    {
+      hook_before_user_created_enabled: true,
+      hook_before_user_created_uri: `https://hooks.voorbeeld.nl/${HOOKS.aanmelden}`,
+    },
+    // het exacte adres, maar de hook staat uit (of niet aan)
+    { ...echt, hook_custom_access_token_enabled: false, hook_before_user_created_enabled: false },
+    { hook_custom_access_token_uri: echt.hook_custom_access_token_uri },
+    // een eigen mailsjabloon, of alleen de tekst zonder het onderwerp
+    { mailer_templates_reauthentication_content: "<p>Je code: {{ .Token }}</p>" },
+    { mailer_templates_reauthentication_content: GEEN_CONTROLECODE.inhoud },
+    {
+      mailer_templates_reauthentication_content: `${GEEN_CONTROLECODE.inhoud} `,
+      mailer_subjects_reauthentication: GEEN_CONTROLECODE.onderwerp,
+    },
+  ];
+  for (const a of lijktErOp) assert.equal(wasKlantportaal(a, HOOKS), false, JSON.stringify(a));
+  // Het merk telt alleen exact (heeftPortaalMerk).
+  for (const tekst of ["", "Geen toegang", `${PORTAAL_MERK} `, PORTAAL_MERK.toLowerCase()]) {
+    assert.equal(heeftPortaalMerk({ custom_deny_message: tekst }), false, tekst);
+  }
+  assert.equal(heeftPortaalMerk({ custom_deny_message: PORTAAL_MERK }), true);
+});
+
+test("een gewone app met een eigen hook die op <voorvoegsel>portaal_voor_token eindigt (in een ander schema) gaat niet als klantportaal dicht: geen klant gemarkeerd of afgemeld, en een vreemde met alleen een mailaccount wordt ingetrokken zoals altijd", async () => {
+  const w = nepWolk({
+    gebruikers: [medewerker(1, "anna@voorbeeld.nl"), klant(2, "vreemd@elders.example")],
+    workerBestaat: true,
+  });
+  await richtIn(ARG, opzet(w, DEUR));
+  Object.assign(auth(w), {
+    hook_custom_access_token_enabled: true,
+    hook_custom_access_token_uri: `pg-functions://postgres/auth_extra/${HOOKS.token}`,
+    hook_before_user_created_enabled: true,
+    hook_before_user_created_uri: `pg-functions://postgres/public/${HOOKS.aanmelden}_oud`,
+  });
+  w.aanroepen.length = 0;
+  const r1 = await richtIn(ARG, opzet(w, DEUR));
+  assert.equal(stap(r1, "3.4 klanten van het gesloten klantportaal"), undefined);
+  assert.deepEqual(
+    w.staat.sql.filter((q) => /klantportaal_klant|delete from auth\.sessions/.test(q)),
+    [],
+  );
+  const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
+  assert.deepEqual(r2.ingetrokken, { direct: ["vreemd@elders.example"] });
+  assert.deepEqual(bans(w), [ID(2)]);
+  assert.equal(r2.klanten, undefined);
 });

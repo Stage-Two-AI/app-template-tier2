@@ -248,19 +248,31 @@ export function neutraleMails(naam) {
   };
 }
 
+/** Het adres van een hookfunctie zoals de inrichting het zelf schrijft. */
+const hookAdres = (functie) => `pg-functions://postgres/public/${functie}`;
+
 /**
  * Is dit project klantportaal (geweest)? Te zien aan iets wat alleen de inrichting van een
- * klantportaal zet: een van de twee hooks, of de mail zonder controlecode. Een gewone app die
- * dat nooit was heeft geen van beide, ook niet als iemand met de hand inloggen per mail aanzette.
+ * klantportaal zet, en alleen als het daar precies zo staat: een van de twee hooks AAN met
+ * exact het adres dat de inrichting schrijft, of de mail zonder controlecode (onderwerp en
+ * tekst allebei exact). Een gewone app die dat nooit was heeft geen van beide, ook niet als
+ * de klant zelf een hook heeft waarvan de naam erop lijkt (in een ander schema, of met iets
+ * erachter) of iemand met de hand inloggen per mail aanzette.
  */
 export function wasKlantportaal(auth, functies) {
-  const hooks = [auth?.hook_custom_access_token_uri, auth?.hook_before_user_created_uri];
+  const hookAan = (aan, uri, functie) => aan === true && uri === hookAdres(functie);
   return (
-    auth?.mailer_templates_reauthentication_content === GEEN_CONTROLECODE.inhoud ||
-    hooks.some(
-      (uri) =>
-        typeof uri === "string" &&
-        (uri.endsWith(`/${functies.token}`) || uri.endsWith(`/${functies.aanmelden}`)),
+    (auth?.mailer_subjects_reauthentication === GEEN_CONTROLECODE.onderwerp &&
+      auth?.mailer_templates_reauthentication_content === GEEN_CONTROLECODE.inhoud) ||
+    hookAan(
+      auth?.hook_custom_access_token_enabled,
+      auth?.hook_custom_access_token_uri,
+      functies.token,
+    ) ||
+    hookAan(
+      auth?.hook_before_user_created_enabled,
+      auth?.hook_before_user_created_uri,
+      functies.aanmelden,
     )
   );
 }
@@ -288,7 +300,7 @@ export function veiligHookAdres(uri) {
 export function andereHooks(auth, functies) {
   const uit = {};
   const ander = (aan, uri, eigen) =>
-    aan === true && typeof uri === "string" && uri && !uri.endsWith(`/${eigen}`);
+    aan === true && typeof uri === "string" && uri && uri !== hookAdres(eigen);
   if (
     ander(
       auth?.hook_before_user_created_enabled,
@@ -320,9 +332,9 @@ export function portaalHookInstellingen(functies) {
   }
   return {
     hook_before_user_created_enabled: true,
-    hook_before_user_created_uri: `pg-functions://postgres/public/${functies.aanmelden}`,
+    hook_before_user_created_uri: hookAdres(functies.aanmelden),
     hook_custom_access_token_enabled: true,
-    hook_custom_access_token_uri: `pg-functions://postgres/public/${functies.token}`,
+    hook_custom_access_token_uri: hookAdres(functies.token),
   };
 }
 
@@ -472,7 +484,7 @@ export function hookInstellingen(functie) {
   return {
     external_email_enabled: true,
     hook_before_user_created_enabled: true,
-    hook_before_user_created_uri: `pg-functions://postgres/public/${functie}`,
+    hook_before_user_created_uri: hookAdres(functie),
   };
 }
 
