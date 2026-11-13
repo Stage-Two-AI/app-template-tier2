@@ -26,6 +26,14 @@
 --      inrichting het), is dat dus Cloudflare. Hangt er ooit een tweede dienst aan het
 --      account, dan zegt deze functie nee, in plaats van te gokken.
 --
+--   4. De inlog via Cloudflare is niet ouder dan twaalf uur. Een sessie van Supabase blijft
+--      anders weken leven, ook als de medewerker intussen bij Cloudflare is afgesloten. De
+--      tijd komt uit `auth.sessions.created_at`: dat schrijft Supabase bij het inloggen en
+--      verandert niet bij het verversen van het token; de gebruiker kan er niet bij. Na
+--      twaalf uur is de sessie nog gewoon ingelogd, maar zonder medewerkerrechten, tot de
+--      medewerker opnieuw via de knop voor medewerkers inlogt.
+--      De duur staat op één plek: `medewerkersessie_geldig` hieronder.
+--
 -- Voorwaarde: zet in Supabase geen andere inlogdienst (Google, Microsoft) rechtstreeks aan
 -- naast Cloudflare. Wie dat toch wil, moet deze functie eerst herzien.
 create function public.sessie_via_cloudflare()
@@ -35,6 +43,8 @@ stable
 security definer
 set search_path = ''
 as $$
+  -- Zo lang geeft een inlog via Cloudflare medewerkerrechten. De enige plek waar dit staat.
+  with instelling as (select interval '12 hours' as medewerkersessie_geldig)
   select
     exists (
       select 1
@@ -48,9 +58,10 @@ as $$
     )
     and exists (
       select 1
-        from auth.sessions s
+        from auth.sessions s, instelling
        where s.id = nullif(auth.jwt() ->> 'session_id', '')::uuid
          and s.user_id = auth.uid()
+         and s.created_at > now() - instelling.medewerkersessie_geldig
     )
     and exists (
       select 1
@@ -67,7 +78,7 @@ as $$
 $$;
 
 comment on function public.sessie_via_cloudflare() is
-  'Is de huidige sessie via Cloudflare begonnen? Per mail of met een wachtwoord: nee, ook op het adres van een medewerker.';
+  'Is de huidige sessie via Cloudflare begonnen, hoogstens twaalf uur geleden? Per mail of met een wachtwoord: nee, ook op het adres van een medewerker.';
 
 -- Wie via Cloudflare binnenkomt, is medewerker: Cloudflare laat alleen de groepen uit
 -- toegang.json door. Kent de app soorten medewerkers (beheerder, verkoop), maak dan een

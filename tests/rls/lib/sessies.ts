@@ -222,6 +222,26 @@ export function noemIdentiteitCloudflare(userId: string): void {
   }
 }
 
+/**
+ * Doet alsof een sessie zoveel uur geleden is begonnen, voor de test van de twaalf uur.
+ * Supabase schrijft dat tijdstip bij het inloggen en wijzigt het daarna niet; alleen wie de
+ * database beheert kan het verzetten, en dat doet de test hier in plaats van twaalf uur wachten.
+ */
+export function zetSessieBegin(sessieId: string, urenGeleden: number): void {
+  if (!UUID.test(sessieId) || !Number.isFinite(urenGeleden)) {
+    throw new Error("Ongeldige testgegevens.");
+  }
+  const aantal = alsBeheerder(
+    `with gewijzigd as (
+       update auth.sessions set created_at = now() - interval '${Math.round(urenGeleden * 60)} minutes'
+        where id = '${sessieId}'
+       returning 1
+     )
+     select count(*) from gewijzigd`,
+  );
+  if (aantal !== "1") throw new Error(`Verwachtte één sessie, maar vond er ${aantal}.`);
+}
+
 export function nieuwAdres(label: string): string {
   return `rls-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@voorbeeld.nl`;
 }

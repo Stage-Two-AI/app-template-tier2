@@ -181,6 +181,11 @@ Drie dingen die daarbij horen:
   aan (`klant_aanmelden()`), zet een medewerker `goedgekeurd` aan, en gebruiken de policies
   van de eigen tabellen `is_goedgekeurde_klant()`. Het adres in die tabel komt uit het
   account zelf, niet uit wat de browser meestuurt.
+- **Medewerkerrechten gelden twaalf uur na het inloggen via Cloudflare.** Daarna is de
+  medewerker nog ingelogd, maar als klant, tot hij opnieuw op de knop voor medewerkers
+  klikt. Zo houdt iemand die bij Cloudflare is afgesloten zijn rechten niet wekenlang. De
+  duur staat op één plek, in `sessie_via_cloudflare()`; de tijd komt uit de administratie
+  van Supabase (`auth.sessions.created_at`) en niet uit iets wat de gebruiker kan aanpassen.
 - **Cloudflare is de enige inlogdienst naast mail.** Het token zegt "via een inlogdienst",
   niet welke. Zet daarom in Supabase niet ook Google of Microsoft rechtstreeks aan; hangt er
   een tweede dienst aan een account, dan zegt de functie nee.

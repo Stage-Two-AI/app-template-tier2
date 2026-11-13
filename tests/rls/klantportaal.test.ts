@@ -23,6 +23,7 @@ import {
   type ViaInlogdienst,
   verwijderAccount,
   wachtOpMail,
+  zetSessieBegin,
 } from "./lib/sessies";
 
 /**
@@ -253,6 +254,32 @@ describe("medewerkerrechten alleen in een sessie via Cloudflare", () => {
     await metAccountViaDienst("zonder-cloudflare", async (sessie) => {
       expect(sessie.methodes).toEqual(["oauth"]);
       expect(await isMedewerker(sessie)).toBe(false);
+    });
+  });
+
+  it("een inlog via Cloudflare geeft twaalf uur medewerkerrechten, en verversen verlengt dat niet", async () => {
+    await metAccountViaDienst("twaalf-uur", async (sessie) => {
+      noemIdentiteitCloudflare(sessie.userId);
+      expect(await isMedewerker(sessie)).toBe(true);
+
+      zetSessieBegin(sessie.sessieId, 11.5);
+      expect(await isMedewerker(sessie)).toBe(true);
+
+      zetSessieBegin(sessie.sessieId, 12.5);
+      expect(await isMedewerker(sessie)).toBe(false);
+      // De sessie zelf leeft nog en het token is te verversen, maar het recht komt niet terug.
+      const ververst = await sessie.client.auth.refreshSession();
+      expect(ververst.error).toBeNull();
+      expect(leesToken(ververst.data.session?.access_token ?? "").amr).toEqual([
+        expect.objectContaining({ method: "oauth" }),
+      ]);
+      expect(await isMedewerker(sessie)).toBe(false);
+      const { data } = await sessie.client.auth.getUser();
+      expect(data.user?.id).toBe(sessie.userId);
+
+      // Terug naar een verse sessie: het lag aan de tijd, niet aan iets anders.
+      zetSessieBegin(sessie.sessieId, 0);
+      expect(await isMedewerker(sessie)).toBe(true);
     });
   });
 
