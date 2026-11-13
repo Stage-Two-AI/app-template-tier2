@@ -124,6 +124,7 @@
       "tests/unit/template-afhankelijk.test.ts",
       "tests/unit/afgeleide-app.test.ts",
       "tests/unit/routes.test.ts",
+      "tests/unit/klantportaal-overnemen.test.ts",
       "e2e/inloggen.ts"
     ],
     "sleutelsSamenvoegen": {

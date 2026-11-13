@@ -6,6 +6,7 @@
  *
  *   node scripts/klantportaal-overnemen.mjs --template <map>              alleen kijken
  *   node scripts/klantportaal-overnemen.mjs --template <map> --overnemen  ook doen
+ *   node scripts/klantportaal-overnemen.mjs --nakijken                    na het handwerk
  *
  * Kijken (wijzigt niets): per bestand dat de app al heeft, hoeveel het afwijkt van de template.
  * Niet alleen van versie 42: een update raakt src/ nooit, dus de eigen code van een app kan van
@@ -25,6 +26,10 @@
  * En: een bestand dat een overgenomen bestand importeert (`@/...`) en dat de app mist, komt
  * mee uit de template, behalve de voorbeeldschermen van de template (src/features/items/ en
  * src/features/start/): die meldt het, want daar hoort het eigen scherm van de app.
+ *
+ * Nakijken (na het handwerk, vóór de commit): staat elk pad uit de router van de app zoals hij
+ * in de laatste commit was (`<Route path=...>`), er nog? Zo valt een route die bij het
+ * overnemen verdween niet stil weg; de typecontrole ziet dat niet.
  *
  * Het script schrijft alleen over bestanden zonder eigen, nog niet gecommitte wijzigingen, en
  * stopt anders vóór het iets doet. Samenvoegen blijft verder werk van de agent.
@@ -46,6 +51,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { padenInTekst } from "./lib/onderdelen.mjs";
 
 /** Bestanden die de app nog niet heeft: kopiëren, nooit overschrijven. */
 export const NIEUW = [
@@ -116,13 +122,15 @@ function probeer(fn) {
 }
 
 function leesArgs(argv) {
-  const uit = { template: null, overnemen: false, app: process.cwd() };
+  const uit = { template: null, overnemen: false, nakijken: false, app: process.cwd() };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--template") uit.template = argv[++i] ?? null;
     else if (argv[i] === "--overnemen") uit.overnemen = true;
+    else if (argv[i] === "--nakijken") uit.nakijken = true;
     else if (argv[i] === "--app") uit.app = argv[++i] ?? uit.app;
     else throw new Error(`onbekend argument ${argv[i]}`);
   }
+  if (uit.nakijken) return { ...uit, app: resolve(uit.app) };
   if (!uit.template) throw new Error("geef de map van de template mee: --template <map>");
   return { ...uit, template: resolve(uit.template), app: resolve(uit.app) };
 }
@@ -169,7 +177,7 @@ function verschil(a, b, werk) {
  * (eigen routes, eigen variabelen) zijn voor samenvoegen geen probleem. Ontbreken er veel regels
  * van de template, dan is het bestand van een andere indeling, en dan ziet samenvoegen het
  * ontbrekende als "bewust weggehaald" en neemt het de nieuwe onderdelen maar half over.
- * Weinig is hoogstens 10 regels of 15 procent van die versie.
+ * Weinig is hoogstens 4 regels of 15 procent van die versie, en altijd minder dan de helft.
  */
 export function dichtstbij({ template, pad, tekst, lijst, werk }) {
   const gezien = new Map();
@@ -190,7 +198,11 @@ export function dichtstbij({ template, pad, tekst, lijst, werk }) {
     if (som === 0) break;
   }
   if (!beste) return null;
-  const grens = Math.max(10, Math.round(beste.lengte * 0.15));
+  // Bij een klein bestand is 4 regels al de helft: dan telt de helft als grens.
+  const grens = Math.min(
+    Math.max(4, Math.round(beste.lengte * 0.15)),
+    Math.floor(beste.lengte / 2),
+  );
   const oordeel =
     beste.erbij + beste.eraf === 0 ? "gelijk" : beste.eraf <= grens ? "weinig" : "veel";
   return { tag: beste.tag, n: beste.n, erbij: beste.erbij, eraf: beste.eraf, oordeel };
@@ -213,6 +225,33 @@ function routesIn(app) {
   return uit.sort();
 }
 
+const CODE = (pad) => /\.(tsx?|jsx?)$/.test(pad) && !/\.test\./.test(pad);
+
+/**
+ * De paden uit de router die in de laatste commit wel en nu niet meer in src/ staan. Geeft
+ * `{ voor, weg }`: alle paden van toen, en welke daarvan nu ontbreken.
+ */
+export function nakijken(app) {
+  const voor = new Set();
+  const inCommit = git(app, ["ls-tree", "-r", "--name-only", "HEAD", "--", "src"])
+    .split("\n")
+    .filter(CODE);
+  for (const pad of inCommit) {
+    for (const p of padenInTekst(git(app, ["show", `HEAD:${pad}`]))) voor.add(p);
+  }
+  const nu = new Set();
+  const loop = (map) => {
+    for (const naam of readdirSync(join(app, map))) {
+      const pad = `${map}/${naam}`;
+      if (statSync(join(app, pad)).isDirectory()) loop(pad);
+      else if (CODE(pad))
+        for (const p of padenInTekst(readFileSync(join(app, pad), "utf8"))) nu.add(p);
+    }
+  };
+  if (existsSync(join(app, "src"))) loop("src");
+  return { voor: [...voor].sort(), weg: [...voor].filter((p) => !nu.has(p)).sort() };
+}
+
 /** De `@/...`-imports in een tekst, als paden in de app die bestaan of zouden moeten bestaan. */
 function importsVan(tekst) {
   return [...tekst.matchAll(/from\s+["']@\/([^"']+)["']|import\(\s*["']@\/([^"']+)["']\s*\)/g)].map(
@@ -226,6 +265,15 @@ function bestaatMetExtensie(map, basis) {
       return basis + ext;
   }
   return null;
+}
+
+function heeftBestand(template, tag, pad) {
+  try {
+    git(template, ["cat-file", "-e", `${tag}:${pad}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Wat het script met elk bestand zou doen; wijzigt niets. */
@@ -269,11 +317,13 @@ export function plan({ app, template }) {
       bestanden.push({ pad, soort: d && d.oordeel !== "veel" ? "samenvoegen" : "MET DE HAND", d });
     }
     if (startNieuw) {
+      // Vergelijk met main.tsx uit de versies waarin die de app nog zelf startte.
+      const oud = lijst.filter(({ tag }) => !heeftBestand(template, tag, "src/start.tsx"));
       const d = dichtstbij({
         template,
         pad: "src/main.tsx",
         tekst: readFileSync(join(app, "src/main.tsx"), "utf8"),
-        lijst,
+        lijst: oud,
         werk,
       });
       bestanden.push({
@@ -420,15 +470,17 @@ export function overnemen({ app, template }, p = plan({ app, template })) {
     if (!/\.(tsx?)$/.test(pad)) continue;
     for (const basis of importsVan(readFileSync(join(app, pad), "utf8"))) {
       if (bestaatMetExtensie(app, basis)) continue;
-      const inTemplate = bestaatMetExtensie(template, basis);
-      if (!inTemplate || gedaan.has(inTemplate)) continue;
-      gedaan.add(inTemplate);
-      if (VOORBEELD.test(inTemplate)) {
+      if (gedaan.has(basis)) continue;
+      gedaan.add(basis);
+      if (VOORBEELD.test(basis)) {
         uit.push(
-          `MET DE HAND: ${pad} importeert ${inTemplate}, een voorbeeldscherm van de template. Zet daar het eigen scherm van de app in`,
+          `MET DE HAND: ${pad} importeert ${basis}, een voorbeeldscherm van de template dat de app niet heeft. Zet daar het eigen scherm van de app in`,
         );
         continue;
       }
+      const inTemplate = bestaatMetExtensie(template, basis);
+      if (!inTemplate || gedaan.has(inTemplate)) continue;
+      gedaan.add(inTemplate);
       kopieer(inTemplate);
       uit.push(`nieuw (nodig voor ${pad}): ${inTemplate}`);
     }
@@ -439,6 +491,17 @@ export function overnemen({ app, template }, p = plan({ app, template })) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     const arg = leesArgs(process.argv.slice(2));
+    if (arg.nakijken) {
+      const { voor, weg } = nakijken(arg.app);
+      if (weg.length) {
+        console.error(
+          `✗ Deze paden stonden in de router van de app en zijn nu weg: ${weg.join(", ")}. Zet ze terug (git show HEAD:<bestand> laat zien waar ze stonden).`,
+        );
+        process.exit(1);
+      }
+      console.log(`✓ Alle ${voor.length} paden uit de router van de app staan er nog.`);
+      process.exit(0);
+    }
     if (!existsSync(join(arg.template, ".git")))
       throw new Error(`${arg.template} is geen kloon van de template`);
     const p = plan(arg);
