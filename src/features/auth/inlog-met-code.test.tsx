@@ -36,6 +36,26 @@ async function naarCodestap(adres = "piet@klant.nl") {
   return await screen.findByLabelText("Code van zes cijfers");
 }
 
+describe("klantportaal: bij wie log je in", () => {
+  afterEach(() => {
+    document.title = "";
+  });
+
+  it("toont de naam van de app boven het formulier, op elke stap", async () => {
+    document.title = "Portaal Jansen";
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByTestId("merknaam")).toHaveTextContent("Portaal Jansen");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inloggen");
+    await naarCodestap();
+    expect(screen.getByTestId("merknaam")).toHaveTextContent("Portaal Jansen");
+  });
+
+  it("laat de regel weg als de pagina geen titel heeft", () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.queryByTestId("merknaam")).toBeNull();
+  });
+});
+
 describe("klantportaal: de knop voor medewerkers", () => {
   it("stuurt niet vanzelf door, maar toont een knop en het veld voor klanten", () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);

@@ -32,9 +32,24 @@ function isKnopdienst(dienst: Inlogdienst): dienst is Knopdienst {
   return dienst in KNOPTEKST;
 }
 
+/**
+ * De naam van de app, boven het formulier: wie via een link uit een mail binnenkomt, ziet zo
+ * meteen bij wie hij inlogt. Het is de titel van de pagina (`<title>` in index.html), dus er
+ * hoeft niets apart ingesteld te worden.
+ */
+function merknaam(): string {
+  return document.title.trim();
+}
+
 function Pagina({ kop, children }: { kop: string; children: ReactNode }) {
+  const merk = merknaam();
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 px-5 py-10">
+      {merk ? (
+        <p data-testid="merknaam" className="pb-4 text-center text-xl font-semibold tracking-tight">
+          {merk}
+        </p>
+      ) : null}
       <h1 className="text-2xl font-semibold tracking-tight">{kop}</h1>
       {children}
     </main>
