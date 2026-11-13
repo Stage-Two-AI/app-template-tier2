@@ -691,6 +691,8 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
       ["select public.is_verkoper() and true", "sql"],
       ["select true from public.x where public.is_medewerker()", "sql"],
       ["begin return public.is_medewerker(); end", "plpgsql"],
+      ["select public.is_medewerker()", "plpgsql"],
+      ["select public.is_medewerker() and true union select true", "sql"],
       ["select 1; select public.is_medewerker()", "sql"],
     ]) {
       expect(
@@ -705,7 +707,13 @@ describe("klantportaal: wat er mis is in de migraties (problemenKlantportaal)", 
     ]);
   });
 
-  it("is_medewerker() herschrijven zonder sessie_via_cloudflare() is fout", () => {
+  it("is_medewerker() herschrijven zonder sessie_via_cloudflare() is fout, ook met een gelijkende naam", () => {
+    expect(
+      problemen(`${TEMPLATE}
+        create or replace function public.is_medewerker() returns boolean language sql security definer as $$ select anderpublic.sessie_via_cloudflare() $$;`),
+    ).toEqual([
+      "public.is_medewerker(): moet public.sessie_via_cloudflare() aanroepen, anders is een mailsessie ook medewerker",
+    ]);
     const sql = `${TEMPLATE}
       create or replace function public.is_medewerker() returns boolean language sql security definer as $$ select true $$;`;
     expect(problemen(sql)).toEqual([

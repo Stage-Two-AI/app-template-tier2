@@ -178,8 +178,8 @@ const MUTATIES = [
     "d23",
     DB,
     "de tabel klanten wordt niet vergeleken",
-    'for (const [veld, uitleg] of [\n      ["kolommen"',
-    'for (const [veld, uitleg] of [] && [\n      ["kolommen"',
+    "if (JSON.stringify(gevonden.klanten[veld]) !== JSON.stringify(verwacht.klanten?.[veld])) {",
+    "if (false) {",
   ],
   [
     "d24",

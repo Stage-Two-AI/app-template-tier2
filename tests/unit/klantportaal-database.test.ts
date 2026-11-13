@@ -178,6 +178,16 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(beoordeel({ policies: [poort, eigen] })).toEqual([]);
     expect(beoordeel({ policies: [{ ...poort, cmd: "select" }, eigen] })).toHaveLength(1);
     expect(beoordeel({ policies: [{ ...poort, check: "true" }, eigen] })).toHaveLength(1);
+    // Bij insert telt de with check van de poort, en zonder with check de using.
+    const schrijft = policy({ cmd: "insert", using: null, check: "auth.uid() = owner_id" });
+    expect(beoordeel({ policies: [{ ...poort, check: "true" }, schrijft] })).toHaveLength(1);
+    const poortInsert = policy({
+      permissief: false,
+      cmd: "insert",
+      using: null,
+      check: "public.is_medewerker()",
+    });
+    expect(beoordeel({ policies: [poortInsert, schrijft] })).toEqual([]);
     expect(beoordeel({ policies: [{ ...poort, ingelogd: false }, eigen] })).toHaveLength(1);
     expect(beoordeel({ policies: [{ ...poort, tabel: "public.ander" }, eigen] })).toHaveLength(1);
     // Een eigen poort telt alleen als hij is opgegeven (en klopt).
@@ -213,6 +223,8 @@ describe("de databasecontrole: de beoordeling", () => {
     ).toEqual(["public.f(): security definer zonder vast zoekpad; zet `set search_path = ''`"]);
     expect(beoordeel({ functies: [{ ...definer, ingelogd: false }] })).toEqual([]);
     expect(beoordeel({ functies: [{ ...definer, supabase: true }] })).toEqual([]);
+    // Een functie met de naam van een basisfunctie in een ander schema is geen basisfunctie.
+    expect(beoordeel({ functies: [{ ...definer, naam: "api.is_medewerker" }] })).toHaveLength(1);
     expect(
       beoordeel({ functies: [{ ...definer, naam: "api.f" }] }, { vrijeFuncties: { f: "x" } }),
     ).toHaveLength(1);
@@ -234,6 +246,10 @@ describe("de databasecontrole: de beoordeling", () => {
     for (const [bron, taal] of [
       ["select public.is_medewerker() or x", "sql"],
       ["begin return public.is_medewerker(); end", "plpgsql"],
+      // Alleen sql is na te lopen, ook als de tekst er als sql uitziet.
+      ["select public.is_medewerker()", "plpgsql"],
+      // Een union geeft er een rij bij die de poort niet ziet.
+      ["select public.is_medewerker() and true union select true", "sql"],
       ["select x from t where public.is_medewerker()", "sql"],
     ] as const) {
       expect(beoordeel({ functies: [poort(bron, taal)] }, { poorten }), bron).toHaveLength(1);

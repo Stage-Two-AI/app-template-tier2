@@ -52,6 +52,13 @@ describe("toonStartfout: geen witte pagina als de app niet kan starten", () => {
     expect(scherm).toContain("VITE_SUPABASE_ANON_KEY");
   });
 
+  it("ook bij een fout van zod zelf staat de naam van de variabele op het scherm, niet de waarde", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    toonStartfout(foutBij({ VITE_SUPABASE_SCHEMA: "geheim_schema" }));
+    expect(document.body).toHaveTextContent("kloppen niet (VITE_SUPABASE_SCHEMA)");
+    expect(document.body).not.toHaveTextContent("geheim_schema");
+  });
+
   it("een andere fout bij het opstarten: een algemene tekst, de fout zelf alleen in de console", () => {
     const console_ = vi.spyOn(console, "error").mockImplementation(() => {});
     const fout = new Error("Kopieer .env.example naar .env.local; geheim=abc");
