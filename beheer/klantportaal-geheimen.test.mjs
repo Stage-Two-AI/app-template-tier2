@@ -138,8 +138,8 @@ test("geheimen: geen geheim in het resultaat van een droogloop, een gewone run o
   uit.push(await richtIn(ARG, opzet(w, PORTAAL)));
   uit.push(await richtIn({ ...ARG, deurWeghalen: true }, opzet(w, PORTAAL)));
   uit.push(await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL)));
-  uit.push(await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL)));
-  uit.push(await werkToegangBij({ voorvoegsel: "wi-", droogloop: true }, opzet(w, PORTAAL)));
+  uit.push(await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL)));
+  uit.push(await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, PORTAAL)));
   const gh = w.aanroepen.filter((a) => a.soort === "gh").map((a) => [a.args, a.invoer]);
   // Alles behalve de PATCH van de auth-config en de toets bij Turnstile: ook de SQL van de
   // hooks en de sessieduur.
@@ -352,7 +352,7 @@ test("de samenvatting van de run: gewone taal, de volgende stap erbij, en geen g
     /\*\*Mislukt\.\*\* gestopt zonder wijzigingen: klantportaal direct: het secret SMTP_WACHTWOORD ontbreekt/,
   );
   // Toegang bijwerken: aantallen, nooit adressen.
-  const t = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const t = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   const toegang = samenvatting("toegang", eindstatus("toegang", t));
   assert.match(toegang, /direct: 1 klantaccounts overgeslagen/);
   assert.match(toegang, /Wat nu[\s\S]*Klantportaal direct: de deur staat er nog/);

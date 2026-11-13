@@ -821,7 +821,7 @@ export const GEEN_BAN = "none";
 
 /**
  * De naam van de aanmeld-hookfunctie, afgeleid van het voorvoegsel:
- * `cf-proef-` wordt `cf_proef_voor_aanmelden`, `rp-` wordt `rp_voor_aanmelden`. Het
+ * `cf-proef-` wordt `cf_proef_voor_aanmelden`, `kl-` wordt `kl_voor_aanmelden`. Het
  * patroon van het voorvoegsel zorgt dat er alleen `[a-z0-9_]` in staat.
  */
 export function hookFunctie(voorvoegsel) {
@@ -920,7 +920,7 @@ revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
 
 /**
  * De namen van de twee hookfuncties in de productiedatabase van een klantportaal, afgeleid
- * van het voorvoegsel: `wi-` geeft `wi_portaal_voor_aanmelden` en `wi_portaal_voor_token`.
+ * van het voorvoegsel: `vb-` geeft `vb_portaal_voor_aanmelden` en `vb_portaal_voor_token`.
  */
 export function portaalHookFuncties(voorvoegsel) {
   const p = valideerVoorvoegsel(voorvoegsel).replaceAll("-", "_");

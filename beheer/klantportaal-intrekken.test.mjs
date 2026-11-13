@@ -56,10 +56,10 @@ test("geen massaban: één regel minder in toegang.json (klantportaal weg, of de
   );
   const lang = { groepen: GROEPEN, apps: { direct: { groepen: ["kantoor"] } } };
   for (const zonder of [DEUR, lang]) {
-    const w = await portaalMet([...klanten, medewerker(900, "anna@winco.nl")]);
+    const w = await portaalMet([...klanten, medewerker(900, "anna@voorbeeld.nl")]);
     let r;
     for (let run = 0; run < 3; run += 1) {
-      r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, zonder));
+      r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, zonder));
     }
     assert.deepEqual(bans(w), []);
     assert.deepEqual(afgemeld(w), []);
@@ -72,7 +72,7 @@ test("geen massaban: één regel minder in toegang.json (klantportaal weg, of de
     assert.match(uitvoerRegel(eindstatus("toegang", r)), /"status":"mislukt"/);
     // De regel terugzetten herstelt alles: er is niets gebeurd dat terug moet.
     w.aanroepen.length = 0;
-    const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+    const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
     assert.equal(w.staat.gebruikers.filter((g) => g.banned_until).length, 0);
     assert.deepEqual(r2.klanten, { direct: 300 });
     assert.equal(r2.fouten, undefined);
@@ -82,14 +82,19 @@ test("geen massaban: één regel minder in toegang.json (klantportaal weg, of de
 
 test("de rem is smal: een vertrokken medewerker ontsnapt er nooit door; in dezelfde pull request klantportaal weg en een medewerker eruit trekt die medewerker meteen in", async () => {
   const vertrokken = {
-    groepen: { kantoor: { domeinen: ["winco.nl"], uitsluiten: ["oud@winco.nl", "anna@winco.nl"] } },
+    groepen: {
+      kantoor: {
+        domeinen: ["voorbeeld.nl"],
+        uitsluiten: ["oud@voorbeeld.nl", "anna@voorbeeld.nl"],
+      },
+    },
     apps: { direct: ["kantoor"] },
   };
-  const w = await portaalMet([klant(1, "inkoop@bloemist.nl"), medewerker(2, "anna@winco.nl")]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, vertrokken));
+  const w = await portaalMet([klant(1, "inkoop@bloemist.nl"), medewerker(2, "anna@voorbeeld.nl")]);
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, vertrokken));
   assert.deepEqual(bans(w), [ID(2)], "anna is geband, de klant niet");
   assert.deepEqual(afgemeld(w), [ID(2)]);
-  assert.deepEqual(r.ingetrokken, { direct: ["anna@winco.nl"] });
+  assert.deepEqual(r.ingetrokken, { direct: ["anna@voorbeeld.nl"] });
   assert.deepEqual(r.klanten, { direct: 1 });
   // En de run eindigt rood, met de uitleg: het portaal staat nog half open.
   const eind = eindstatus("toegang", r);
@@ -102,7 +107,7 @@ test("geen massaban: ook niet als App inrichten halverwege bleef steken (mail al
   const w = await portaalMet([klant(1, "inkoop@bloemist.nl"), klant(2, "piet@tuincentrum.be")]);
   // De auth-config is al die van een gewone app; het markeren van de klanten mislukte.
   Object.assign(auth(w), { external_email_enabled: false, mailer_autoconfirm: true });
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), []);
   assert.match(r.fouten.join(" "), /direct: wacht op App inrichten.*Draai App inrichten/);
   // De volgende run van App inrichten maakt het af: klanten gemarkeerd, deur terug.
@@ -110,7 +115,7 @@ test("geen massaban: ook niet als App inrichten halverwege bleef steken (mail al
   assert.match(stap(dicht, "3.4 klanten van het gesloten klantportaal"), /^2 klantaccounts/);
   assert.ok(app(w, NAMEN.deur));
   w.aanroepen.length = 0;
-  const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), []);
   assert.equal(r2.fouten, undefined);
   // Toegang bijwerken ziet het aan het merk op de Access op de Worker, in de lijst die hij
@@ -120,7 +125,7 @@ test("geen massaban: ook niet als App inrichten halverwege bleef steken (mail al
   stuk.supabase.authConfig = async () => {
     throw new Error("GET config/auth gaf 500");
   };
-  const r3 = await werkToegangBij({ voorvoegsel: "wi-" }, stuk);
+  const r3 = await werkToegangBij({ voorvoegsel: "vb-" }, stuk);
   assert.deepEqual(bans(kapot), []);
   assert.match(r3.fouten.join(" "), /direct: wacht op App inrichten/);
 });
@@ -129,7 +134,7 @@ test("een portaal sluiten bant geen klanten: App inrichten zegt in de droogloop 
   const klanten = Array.from({ length: 50 }, (_, i) => klant(100 + i, `klant${i}@bloemist.nl`));
   const w = await portaalMet([
     ...klanten,
-    medewerker(2, "anna@winco.nl"),
+    medewerker(2, "anna@voorbeeld.nl"),
     medewerker(3, "ex@oudbedrijf.nl"),
   ]);
   // Iemand schrijft de korte vorm. De droogloop van App inrichten zegt wat dat betekent.
@@ -171,7 +176,7 @@ test("een portaal sluiten bant geen klanten: App inrichten zegt in de droogloop 
   w.aanroepen.length = 0;
   let r;
   for (let run = 0; run < 3; run += 1)
-    r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+    r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), [ID(3)], "alleen ex@oudbedrijf.nl");
   assert.deepEqual(r.klanten, { direct: 50 });
   assert.equal(r.fouten, undefined);
@@ -192,25 +197,25 @@ test("een portaal sluiten bant geen klanten: App inrichten zegt in de droogloop 
   });
   await richtIn(ARG, opzet(w2, DEUR));
   w2.aanroepen.length = 0;
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w2, DEUR));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w2, DEUR));
   assert.deepEqual(bans(w2), [ID(7)]);
 });
 
 test("één mislukte leesvraag bij een klantportaal houdt het intrekken bij de andere apps niet tegen: doorgaan, en rood eindigen", async () => {
-  const w = await portaalMet([medewerker(2, "anna@winco.nl")]);
+  const w = await portaalMet([medewerker(2, "anna@voorbeeld.nl")]);
   // Een tweede, gewone app van dezelfde klant, met een vertrokken medewerker.
   const ref = "refzzzzzzzzzzzzzzzzz";
   w.staat.projecten.push({
     ref,
-    name: "wi-zzz",
-    organization_slug: "winco",
+    name: "vb-zzz",
+    organization_slug: "voorbeeld",
     status: "ACTIVE_HEALTHY",
   });
-  w.staat.apps.push({ id: "app-zzz", name: "wi-zzz", type: "self_hosted", policies: [] });
+  w.staat.apps.push({ id: "app-zzz", name: "vb-zzz", type: "self_hosted", policies: [] });
   w.staat.gebruikersOp[`https://${ref}.supabase.co`] = [medewerker(9, "ex@oudbedrijf.nl")];
   const toegang = { groepen: GROEPEN, apps: { direct: PORTAAL_APP, zzz: ["kantoor"] } };
   w.staat.identiteitenAntwoord = { message: "query timed out" };
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, toegang));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, toegang));
   assert.deepEqual(bans(w), [ID(9)], "ex@oudbedrijf.nl bij de andere app is ingetrokken");
   assert.deepEqual(r.ingetrokken, { zzz: ["ex@oudbedrijf.nl"] });
   assert.match(
@@ -225,7 +230,7 @@ test("één mislukte leesvraag bij een klantportaal houdt het intrekken bij de a
   d.maakAdmin = () => ({
     listUsers: async () => ({ data: null, error: { message: "stuk" } }),
   });
-  await assert.rejects(() => werkToegangBij({ voorvoegsel: "wi-" }, d), /listUsers: stuk/);
+  await assert.rejects(() => werkToegangBij({ voorvoegsel: "vb-" }, d), /listUsers: stuk/);
 });
 
 test("geen massaban: een gewone app met een deur krijgt daarvoor geen enkele extra leesvraag", async () => {
@@ -233,12 +238,12 @@ test("geen massaban: een gewone app met een deur krijgt daarvoor geen enkele ext
     workerBestaat: true,
     gebruikers: [
       { id: ID(1), email: "vreemd@elders.nl" },
-      { id: ID(2), email: "anna@winco.nl" },
+      { id: ID(2), email: "anna@voorbeeld.nl" },
     ],
   });
   await richtIn(ARG, opzet(w, DEUR));
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), [ID(1)], "een gewone app trekt in zoals altijd");
   assert.equal(
     authGelezen(w, project(w).ref),
@@ -252,24 +257,27 @@ test("geen rem voor een gewone app: is de deur hernoemd of weg, of staat de app 
   // Nooit klantportaal geweest; iemand geeft de Access-app in het dashboard een nettere naam.
   const w = nepWolk({
     workerBestaat: true,
-    gebruikers: [medewerker(2, "anna@winco.nl"), medewerker(3, "ex@oudbedrijf.nl")],
+    gebruikers: [medewerker(2, "anna@voorbeeld.nl"), medewerker(3, "ex@oudbedrijf.nl")],
   });
   await richtIn(ARG, opzet(w, DEUR));
-  app(w, NAMEN.deur).name = "Winco Direct";
+  app(w, NAMEN.deur).name = "Voorbeeld Direct";
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), [ID(3)], "ex@oudbedrijf.nl wordt ingetrokken");
   assert.deepEqual(r.ingetrokken, { direct: ["ex@oudbedrijf.nl"] });
   assert.equal(r.fouten, undefined);
   assert.equal(authGelezen(w, project(w).ref), 0, "geen extra leesvraag");
   // De tijdelijke stand (geen deur, alleen workers.dev): hetzelfde.
   const tijdelijk = { ...ARG, hostname: null, stand: "tijdelijk" };
-  const t = nepWolk({ workerBestaat: true, gebruikers: [{ id: ID(2), email: "anna@winco.nl" }] });
+  const t = nepWolk({
+    workerBestaat: true,
+    gebruikers: [{ id: ID(2), email: "anna@voorbeeld.nl" }],
+  });
   await richtIn(tijdelijk, opzet(t, DEUR));
   assert.equal(app(t, NAMEN.deur), undefined);
   t.staat.gebruikers.push({ id: ID(1), email: "vreemd@elders.nl" });
   t.aanroepen.length = 0;
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(t, DEUR));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(t, DEUR));
   assert.equal(authGelezen(t, project(t).ref), 0);
   assert.deepEqual(bans(t), [ID(1)]);
   assert.deepEqual(afgemeld(t), [ID(1)]);
@@ -279,7 +287,7 @@ test("geen rem voor een gewone app: is de deur hernoemd of weg, of staat de app 
   t.staat.gebruikers.push(klant(5, "oud-account@elders.nl"));
   auth(t).external_email_enabled = true;
   t.aanroepen.length = 0;
-  const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(t, DEUR));
+  const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(t, DEUR));
   assert.equal(authGelezen(t, project(t).ref), 0);
   assert.deepEqual(bans(t), [ID(5)]);
   assert.equal(r2.fouten, undefined);
@@ -295,7 +303,7 @@ test("bewust: een account met een Cloudflare- én een e-mailinlog gaat helemaal 
       app_metadata: { provider: "email", providers: ["email", "custom:cloudflare"] },
     },
   ]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), [ID(1)]);
   assert.deepEqual(afgemeld(w), [ID(1)]);
   // Niet stil: de owner leest dat ook de klantkant dicht is en waar staat wat hij dan doet.
@@ -312,8 +320,8 @@ test("bewust: een account met een Cloudflare- én een e-mailinlog gaat helemaal 
 test("geen klant geraakt: een adres op het medewerkerdomein, hoofdletters, voorbij de 1000 accounts of een vreemd antwoord van de database", async () => {
   const veel = Array.from({ length: 2300 }, (_, i) => klant(i + 10, `K${i}@Handel.NL`));
   const lastig = [
-    klant(1, "Klant@Winco.NL"), // adres op het domein van de medewerkers, hoofdletters
-    klant(2, "oud@winco.nl"), // staat zelfs in uitsluiten
+    klant(1, "Klant@Voorbeeld.NL"), // adres op het domein van de medewerkers, hoofdletters
+    klant(2, "oud@voorbeeld.nl"), // staat zelfs in uitsluiten
     { id: ID(3), email: "kaal@elders.nl" }, // geen metadata
     { id: ID(4) }, // geen adres
     { id: ID(5), email: "raar@elders.nl", app_metadata: { providers: "custom:cloudflare-nep" } },
@@ -321,7 +329,7 @@ test("geen klant geraakt: een adres op het medewerkerdomein, hoofdletters, voorb
   for (const antwoord of [undefined, [], [{ user_id: ID(9999), email: "x@y.nl" }]]) {
     const w = await portaalMet([...lastig, ...veel]);
     w.staat.identiteitenAntwoord = antwoord;
-    const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+    const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
     assert.equal(w.aanroepen.filter((a) => a.methode === "updateUserById").length, 0);
     assert.deepEqual(afgemeld(w), []);
     assert.deepEqual(r.klanten, { direct: 2305 });
@@ -331,7 +339,7 @@ test("geen klant geraakt: een adres op het medewerkerdomein, hoofdletters, voorb
   for (const antwoord of [{ result: [] }, "fout", null, [["a", "b"]], [{ email: "x@y.nl" }]]) {
     const w = await portaalMet(lastig);
     w.staat.identiteitenAntwoord = antwoord;
-    const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+    const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
     assert.match(r.fouten.join(" "), /er is niets ingetrokken/);
     assert.equal(w.aanroepen.filter((a) => a.methode === "updateUserById").length, 0);
   }
@@ -407,14 +415,14 @@ test("vertrokken medewerker: het adres van een medewerker is niet per mail aan t
 
   const sql = portaalAanmeldHookSql(PORTAAL, "direct", HOOKS.aanmelden);
   assert.ok(w.staat.sqlOp.some((q) => q.ref === ref && q.query === sql));
-  assert.match(sql, /domein = any \(array\['winco\.nl'\]::text\[\]\)/);
+  assert.match(sql, /domein = any \(array\['voorbeeld\.nl'\]::text\[\]\)/);
   assert.ok(sql.includes(MELDING_MEDEWERKER));
   // Via Cloudflare blijft de Access-policy de poort; elke andere manier is geweigerd.
   assert.match(sql, /if aanbieder = 'custom:cloudflare' then\s+return '\{\}'::jsonb;/);
   assert.match(sql, /if aanbieder <> 'email' or adres !~/);
   assert.match(
     sql,
-    /revoke execute on function public\.wi_portaal_voor_aanmelden\(jsonb\) from authenticated, anon, public;/,
+    /revoke execute on function public\.vb_portaal_voor_aanmelden\(jsonb\) from authenticated, anon, public;/,
   );
 
   // Toegang bijwerken houdt hem actueel als de groepen wijzigen.
@@ -423,20 +431,20 @@ test("vertrokken medewerker: het adres van een medewerker is niet per mail aan t
     apps: { direct: { ...PORTAAL_APP, groepen: ["kantoor", "extern"] } },
   };
   w.staat.sqlOp.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, meer));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, meer));
   const nieuw = w.staat.sqlOp.find((q) => q.ref === ref && q.query.includes(HOOKS.aanmelden));
   assert.ok(nieuw, "de hook is opnieuw geschreven");
-  assert.match(nieuw.query, /array\['winco\.nl', 'partner\.nl'\]::text\[\]/);
+  assert.match(nieuw.query, /array\['voorbeeld\.nl', 'partner\.nl'\]::text\[\]/);
   assert.match(nieuw.query, /adres = any \(array\['hulp@bureau\.nl'\]::text\[\]\)/);
   assert.ok(
     r.acties.some((a) =>
-      /aanmeld-hook public\.wi_portaal_voor_aanmelden van klantportaal direct bijgewerkt/.test(a),
+      /aanmeld-hook public\.vb_portaal_voor_aanmelden van klantportaal direct bijgewerkt/.test(a),
     ),
   );
   // Een gewone app krijgt in productie geen hook en geen SQL.
   const gewoon = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(gewoon, DEUR));
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(gewoon, DEUR));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(gewoon, DEUR));
   assert.deepEqual(gewoon.staat.sqlOp, []);
   assert.equal(auth(gewoon).hook_before_user_created_enabled, undefined);
 });
@@ -465,7 +473,7 @@ test("vertrokken medewerker: ontsnapt niet door zijn adres te wijzigen, een e-ma
     {
       id: ID(1),
       email: "prive@gmail.com",
-      identities: [cf("oud@winco.nl")],
+      identities: [cf("oud@voorbeeld.nl")],
       app_metadata: { provider: "custom:cloudflare", providers: ["custom:cloudflare"] },
     },
     // e-mailinlog erbij, metadata zegt alleen "email"
@@ -476,9 +484,9 @@ test("vertrokken medewerker: ontsnapt niet door zijn adres te wijzigen, een e-ma
       app_metadata: { provider: "email", providers: ["email"] },
     },
     // hoofdletters in het adres van de identiteit
-    { id: ID(3), email: "x@gmail.com", identities: [cf("OUD@Winco.NL")], app_metadata: {} },
+    { id: ID(3), email: "x@gmail.com", identities: [cf("OUD@Voorbeeld.NL")], app_metadata: {} },
   ]);
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w).sort(), [ID(1), ID(2), ID(3)]);
   assert.deepEqual(afgemeld(w).sort(), [ID(1), ID(2), ID(3)]);
 });
@@ -486,28 +494,28 @@ test("vertrokken medewerker: ontsnapt niet door zijn adres te wijzigen, een e-ma
 // ---------------------------------------------------------------- een klantaccount op een medewerkeradres
 
 test("een klantaccount op een adres dat (later) van een medewerker is: Toegang bijwerken en App inrichten melden het uitdrukkelijk, ook in de droogloop, met het adres gemaskeerd, en ruimen niets op", async () => {
-  // jan was klant en komt in dienst (winco.nl is het domein van de medewerkers); kees gebruikte
+  // jan was klant en komt in dienst (voorbeeld.nl is het domein van de medewerkers); kees gebruikte
   // het klantvak vóór de aanmeld-hook er was. Anna logt gewoon via Cloudflare in.
   const w = await portaalMet([
-    klant(1, "Jan.Jansen@Winco.nl"),
-    klant(2, "kees@winco.nl"),
+    klant(1, "Jan.Jansen@Voorbeeld.nl"),
+    klant(2, "kees@voorbeeld.nl"),
     klant(3, "inkoop@bloemist.nl"),
-    klant(4, "oud@winco.nl"), // uitgesloten: geen medewerker, dus een gewone klant
-    medewerker(5, "anna@winco.nl"),
+    klant(4, "oud@voorbeeld.nl"), // uitgesloten: geen medewerker, dus een gewone klant
+    medewerker(5, "anna@voorbeeld.nl"),
   ]);
   const voor = JSON.stringify(w.staat.gebruikers);
   const meldingen = (r) => (r.waarschuwingen ?? []).filter((x) => /klantaccount/.test(x));
   const runs = [
-    await werkToegangBij({ voorvoegsel: "wi-", droogloop: true }, opzet(w, PORTAAL)),
-    await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL)),
+    await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, PORTAAL)),
+    await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL)),
     await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL)),
     await richtIn(ARG, opzet(w, PORTAAL)),
   ];
   for (const r of runs) {
     const m = meldingen(r);
     assert.equal(m.length, 2, JSON.stringify(r.waarschuwingen));
-    assert.match(m[0], new RegExp(`direct: j\\*\\*\\*@winco\\.nl \\(id ${ID(1)}\\)`));
-    assert.match(m[1], new RegExp(`direct: k\\*\\*\\*@winco\\.nl \\(id ${ID(2)}\\)`));
+    assert.match(m[0], new RegExp(`direct: j\\*\\*\\*@voorbeeld\\.nl \\(id ${ID(1)}\\)`));
+    assert.match(m[1], new RegExp(`direct: k\\*\\*\\*@voorbeeld\\.nl \\(id ${ID(2)}\\)`));
     assert.match(
       m[0],
       /kan deze persoon niet als medewerker inloggen.*Er is niets gewijzigd.*verwijder het account in Supabase.*Inloggen voor medewerkers/,
@@ -527,7 +535,7 @@ test("een klantaccount op een adres dat (later) van een medewerker is: Toegang b
     /niet nagegaan of er klantaccounts op een adres van een medewerker staan/,
   );
   // Een gewone app krijgt deze melding en deze leesvragen nooit.
-  const gewoon = nepWolk({ workerBestaat: true, gebruikers: [klant(1, "jan@winco.nl")] });
+  const gewoon = nepWolk({ workerBestaat: true, gebruikers: [klant(1, "jan@voorbeeld.nl")] });
   await richtIn(ARG, opzet(gewoon, DEUR));
   gewoon.aanroepen.length = 0;
   const g = await richtIn(ARG, opzet(gewoon, DEUR));
@@ -540,14 +548,14 @@ test("een klantaccount op een adres dat (later) van een medewerker is: Toegang b
 test("geen massaban: het portaal stond klaar maar de deur stond er nog (proefklanten hebben per mail een account). Eén pull request terug naar een gewone app: Toegang bijwerken (start vanzelf bij de merge) bant niemand, eindigt rood met de ene verwachte melding, en geen klantadres staat in de uitvoer", async () => {
   const proef = Array.from({ length: 25 }, (_, i) => klant(i + 1, `inkoper${i}@klant${i}.nl`));
   const w = nepWolk({
-    gebruikers: [...proef, medewerker(900, "anna@winco.nl")],
+    gebruikers: [...proef, medewerker(900, "anna@voorbeeld.nl")],
     workerBestaat: true,
   });
   await richtIn(ARG, opzet(w, DEUR));
   await richtIn(ARG, opzet(w, PORTAAL)); // stap 3: alles klaar, de deur staat er nog
   assert.ok(app(w, NAMEN.deur));
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), []);
   assert.deepEqual(afgemeld(w), []);
   assert.deepEqual(r.klanten, { direct: 25 });
@@ -564,7 +572,7 @@ test("geen massaban: het portaal stond klaar maar de deur stond er nog (proefkla
   // App inrichten sluit het portaal; daarna is Toegang bijwerken groen en is nog steeds
   // niemand geband.
   await richtIn(ARG, opzet(w, DEUR));
-  const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.equal(r2.fouten, undefined);
   assert.deepEqual(bans(w), []);
   assert.deepEqual(r2.klanten, { direct: 25 });
@@ -583,7 +591,7 @@ test("geen massaban: ook als een groep van de app op idp_groepen staat (geen kla
   await richtIn(ARG, opzet(w, { groepen, apps: { direct: ["kantoor", "verkoop"] } }, idp));
   await naarPortaal(w, portaal, ARG, idp);
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, gewoon, idp));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, gewoon, idp));
   assert.deepEqual(bans(w), []);
   assert.deepEqual(r.fouten, [wachtOpInrichten("direct", 200)]);
   assert.deepEqual(r.onbekend, {}, "klanten staan niet als onbekend in het resultaat");
@@ -593,7 +601,7 @@ test("geen massaban: ook als een groep van de app op idp_groepen staat (geen kla
 });
 
 test("een vertrokken medewerker wordt altijd ingetrokken: ook als de aanmeld-hook van het klantportaal niet te schrijven is (rood, maar ingetrokken), en ook in de rem als hij daarnaast per mail kan inloggen", async () => {
-  const oud = medewerker(1, "oud@winco.nl");
+  const oud = medewerker(1, "oud@voorbeeld.nl");
   const w = await portaalMet([oud, klant(2, "piet@handel.nl")]);
   let hookOp = -1;
   const fetchFn = (url, opties) => {
@@ -607,8 +615,8 @@ test("een vertrokken medewerker wordt altijd ingetrokken: ook als de aanmeld-hoo
       text: async () => JSON.stringify({ message: "Failed to run sql query" }),
     });
   };
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet({ ...w, fetchFn }, PORTAAL));
-  assert.deepEqual(bans(w), [oud.id], "oud@winco.nl (uitgesloten) is ingetrokken");
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet({ ...w, fetchFn }, PORTAAL));
+  assert.deepEqual(bans(w), [oud.id], "oud@voorbeeld.nl (uitgesloten) is ingetrokken");
   assert.deepEqual(afgemeld(w), [oud.id]);
   assert.match(
     r.fouten.join(" "),
@@ -618,27 +626,27 @@ test("een vertrokken medewerker wordt altijd ingetrokken: ook als de aanmeld-hoo
   const ban = w.aanroepen.findIndex((a) => a.methode === "updateUserById");
   assert.ok(ban !== -1 && ban < hookOp, "eerst intrekken, dan pas de hook");
   // De rem (klantportaal uit het bestand, App inrichten nog niet gedraaid).
-  const ook = medewerker(1, "oud@winco.nl");
-  ook.identities.push(mail("oud@winco.nl"));
+  const ook = medewerker(1, "oud@voorbeeld.nl");
+  ook.identities.push(mail("oud@voorbeeld.nl"));
   ook.app_metadata.providers = ["custom:cloudflare", "email"];
   const w2 = await portaalMet([ook, klant(2, "piet@handel.nl")]);
-  const r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w2, DEUR));
+  const r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w2, DEUR));
   assert.deepEqual(bans(w2), [ook.id]);
   assert.ok(r2.fouten.length);
 });
 
 test("een klantportaal komt altijd vóór de gewone apps aan de beurt: stopt de run op een fout bij een gewone app (zoals op versie 42), dan is de vertrokken medewerker van het klantportaal al ingetrokken", async () => {
   const toegang = { groepen: GROEPEN, apps: { administratie: ["kantoor"], direct: PORTAAL_APP } };
-  const w = nepWolk({ gebruikers: [medewerker(1, "oud@winco.nl")], workerBestaat: true });
+  const w = nepWolk({ gebruikers: [medewerker(1, "oud@voorbeeld.nl")], workerBestaat: true });
   await richtIn(ARG, opzet(w, { groepen: GROEPEN, apps: { direct: ["kantoor"] } }));
   await naarPortaal(w, toegang);
   // De gewone app administratie staat eerder in het bestand en heeft een eigen project; daar
   // is iets stuk.
   w.staat.projecten.push({
     ref: "refadministratie00000",
-    name: "wi-administratie",
+    name: "vb-administratie",
     status: "ACTIVE_HEALTHY",
-    organization_slug: "winco",
+    organization_slug: "voorbeeld",
   });
   const fetchFn = (url, opties) =>
     url.includes("/refadministratie00000/api-keys")
@@ -646,7 +654,7 @@ test("een klantportaal komt altijd vóór de gewone apps aan de beurt: stopt de 
       : w.fetchFn(url, opties);
   w.aanroepen.length = 0;
   await assert.rejects(
-    () => werkToegangBij({ voorvoegsel: "wi-" }, opzet({ ...w, fetchFn }, toegang)),
+    () => werkToegangBij({ voorvoegsel: "vb-" }, opzet({ ...w, fetchFn }, toegang)),
     /api-keys gaf 500/,
   );
   assert.deepEqual(bans(w), [ID(1)], "bij het klantportaal direct is al ingetrokken");

@@ -11,7 +11,7 @@
  *        [--deur-weghalen]   (alleen bij een klantportaal: captcha aan en de deur weg)
  *
  * Het voorvoegsel is verplicht (vlag of BEHEER_VOORVOEGSEL): `cf-proef-` voor de proef,
- * `rp-` voor Richplant. Buiten de proef zijn ook `--repo` (de app-repo die de
+ * bij een klant bijvoorbeeld `kl-`. Buiten de proef zijn ook `--repo` (de app-repo die de
  * variabelen en secrets krijgt) en `--wrangler` (de wrangler.jsonc van die app, bij
  * een uitgecheckte app-repo) verplicht. Alleen de proef valt terug op de eigen repo
  * (GITHUB_REPOSITORY) en op wrangler.jsonc in de werkmap.

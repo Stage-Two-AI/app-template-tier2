@@ -348,8 +348,8 @@ test("de knop: de controle zoekt zelf de adressen op die de inrichting kent (dom
     projecten: [
       {
         ref: "refaaaaaaaaaaaaaaaaa",
-        name: "wi-direct",
-        organization_slug: "winco",
+        name: "vb-direct",
+        organization_slug: "voorbeeld",
         status: "ACTIVE_HEALTHY",
       },
     ],
@@ -362,16 +362,16 @@ test("de knop: de controle zoekt zelf de adressen op die de inrichting kent (dom
       accountId: "acc",
       teamDomein: "stagetwo",
     }),
-    supabase: supabaseBeheer({ fetchFn: w.fetchFn, token: "t", orgSlug: "winco" }),
+    supabase: supabaseBeheer({ fetchFn: w.fetchFn, token: "t", orgSlug: "voorbeeld" }),
     toegang,
     maskeer: (x) => gemaskeerd.push(x),
   });
-  const groepen = { kantoor: { domeinen: ["winco.nl"] } };
+  const groepen = { kantoor: { domeinen: ["voorbeeld.nl"] } };
   const arg = {
     app: "direct",
-    voorvoegsel: "wi-",
-    hostname: "direct.wincoapps.com",
-    worker: "wi-direct",
+    voorvoegsel: "vb-",
+    hostname: "direct.voorbeeldapps.nl",
+    worker: "vb-direct",
     stand: "standaard",
   };
   const portaal = {
@@ -381,11 +381,11 @@ test("de knop: de controle zoekt zelf de adressen op die de inrichting kent (dom
     },
   };
   assert.deepEqual(await adressenVoor(arg, d(portaal)), {
-    hostname: "direct.wincoapps.com",
+    hostname: "direct.voorbeeldapps.nl",
     projectRef: "refaaaaaaaaaaaaaaaaa",
     anonKey: "sb_publishable_refaaaaaaaaaaaaaaaaa",
-    workersDev: "https://wi-direct.stagetwo-acc.workers.dev/",
-    previewUrl: "https://actueel-wi-direct.stagetwo-acc.workers.dev/",
+    workersDev: "https://vb-direct.stagetwo-acc.workers.dev/",
+    previewUrl: "https://actueel-vb-direct.stagetwo-acc.workers.dev/",
     klantportaal: true,
     captcha: false,
     team: "stagetwo.cloudflareaccess.com",
@@ -405,7 +405,7 @@ test("de knop: de controle zoekt zelf de adressen op die de inrichting kent (dom
     { ...arg, hostname: null, stand: "tijdelijk" },
     d({ groepen, apps: { direct: ["kantoor"] } }),
   );
-  assert.equal(tijdelijk.hostname, "wi-direct.stagetwo-acc.workers.dev");
+  assert.equal(tijdelijk.hostname, "vb-direct.stagetwo-acc.workers.dev");
   assert.equal(tijdelijk.workersDev, undefined);
   await assert.rejects(
     () => adressenVoor({ ...arg, app: "bestaat-niet" }, d(portaal)),

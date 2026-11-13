@@ -47,7 +47,7 @@ import { nepWolk } from "./nep-wolk.mjs";
 
 const inst = (extra = {}) =>
   klantportaalInstellingen({
-    afzender: { adres: "noreply@wincoapps.com", naam: "Winco Direct" },
+    afzender: { adres: "noreply@voorbeeldapps.nl", naam: "Voorbeeld Direct" },
     smtpWachtwoord: "x",
     captchaGeheim: "y",
     hooks: HOOKS,
@@ -77,11 +77,11 @@ test("overname met een wachtwoord: een sessie met een wachtwoord bestaat niet; d
   assert.match(sql, /return jsonb_build_object\('claims', event->'claims'\);/);
   assert.match(
     sql,
-    /grant execute on function public\.wi_portaal_voor_token\(jsonb\) to supabase_auth_admin;/,
+    /grant execute on function public\.vb_portaal_voor_token\(jsonb\) to supabase_auth_admin;/,
   );
   assert.match(
     sql,
-    /revoke execute on function public\.wi_portaal_voor_token\(jsonb\) from authenticated, anon, public;/,
+    /revoke execute on function public\.vb_portaal_voor_token\(jsonb\) from authenticated, anon, public;/,
   );
   assert.throws(() => portaalTokenHookSql("x; drop table y"), /ongeldige functienaam/);
 
@@ -227,7 +227,7 @@ test("adres wijzigen: een account is niet naar het adres van een ander te zetten
     );
   }
   assert.match(i.mailer_templates_email_change_content, /Dat kan niet zelf: er is niets gewijzigd/);
-  assert.match(i.mailer_templates_email_change_content, /neem dan contact op met Winco Direct/);
+  assert.match(i.mailer_templates_email_change_content, /neem dan contact op met Voorbeeld Direct/);
   // De uitnodiging logt niet in: alleen een verwijzing naar de inlogpagina op het eigen domein.
   assert.deepEqual(i.mailer_templates_invite_content.match(/\{\{[^}]*\}\}/g), ["{{ .SiteURL }}"]);
   // Wie de code van acht cijfers wil raden om de wijziging toch te bevestigen, moet er twee raden.
@@ -272,11 +272,11 @@ test("overname met een wachtwoord: de mail die een ander kan uitlokken zegt wat 
   assert.equal(i.mailer_templates_magic_link_content, tekst);
   assert.equal(i.mailer_templates_recovery_content, tekst);
   for (const soort of ["confirmation", "magic_link", "recovery"]) {
-    assert.equal(i[`mailer_subjects_${soort}`], "Inloggen bij Winco Direct");
+    assert.equal(i[`mailer_subjects_${soort}`], "Inloggen bij Voorbeeld Direct");
   }
   assert.match(
     tekst,
-    /niet zelf, zojuist, op de inlogpagina van Winco Direct aangevraagd\? Dan hoef je niets te doen/,
+    /niet zelf, zojuist, op de inlogpagina van Voorbeeld Direct aangevraagd\? Dan hoef je niets te doen/,
   );
   assert.match(tekst, /Klik niet op de link en geef de code aan niemand/);
   // Geen link die bij openen meteen inlogt (ook niet door een virusscanner), en geen adres
@@ -429,7 +429,7 @@ test("de rem: elke grens ligt binnen wat de Management API aanneemt en heeft de 
 
 test("geen SQL via toegang.json: een groep, domein, adres of naam met aanhalingstekens, een $-blok, een backslash of een regeleinde wordt geweigerd vóór er één regel SQL bestaat", () => {
   const gif = [
-    "x'; drop table auth.users; --@winco.nl",
+    "x'; drop table auth.users; --@voorbeeld.nl",
     "a@b.nl' or '1'='1",
     "$hook$; select 1; $hook$@x.nl",
     "a\\'@x.nl",
@@ -455,7 +455,7 @@ test("geen SQL via toegang.json: een groep, domein, adres of naam met aanhalings
         /naam alleen kleine letters/,
       );
     }
-    const afzender = { ...PORTAAL_APP, afzender: `${g} <noreply@winco.nl>` };
+    const afzender = { ...PORTAAL_APP, afzender: `${g} <noreply@voorbeeld.nl>` };
     assert.throws(
       () => valideerToegang({ groepen: GROEPEN, apps: { direct: afzender } }),
       /afzender/,
@@ -466,8 +466,8 @@ test("geen SQL via toegang.json: een groep, domein, adres of naam met aanhalings
 });
 
 test("de aanmeld-hook laat geen adres op het domein van een medewerker door: hoofdletters, spaties, een tab of twee apenstaartjes helpen niet", () => {
-  // Tegen een echte Postgres gedraaid (13-11-2026) met "a@b"@winco.nl, Nieuw@WINCO.NL,
-  // " nieuw@winco.nl", "nieuw@winco.nl\t", nieuw@elders.nl@winco.nl en nieuw+klant@winco.nl:
+  // Tegen een echte Postgres gedraaid (13-11-2026) met "a@b"@voorbeeld.nl, Nieuw@VOORBEELD.NL,
+  // " nieuw@voorbeeld.nl", "nieuw@voorbeeld.nl\t", nieuw@elders.nl@voorbeeld.nl en nieuw+klant@voorbeeld.nl:
   // allemaal geweigerd. Hier staat vast waar dat op rust.
   const sql = portaalAanmeldHookSql(PORTAAL, "direct", HOOKS.aanmelden);
   // Het adres wordt eerst klein gemaakt, en het domein is wat na het eerste apenstaartje komt.
@@ -476,7 +476,7 @@ test("de aanmeld-hook laat geen adres op het domein van een medewerker door: hoo
   // Een adres met witruimte of meer dan één apenstaartje is geen adres: geweigerd, vóór de
   // vergelijking met de groepen.
   const vorm = sql.indexOf("adres !~ '^[^@[:space:]]+@[^@[:space:]]+$'");
-  const groepen = sql.indexOf("domein = any (array['winco.nl']::text[])");
+  const groepen = sql.indexOf("domein = any (array['voorbeeld.nl']::text[])");
   assert.ok(vorm !== -1 && groepen !== -1 && vorm < groepen);
   // Alles wat niet per mail of via Cloudflare komt (ook anoniem) wordt geweigerd.
   assert.match(sql, /if aanbieder <> 'email' or adres !~/);

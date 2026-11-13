@@ -61,7 +61,7 @@ test("deur: een mens haalt de deur weg, niet de code: zonder vinkje blijft hij s
     assert.match(r.watNu.join(" "), /Rol de app uit.*Test achter de deur.*met het vinkje/);
   }
   // Toegang bijwerken en de tweede doorgang raken de deur evenmin.
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   await tweedeDoorgang(ARG, opzet(w, PORTAAL));
   assert.ok(app(w, NAMEN.deur));
   // Met het vinkje: een storing bij het nalopen laat de deur staan (hij is de enige wijziging
@@ -121,14 +121,14 @@ test("deur: het vinkje wordt geweigerd, vóór de eerste wijziging en met uitleg
 test("deur: klantportaal uit toegang.json gehaald: Toegang bijwerken bant geen klant, zet geen deur terug en eindigt rood tot App inrichten heeft gedraaid", async () => {
   const w = nepWolk({
     workerBestaat: true,
-    gebruikers: [klant(1, "inkoop@bloemist.nl"), medewerker(2, "anna@winco.nl")],
+    gebruikers: [klant(1, "inkoop@bloemist.nl"), medewerker(2, "anna@voorbeeld.nl")],
   });
   await richtIn(ARG, opzet(w, DEUR));
   await naarPortaal(w);
   w.aanroepen.length = 0;
   // De pull request die klantportaal weghaalt wordt gemerged; Toegang bijwerken draait
   // vanzelf, App inrichten niet.
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   assert.deepEqual(bans(w), [], "geen klant is geband");
   assert.equal(app(w, NAMEN.deur), undefined, "er staat (nog) geen deur");
   const tekst = r.fouten.join(" ");
@@ -161,7 +161,7 @@ test("deur: een rare waarde of schrijfwijze van klantportaal haalt de deur nooit
     assert.throws(() => valideerToegang(structuredClone(toegang)), JSON.stringify(extra));
     for (let run = 0; run < 3; run += 1) {
       await assert.rejects(() => richtIn(ARG, opzet(w, toegang)));
-      await assert.rejects(() => werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, toegang)));
+      await assert.rejects(() => werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, toegang)));
     }
     assert.ok(app(w, NAMEN.deur), `de deur staat er nog bij ${JSON.stringify(extra)}`);
   }
@@ -174,7 +174,7 @@ test("deur: een droogloop van deur naar klantportaal wijzigt niets, ook niet met
     w.aanroepen.length = 0;
     await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL));
     await richtIn({ ...MET_VINKJE, droogloop: true }, opzet(w, PORTAAL));
-    await werkToegangBij({ voorvoegsel: "wi-", droogloop: true }, opzet(w, PORTAAL));
+    await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, PORTAAL));
     assert.deepEqual(w.schrijfacties(), []);
     assert.ok(app(w, NAMEN.deur));
     // Daarna de echte run zonder vinkje, zodat bij de volgende droogloop alles klaarstaat.
@@ -187,36 +187,36 @@ test("deur: een droogloop van deur naar klantportaal wijzigt niets, ook niet met
 test("workers.dev: bewaakt de Access op de Worker van een klantportaal een gewenst adres niet (de Worker is hernoemd in wrangler.jsonc), dan zet stap 4 het erbij en haalt hij niets weg", async () => {
   const w = nepWolk({ workerBestaat: true });
   await richtIn(ARG, opzet(w, DEUR));
-  const nieuw = { ...ARG, worker: "wi-direct-nieuw" };
+  const nieuw = { ...ARG, worker: "vb-direct-nieuw" };
 
   // De droogloop zegt het al.
   const droog = await richtIn({ ...nieuw, droogloop: true }, opzet(w, PORTAAL));
-  assert.match(stap(droog, "4 Access op de Worker"), /gepland: wi-direct-nieuw\..* erbij zetten/);
+  assert.match(stap(droog, "4 Access op de Worker"), /gepland: vb-direct-nieuw\..* erbij zetten/);
 
   const r = await richtIn(nieuw, opzet(w, PORTAAL));
   assert.match(stap(r, "4 Access op de Worker"), /adres en merk klantportaal bijgewerkt/);
   assert.deepEqual(
     app(w, NAMEN.worker).destinations.map((x) => x.uri),
     [
-      "wi-direct.stagetwo-acc.workers.dev",
-      "*-wi-direct.stagetwo-acc.workers.dev",
-      "wi-direct-nieuw.stagetwo-acc.workers.dev",
-      "*-wi-direct-nieuw.stagetwo-acc.workers.dev",
+      "vb-direct.stagetwo-acc.workers.dev",
+      "*-vb-direct.stagetwo-acc.workers.dev",
+      "vb-direct-nieuw.stagetwo-acc.workers.dev",
+      "*-vb-direct-nieuw.stagetwo-acc.workers.dev",
     ],
     "de nieuwe adressen staan erbij, de oude zijn er nog",
   );
   assert.ok(
-    r.waarschuwingen.some((x) => /wi-direct-nieuw.* niet; dat adres is erbij gezet/.test(x)),
+    r.waarschuwingen.some((x) => /vb-direct-nieuw.* niet; dat adres is erbij gezet/.test(x)),
   );
   // En pas daarna, in een run met het vinkje, gaat de deur van het domein weg.
   assert.ok(app(w, NAMEN.deur));
   await richtIn({ ...nieuw, deurWeghalen: true }, opzet(w, PORTAAL));
   assert.equal(app(w, NAMEN.deur), undefined);
-  assert.ok(gedekt(w).includes("*-wi-direct-nieuw.stagetwo-acc.workers.dev"));
+  assert.ok(gedekt(w).includes("*-vb-direct-nieuw.stagetwo-acc.workers.dev"));
 });
 
 test("workers.dev: een adres dat iemand met de hand onder de Access op de Worker zette blijft bewaakt, bij een gewone app (geen PUT, zoals versie 42) en bij een klantportaal (toevoegen, nooit vervangen)", async () => {
-  const extra = "demo-wi-direct.wincoapps.com";
+  const extra = "demo-vb-direct.voorbeeldapps.nl";
   const zetErbij = (w) => {
     const worker = app(w, NAMEN.worker);
     worker.destinations = [...worker.destinations, { type: "public", uri: extra }];
@@ -248,7 +248,7 @@ test("workers.dev: een adres dat iemand met de hand onder de Access op de Worker
     await draai(ARG, opzet(w, PORTAAL));
     assert.deepEqual(
       app(w, NAMEN.worker).destinations.map((x) => x.uri),
-      ["wi-direct.stagetwo-acc.workers.dev", extra, "*-wi-direct.stagetwo-acc.workers.dev"],
+      ["vb-direct.stagetwo-acc.workers.dev", extra, "*-vb-direct.stagetwo-acc.workers.dev"],
     );
   }
   // Alleen een andere volgorde of hoofdletters is geen afwijking: dan wordt er niets geschreven.
@@ -258,7 +258,7 @@ test("workers.dev: een adres dat iemand met de hand onder de Access op de Worker
   const i = w.staat.apps.findIndex((a) => a.name === NAMEN.worker);
   w.staat.apps[i] = {
     ...w.staat.apps[i],
-    domain: "WI-Direct.stagetwo-acc.workers.dev",
+    domain: "VB-Direct.stagetwo-acc.workers.dev",
     // Ook met velden erbij die Cloudflare zelf toevoegt.
     destinations: [...w.staat.apps[i].destinations]
       .reverse()
@@ -287,32 +287,32 @@ test("workers.dev: het vinkje haalt de deur niet weg als de Access op de Worker 
     w.aanroepen.length = 0;
     await assert.rejects(
       () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
-      /de deur gaat niet weg.*de Access op de Worker \(wi-direct-worker\) (ontbreekt|bewaakt \*-wi-direct\.stagetwo-acc\.workers\.dev nog niet)/,
+      /de deur gaat niet weg.*de Access op de Worker \(vb-direct-worker\) (ontbreekt|bewaakt \*-vb-direct\.stagetwo-acc\.workers\.dev nog niet)/,
     );
     assert.deepEqual(w.schrijfacties(), []);
     assert.ok(app(w, NAMEN.deur));
     await richtIn(ARG, opzet(w, PORTAAL));
     await richtIn(MET_VINKJE, opzet(w, PORTAAL));
     assert.equal(app(w, NAMEN.deur), undefined);
-    assert.ok(gedekt(w).includes("*-wi-direct.stagetwo-acc.workers.dev"));
+    assert.ok(gedekt(w).includes("*-vb-direct.stagetwo-acc.workers.dev"));
   }
 });
 
 test("workers.dev: Toegang bijwerken of een volgende run haalt bij een klantportaal de Access op de Worker nooit weg en maakt hem nooit leeg", async () => {
   const w = nepWolk({ workerBestaat: true });
   await naarPortaal(w);
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   await richtIn(ARG, opzet(w, PORTAAL));
   const andereGroep = {
     groepen: { ...GROEPEN, extra: { adressen: ["hulp@bureau.nl"] } },
     apps: { direct: { ...PORTAAL_APP, groepen: ["extra"] } },
   };
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, andereGroep));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, andereGroep));
   const worker = app(w, NAMEN.worker);
   assert.ok(worker, "de Access op de Worker staat er");
   assert.equal(worker.policies.length, 1);
   assert.ok(!w.staat.policies.some((p) => p.decision === "bypass"));
-  assert.ok(worker.destinations.some((x) => x.uri === "*-wi-direct.stagetwo-acc.workers.dev"));
+  assert.ok(worker.destinations.some((x) => x.uri === "*-vb-direct.stagetwo-acc.workers.dev"));
 });
 
 test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonder dat een preview is bekeken", async () => {
@@ -323,8 +323,8 @@ test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonde
       headers: { get: (k) => (k === "location" ? (location ?? null) : null) },
       text: async () => "<html>app</html>",
     });
-    if (u.startsWith("https://direct.wincoapps.com")) return antwoord(200);
-    if (u.includes("wi-direct.stagetwo-acc.workers.dev"))
+    if (u.startsWith("https://direct.voorbeeldapps.nl")) return antwoord(200);
+    if (u.includes("vb-direct.stagetwo-acc.workers.dev"))
       return antwoord(302, "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/x");
     if (u.includes("supabase.co/auth/v1/authorize"))
       return antwoord(302, "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/y");
@@ -343,10 +343,10 @@ test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonde
   };
   const basis = {
     fetchFn,
-    hostname: "direct.wincoapps.com",
+    hostname: "direct.voorbeeldapps.nl",
     projectRef: "abcdefghijklmnopqrst",
     anonKey: "anon",
-    workersDev: "https://wi-direct.stagetwo-acc.workers.dev/",
+    workersDev: "https://vb-direct.stagetwo-acc.workers.dev/",
     klantportaal: true,
   };
   const zonder = await controleer(basis);
@@ -357,7 +357,7 @@ test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonde
   // Met het vaste preview-adres erbij is alles bekeken en geslaagd.
   const met = await controleer({
     ...basis,
-    previewUrl: "https://actueel-wi-direct.stagetwo-acc.workers.dev/",
+    previewUrl: "https://actueel-vb-direct.stagetwo-acc.workers.dev/",
   });
   assert.deepEqual(
     met.filter((x) => x.geslaagd === false),
@@ -402,7 +402,7 @@ test("workers.dev: geeft Cloudflare de Access op de Worker terug met bestemminge
   w.aanroepen.length = 0;
   await assert.rejects(
     () => richtIn(MET_VINKJE, opzet(w, PORTAAL)),
-    /gestopt zonder wijzigingen.*de deur gaat niet weg.*bestemmingen zonder adres.*Zet in Cloudflare \(Zero Trust, Access, Applications, wi-direct-worker\) de adressen wi-direct\.stagetwo-acc\.workers\.dev en \*-wi-direct\.stagetwo-acc\.workers\.dev als gewone bestemming/,
+    /gestopt zonder wijzigingen.*de deur gaat niet weg.*bestemmingen zonder adres.*Zet in Cloudflare \(Zero Trust, Access, Applications, vb-direct-worker\) de adressen vb-direct\.stagetwo-acc\.workers\.dev en \*-vb-direct\.stagetwo-acc\.workers\.dev als gewone bestemming/,
   );
   assert.deepEqual(w.schrijfacties(), []);
   assert.ok(app(w, NAMEN.deur), "de deur staat er nog");
@@ -414,7 +414,7 @@ test("workers.dev: geeft Cloudflare de Access op de Worker terug met bestemminge
   app(gewoon, NAMEN.worker).destinations = structuredClone(zonderAdres);
   await richtIn(ARG, opzet(gewoon, andereGroep));
   assert.deepEqual(app(gewoon, NAMEN.worker).destinations, zonderAdres);
-  const extra = gewoon.staat.policies.find((p) => p.name === "wi-extra");
+  const extra = gewoon.staat.policies.find((p) => p.name === "vb-extra");
   assert.deepEqual(app(gewoon, NAMEN.worker).policies, [{ id: extra.id, precedence: 1 }]);
 });
 
@@ -454,8 +454,8 @@ test("een app van vóór versie 43: de inrichting leest eerst of de app de inlog
 });
 
 test("previews: bij een klantportaal met een testdatabase staan de previews niet op de lijst van terugkeeradressen van productie; zonder testdatabase waarschuwt elke run", async () => {
-  const domein = "https://direct.wincoapps.com/**";
-  const metPreviews = `${domein},https://pr-*-wi-direct.stagetwo-acc.workers.dev/**,https://actueel-wi-direct.stagetwo-acc.workers.dev/**`;
+  const domein = "https://direct.voorbeeldapps.nl/**";
+  const metPreviews = `${domein},https://pr-*-vb-direct.stagetwo-acc.workers.dev/**,https://actueel-vb-direct.stagetwo-acc.workers.dev/**`;
   const metTest = { ...ARG, testdatabase: true };
   const w = nepWolk({ workerBestaat: true });
   // Als gewone app: productie en de testdatabase hebben allebei de previews, zoals altijd.
@@ -464,7 +464,7 @@ test("previews: bij een klantportaal met een testdatabase staan de previews niet
   // Als klantportaal: productie alleen nog het domein; de testdatabase houdt de previews.
   const r = await richtIn(metTest, opzet(w, PORTAAL));
   assert.equal(auth(w).uri_allow_list, domein);
-  assert.equal(auth(w, "wi-direct-test").uri_allow_list, metPreviews);
+  assert.equal(auth(w, "vb-direct-test").uri_allow_list, metPreviews);
   assert.deepEqual(r.uri_allow_list, [domein]);
   assert.doesNotMatch(r.waarschuwingen.join(" "), /geen testdatabase/);
   // Ook een latere run zonder de vlag ziet dat de testdatabase er is.

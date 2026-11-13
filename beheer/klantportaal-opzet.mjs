@@ -1,6 +1,6 @@
 /**
  * Gedeelde opzet voor de verdedigingstests van het klantportaal (klantportaal-*.test.mjs):
- * één klant (Winco, voorvoegsel wi-), één app (direct), als gewone app (DEUR) en als
+ * één klant (Voorbeeld, voorvoegsel vb-), één app (direct), als gewone app (DEUR) en als
  * klantportaal (PORTAAL). Die tests spelen de aanvallen na die bij het bouwen van uitgave 43
  * zijn geprobeerd, en bewijzen dat ze mislukken. Geen testbestand zelf (geen `.test.` in de
  * naam), net als nep-wolk.mjs.
@@ -9,8 +9,10 @@ import { richtIn } from "./inrichten-cloudflare.mjs";
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import { supabaseBeheer } from "./lib/supabase.mjs";
 
-export const GROEPEN = { kantoor: { domeinen: ["winco.nl"], uitsluiten: ["oud@winco.nl"] } };
-export const AFZENDER = "Winco Direct <noreply@wincoapps.com>";
+export const GROEPEN = {
+  kantoor: { domeinen: ["voorbeeld.nl"], uitsluiten: ["oud@voorbeeld.nl"] },
+};
+export const AFZENDER = "Voorbeeld Direct <noreply@voorbeeldapps.nl>";
 export const SITEKEY = "0x4AAAAAAAOpenbareSleutel";
 export const DEUR = { groepen: GROEPEN, apps: { direct: ["kantoor"] } };
 export const PORTAAL_APP = {
@@ -22,16 +24,16 @@ export const PORTAAL_APP = {
 export const PORTAAL = { groepen: GROEPEN, apps: { direct: PORTAAL_APP } };
 export const ARG = {
   app: "direct",
-  hostname: "direct.wincoapps.com",
-  worker: "wi-direct",
-  repo: "Winco-Holland-B-V/direct",
-  voorvoegsel: "wi-",
+  hostname: "direct.voorbeeldapps.nl",
+  worker: "vb-direct",
+  repo: "voorbeeld-org/direct",
+  voorvoegsel: "vb-",
   droogloop: false,
 };
 export const SMTP = "re_GeheimeSleutelVanResend123";
 export const TURNSTILE = "0x4GeheimVanTurnstile456";
-export const NAMEN = { deur: "wi-direct", inlog: "wi-direct-inlog", worker: "wi-direct-worker" };
-export const HOOKS = { aanmelden: "wi_portaal_voor_aanmelden", token: "wi_portaal_voor_token" };
+export const NAMEN = { deur: "vb-direct", inlog: "vb-direct-inlog", worker: "vb-direct-worker" };
+export const HOOKS = { aanmelden: "vb_portaal_voor_aanmelden", token: "vb_portaal_voor_token" };
 
 export function opzet(w, toegang, extra = {}) {
   const geheimen = [];
@@ -45,7 +47,7 @@ export function opzet(w, toegang, extra = {}) {
     supabase: supabaseBeheer({
       fetchFn: w.fetchFn,
       token: "sb-token",
-      orgSlug: "winco",
+      orgSlug: "voorbeeld",
       slaap: async () => {},
     }),
     maakAdmin: w.maakAdmin,
@@ -77,7 +79,7 @@ export async function naarPortaal(w, toegang = PORTAAL, arg = ARG, extra = {}) {
 }
 
 export const app = (w, naam) => w.staat.apps.find((a) => a.name === naam);
-export const project = (w, naam = "wi-direct") => w.staat.projecten.find((p) => p.name === naam);
+export const project = (w, naam = "vb-direct") => w.staat.projecten.find((p) => p.name === naam);
 export const auth = (w, naam) => w.staat.auth[project(w, naam).ref];
 export const stap = (r, naam) => r.stappen.find((s) => s.stap === naam)?.actie;
 export const ID = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

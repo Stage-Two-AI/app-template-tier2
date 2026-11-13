@@ -30,8 +30,8 @@ import {
 import { CLOUDFLARE_IDENTITEITEN_SQL } from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
 
-const GROEPEN = { kantoor: { domeinen: ["winco.nl"], uitsluiten: ["oud@winco.nl"] } };
-const AFZENDER = "Winco Direct <noreply@wincoapps.com>";
+const GROEPEN = { kantoor: { domeinen: ["voorbeeld.nl"], uitsluiten: ["oud@voorbeeld.nl"] } };
+const AFZENDER = "Voorbeeld Direct <noreply@voorbeeldapps.nl>";
 const DEUR = { groepen: GROEPEN, apps: { direct: ["kantoor"] } };
 const SITEKEY = "0x4AAAAAAAOpenbareSleutel";
 const PORTAAL = {
@@ -45,22 +45,22 @@ const PORTAAL = {
     },
   },
 };
-const HOOKS = { aanmelden: "wi_portaal_voor_aanmelden", token: "wi_portaal_voor_token" };
+const HOOKS = { aanmelden: "vb_portaal_voor_aanmelden", token: "vb_portaal_voor_token" };
 const ARG = {
   app: "direct",
-  hostname: "direct.wincoapps.com",
-  worker: "wi-direct",
-  repo: "Winco-Holland-B-V/direct",
-  voorvoegsel: "wi-",
+  hostname: "direct.voorbeeldapps.nl",
+  worker: "vb-direct",
+  repo: "voorbeeld-org/direct",
+  voorvoegsel: "vb-",
   droogloop: false,
 };
 const SMTP = "re_GeheimeSleutelVanResend123";
 const TURNSTILE = "0x4GeheimVanTurnstile456";
 const NAMEN = {
-  deur: "wi-direct",
-  inlog: "wi-direct-inlog",
-  worker: "wi-direct-worker",
-  publiek: "wi-direct-publiek",
+  deur: "vb-direct",
+  inlog: "vb-direct-inlog",
+  worker: "vb-direct-worker",
+  publiek: "vb-direct-publiek",
 };
 
 function opzet(w, toegang, extra = {}) {
@@ -75,7 +75,7 @@ function opzet(w, toegang, extra = {}) {
     supabase: supabaseBeheer({
       fetchFn: w.fetchFn,
       token: "sb-token",
-      orgSlug: "winco",
+      orgSlug: "voorbeeld",
       slaap: async () => {},
     }),
     maakAdmin: w.maakAdmin,
@@ -94,7 +94,7 @@ function opzet(w, toegang, extra = {}) {
 }
 
 const app = (w, naam) => w.staat.apps.find((a) => a.name === naam);
-const project = (w, naam = "wi-direct") => w.staat.projecten.find((p) => p.name === naam);
+const project = (w, naam = "vb-direct") => w.staat.projecten.find((p) => p.name === naam);
 const auth = (w, naam) => w.staat.auth[project(w, naam).ref];
 const stap = (r, naam) => r.stappen.find((s) => s.stap === naam)?.actie;
 const cfSchrijf = (w) => w.schrijfacties().filter((s) => / cf\//.test(s));
@@ -117,9 +117,9 @@ function eisWorkerDicht(w) {
   assert.ok(worker, "de Access op de Worker staat er");
   assert.deepEqual(
     worker.destinations.map((x) => x.uri),
-    ["wi-direct.stagetwo-acc.workers.dev", "*-wi-direct.stagetwo-acc.workers.dev"],
+    ["vb-direct.stagetwo-acc.workers.dev", "*-vb-direct.stagetwo-acc.workers.dev"],
   );
-  const groep = w.staat.policies.find((p) => p.name === "wi-kantoor");
+  const groep = w.staat.policies.find((p) => p.name === "vb-kantoor");
   assert.deepEqual(worker.policies, [{ id: groep.id, precedence: 1 }]);
   assert.equal(groep.decision, "allow");
   assert.ok(!w.staat.policies.some((p) => p.decision === "bypass"), "nergens een bypass");
@@ -132,7 +132,7 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
   await richtIn(ARG, opzet(w, DEUR));
   const deurId = app(w, NAMEN.deur).id;
   const inlogVoor = structuredClone(app(w, NAMEN.inlog));
-  assert.equal(app(w, NAMEN.deur).domain, "direct.wincoapps.com");
+  assert.equal(app(w, NAMEN.deur).domain, "direct.voorbeeldapps.nl");
 
   // Zonder vinkje: alles staat klaar (mail, hooks, captcha, variabelen), de deur blijft. Ook
   // bij de tweede en de derde keer: een run zonder vinkje is veilig te herhalen.
@@ -156,7 +156,7 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
   );
   assert.equal(r1.cloudflare.deur, deurId);
   assert.ok(
-    r1.waarschuwingen.some((x) => /deur wi-direct staat er nog.*Alles staat klaar/.test(x)),
+    r1.waarschuwingen.some((x) => /deur vb-direct staat er nog.*Alles staat klaar/.test(x)),
     JSON.stringify(r1.waarschuwingen),
   );
   assert.match(r1.watNu.join(" "), /Rol de app uit.*privéadres.*met het vinkje/);
@@ -168,8 +168,8 @@ test("deur weg: een run zonder vinkje laat de deur staan, hoe vaak ook; alleen e
   assert.ok(
     !w.staat.apps.some(
       (a) =>
-        a.domain?.startsWith("direct.wincoapps.com") ||
-        (a.destinations ?? []).some((x) => x.uri.startsWith("direct.wincoapps.com")),
+        a.domain?.startsWith("direct.voorbeeldapps.nl") ||
+        (a.destinations ?? []).some((x) => x.uri.startsWith("direct.voorbeeldapps.nl")),
     ),
     "geen enkele Access-app meer op het domein",
   );
@@ -236,9 +236,9 @@ test("deur terug: van klantportaal terug naar een gewone app zet de inrichting d
   const deur = app(w, NAMEN.deur);
   assert.ok(deur, "de deur staat er weer");
   assert.equal(deur.type, "self_hosted");
-  assert.equal(deur.domain, "direct.wincoapps.com");
-  assert.deepEqual(deur.destinations, [{ type: "public", uri: "direct.wincoapps.com" }]);
-  const groep = w.staat.policies.find((p) => p.name === "wi-kantoor");
+  assert.equal(deur.domain, "direct.voorbeeldapps.nl");
+  assert.deepEqual(deur.destinations, [{ type: "public", uri: "direct.voorbeeldapps.nl" }]);
+  const groep = w.staat.policies.find((p) => p.name === "vb-kantoor");
   assert.deepEqual(deur.policies, [{ id: groep.id, precedence: 1 }]);
   assert.deepEqual(deur.allowed_idps, ["idp-otp"]);
   assert.match(stap(r, "3.5 Access-app op de hostname"), /^aangemaakt/);
@@ -282,15 +282,15 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   // Zonder vinkje: de deur blijft, en de droogloop zegt wat het vinkje zou doen.
   assert.match(
     stap(r, "3.5 Access-app op de hostname"),
-    new RegExp(`wi-direct \\(${deurId}\\) blijft staan.*zonder het vinkje.*veilig te herhalen`),
+    new RegExp(`vb-direct \\(${deurId}\\) blijft staan.*zonder het vinkje.*veilig te herhalen`),
   );
   const mail = stap(r, "3.4 auth-config");
   assert.match(mail, /klantportaal: inloggen per mail aan/);
   assert.match(mail, /code van 8 cijfers.*15 minuten/);
-  assert.match(mail, /Winco Direct <noreply@wincoapps\.com>/);
+  assert.match(mail, /Voorbeeld Direct <noreply@voorbeeldapps\.nl>/);
   assert.match(mail, /mailer_autoconfirm uit/);
   assert.match(mail, /captcha aan \(Turnstile/);
-  assert.match(mail, /wi_portaal_voor_aanmelden.*wi_portaal_voor_token.*30 dagen/);
+  assert.match(mail, /vb_portaal_voor_aanmelden.*vb_portaal_voor_token.*30 dagen/);
   assert.ok(!mail.includes("e-mail-inlog uit"));
   assert.ok(app(w, NAMEN.deur), "de deur staat er nog");
   assert.deepEqual(
@@ -316,7 +316,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   assert.match(
     stap(r, "3.5 Access-app op de hostname"),
     new RegExp(
-      `gepland: wi-direct \\(${deurId}\\) weghalen; verder wijzigt deze run niets.*open voor iedereen.*workers\\.dev en de previews blijven dicht`,
+      `gepland: vb-direct \\(${deurId}\\) weghalen; verder wijzigt deze run niets.*open voor iedereen.*workers\\.dev en de previews blijven dicht`,
     ),
   );
 
@@ -327,7 +327,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   assert.deepEqual(w.schrijfacties(), []);
   assert.equal(
     stap(r, "3.5 Access-app op de hostname"),
-    "gepland: wi-direct op direct.wincoapps.com",
+    "gepland: vb-direct op direct.voorbeeldapps.nl",
   );
   assert.match(stap(r, "3.4 auth-config"), /e-mail-inlog uit$/);
   assert.ok(
@@ -360,7 +360,7 @@ test("workers.dev en previews blijven dicht bij een klantportaal, ook na Toegang
   await richtIn(ARG, opzet(w, DEUR));
   await naarPortaal(w);
   eisWorkerDicht(w);
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   eisWorkerDicht(w);
 
   // Een tweede groep erbij: de Access op de Worker en de inlogdienst volgen, het domein
@@ -369,8 +369,8 @@ test("workers.dev en previews blijven dicht bij een klantportaal, ook na Toegang
     groepen: { ...GROEPEN, extern: { adressen: ["hulp@bureau.nl"] } },
     apps: { direct: { ...PORTAAL.apps.direct, groepen: ["kantoor", "extern"] } },
   };
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, meer));
-  const ids = ["wi-kantoor", "wi-extern"].map((n) => w.staat.policies.find((p) => p.name === n).id);
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, meer));
+  const ids = ["vb-kantoor", "vb-extern"].map((n) => w.staat.policies.find((p) => p.name === n).id);
   for (const naam of [NAMEN.worker, NAMEN.inlog]) {
     assert.deepEqual(
       app(w, naam).policies.map((p) => p.id),
@@ -381,7 +381,7 @@ test("workers.dev en previews blijven dicht bij een klantportaal, ook na Toegang
   assert.equal(app(w, NAMEN.deur), undefined);
   assert.deepEqual(
     app(w, NAMEN.worker).destinations.map((x) => x.uri),
-    ["wi-direct.stagetwo-acc.workers.dev", "*-wi-direct.stagetwo-acc.workers.dev"],
+    ["vb-direct.stagetwo-acc.workers.dev", "*-vb-direct.stagetwo-acc.workers.dev"],
   );
   // De redirect-lijst van Supabase noemt het subdomein van het account, nooit een wildcard.
   assert.ok(!auth(w).uri_allow_list.includes("*.workers.dev"));
@@ -430,9 +430,14 @@ test("een klantportaal in de tijdelijke stand (alleen workers.dev) wordt geweige
 
 test("een Access-app van iemand anders op het domein laat ook een klantportaal stoppen", async () => {
   const w = nepWolk({
-    apps: [{ id: "x", name: "met de hand", type: "self_hosted", domain: "direct.wincoapps.com" }],
+    apps: [
+      { id: "x", name: "met de hand", type: "self_hosted", domain: "direct.voorbeeldapps.nl" },
+    ],
   });
-  await assert.rejects(() => richtIn(ARG, opzet(w, PORTAAL)), /bewaakt direct\.wincoapps\.com al/);
+  await assert.rejects(
+    () => richtIn(ARG, opzet(w, PORTAAL)),
+    /bewaakt direct\.voorbeeldapps\.nl al/,
+  );
   assert.deepEqual(w.schrijfacties(), []);
 });
 
@@ -452,7 +457,7 @@ test("van publieke paden naar klantportaal: de app met de bypass gaat weg, de by
     assert.ok(!app(w, naam).policies.some((p) => p.id === bypass.id), `${naam} zonder bypass`);
   }
   // Toegang bijwerken ruimt daarna de ongebruikte bypass-policy op.
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.ok(!w.staat.policies.some((p) => p.decision === "bypass"));
 });
 
@@ -524,8 +529,8 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
   assert.equal(a.smtp_port, "465");
   assert.equal(a.smtp_user, "resend");
   assert.equal(a.smtp_pass, SMTP);
-  assert.equal(a.smtp_admin_email, "noreply@wincoapps.com");
-  assert.equal(a.smtp_sender_name, "Winco Direct");
+  assert.equal(a.smtp_admin_email, "noreply@voorbeeldapps.nl");
+  assert.equal(a.smtp_sender_name, "Voorbeeld Direct");
   assert.equal(a.mailer_otp_length, 8);
   assert.equal(a.mailer_otp_exp, 900);
   // De rem.
@@ -545,10 +550,10 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
   assert.equal(a.sessions_inactivity_timeout, 720);
   assert.deepEqual(SESSIE, { sessions_inactivity_timeout: 720 });
   // De adressen om naar terug te keren: het domein en de previews van dit account.
-  assert.equal(a.site_url, "https://direct.wincoapps.com");
+  assert.equal(a.site_url, "https://direct.voorbeeldapps.nl");
   assert.equal(
     a.uri_allow_list,
-    "https://direct.wincoapps.com/**,https://pr-*-wi-direct.stagetwo-acc.workers.dev/**,https://actueel-wi-direct.stagetwo-acc.workers.dev/**",
+    "https://direct.voorbeeldapps.nl/**,https://pr-*-vb-direct.stagetwo-acc.workers.dev/**,https://actueel-vb-direct.stagetwo-acc.workers.dev/**",
   );
   // disable_signup blijft onaangeroerd, en er staat geen veld in dat de API niet kent.
   const gestuurd = w.aanroepen
@@ -570,9 +575,9 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
 });
 
 test("mail: één sjabloon voor de drie soorten, in de vorm van het lokale sjabloon van de app: de code in id=code en een link met token_hash naar /login", async () => {
-  const m = inlogmail("Winco Direct");
+  const m = inlogmail("Voorbeeld Direct");
   assert.equal(INLOGLINK, "{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=email");
-  assert.equal(m.onderwerp, "Inloggen bij Winco Direct");
+  assert.equal(m.onderwerp, "Inloggen bij Voorbeeld Direct");
   assert.match(m.inhoud, /<span id="code">\{\{ \.Token \}\}<\/span>/);
   assert.ok(m.inhoud.includes(`<a id="link" href="${INLOGLINK}">`));
   assert.match(m.inhoud, /15 minuten/);
@@ -625,13 +630,13 @@ test("mail: zonder naam in de afzender is de naam die van de app", async () => {
       direct: {
         groepen: ["kantoor"],
         klantportaal: true,
-        afzender: "Noreply@WincoApps.com",
+        afzender: "Noreply@VoorbeeldApps.nl",
         turnstile_sitekey: SITEKEY,
       },
     },
   };
   await richtIn(ARG, opzet(w, t));
-  assert.equal(auth(w).smtp_admin_email, "noreply@wincoapps.com");
+  assert.equal(auth(w).smtp_admin_email, "noreply@voorbeeldapps.nl");
   assert.equal(auth(w).smtp_sender_name, "direct");
 });
 
@@ -826,13 +831,13 @@ test("de testdatabase van een klantportaal blijft zoals bij elke app: e-mail all
   const arg = { ...ARG, testdatabase: true };
   await richtIn(arg, opzet(w, PORTAAL));
   await richtIn(arg, opzet(gewoon, DEUR));
-  const test = auth(w, "wi-direct-test");
-  assert.deepEqual(test, auth(gewoon, "wi-direct-test"), "exact als bij een gewone app");
+  const test = auth(w, "vb-direct-test");
+  assert.deepEqual(test, auth(gewoon, "vb-direct-test"), "exact als bij een gewone app");
   assert.equal(test.mailer_autoconfirm, true);
   assert.equal(test.hook_before_user_created_enabled, true);
   assert.ok(!Object.keys(test).some((k) => /^smtp_|rate_limit|captcha|mailer_otp/.test(k)));
   // Het SMTP-wachtwoord gaat alleen naar productie.
-  const ref = project(w, "wi-direct-test").ref;
+  const ref = project(w, "vb-direct-test").ref;
   assert.ok(
     !w.aanroepen.some(
       (a) => (a.pad ?? "").includes(ref) && JSON.stringify(a.body ?? "").includes(SMTP),
@@ -840,7 +845,7 @@ test("de testdatabase van een klantportaal blijft zoals bij elke app: e-mail all
   );
   // De hook van de testdatabase is dezelfde SQL.
   const sql = (x) =>
-    x.staat.sqlOp.filter((q) => q.ref === project(x, "wi-direct-test").ref).map((q) => q.query);
+    x.staat.sqlOp.filter((q) => q.ref === project(x, "vb-direct-test").ref).map((q) => q.query);
   assert.deepEqual(sql(w), sql(gewoon));
   assert.equal(w.staat.ghVariabelen.repo.PREVIEW_VITE_INLOGDIENST, "cloudflare");
 });
@@ -880,15 +885,15 @@ const MENSEN = () => [
   // Medewerkers via Cloudflare.
   {
     id: ID(5),
-    email: "anna@winco.nl",
-    identities: [cf("anna@winco.nl")],
+    email: "anna@voorbeeld.nl",
+    identities: [cf("anna@voorbeeld.nl")],
     app_metadata: { provider: "custom:cloudflare", providers: ["custom:cloudflare"] },
   },
   // Vertrokken: staat in uitsluiten.
   {
     id: ID(6),
-    email: "oud@winco.nl",
-    identities: [cf("oud@winco.nl")],
+    email: "oud@voorbeeld.nl",
+    identities: [cf("oud@voorbeeld.nl")],
     app_metadata: { provider: "custom:cloudflare", providers: ["custom:cloudflare"] },
   },
   // Vertrokken en eerder al ingetrokken.
@@ -926,7 +931,7 @@ const afgemeld = (w) =>
 
 test("geen ban voor klanten: Toegang bijwerken laat bij een klantportaal elk account zonder Cloudflare-inlog met rust", async () => {
   const w = await portaalMet(MENSEN());
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   for (const n of [1, 2, 3, 4]) {
     assert.ok(!bans(w).includes(ID(n)), `klant ${n} is niet geband`);
     assert.ok(!afgemeld(w).includes(ID(n)), `klant ${n} is niet afgemeld`);
@@ -947,7 +952,7 @@ test("geen ban voor klanten: ook niet met honderden klanten en geen enkele medew
     app_metadata: { provider: "email", providers: ["email"] },
   }));
   const w = await portaalMet(klanten);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), []);
   assert.deepEqual(afgemeld(w), []);
   assert.deepEqual(r.klanten, { direct: 1500 });
@@ -958,29 +963,29 @@ test("geen ban voor klanten: een klant met een adres op het domein van de medewe
   const w = await portaalMet([
     {
       id: ID(1),
-      email: "stagiair@winco.nl",
-      identities: [mail("stagiair@winco.nl")],
+      email: "stagiair@voorbeeld.nl",
+      identities: [mail("stagiair@voorbeeld.nl")],
       app_metadata: { providers: ["email"] },
     },
     // Uitgesloten adres, maar alleen per mail: geen medewerkersaccount, dus geen oordeel.
     {
       id: ID(2),
-      email: "oud@winco.nl",
-      identities: [mail("oud@winco.nl")],
+      email: "oud@voorbeeld.nl",
+      identities: [mail("oud@voorbeeld.nl")],
       app_metadata: { providers: ["email"] },
     },
   ]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), []);
   assert.deepEqual(r.klanten, { direct: 2 });
 });
 
 test("wel ban voor een vertrokken medewerker: ban én afmelden, ook bij een klantportaal", async () => {
   const w = await portaalMet(MENSEN());
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w).sort(), [ID(6), ID(8)]);
   assert.deepEqual(afgemeld(w).sort(), [ID(6), ID(8)]);
-  assert.deepEqual(r.ingetrokken, { direct: ["oud@winco.nl", "hulp@bureau.nl"] });
+  assert.deepEqual(r.ingetrokken, { direct: ["oud@voorbeeld.nl", "hulp@bureau.nl"] });
   for (const a of w.aanroepen.filter((x) => x.methode === "updateUserById")) {
     assert.equal(a.body.ban_duration, "876000h");
   }
@@ -990,7 +995,7 @@ test("wel ban voor een vertrokken medewerker: ban én afmelden, ook bij een klan
   // Een tweede run doet niets meer.
   w.aanroepen.length = 0;
   w.staat.sql.length = 0;
-  await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), []);
   assert.deepEqual(afgemeld(w), []);
 });
@@ -998,10 +1003,10 @@ test("wel ban voor een vertrokken medewerker: ban én afmelden, ook bij een klan
 test("wel ban voor een vertrokken medewerker: de Cloudflare-inlog komt uit de database, want de gebruikerslijst geeft geen identiteiten mee", async () => {
   // Alleen de identiteit zegt dat dit een medewerker is: geen app_metadata.
   const w = await portaalMet([
-    { id: ID(1), email: "oud@winco.nl", identities: [cf("oud@winco.nl")] },
+    { id: ID(1), email: "oud@voorbeeld.nl", identities: [cf("oud@voorbeeld.nl")] },
     { id: ID(2), email: "klant@elders.nl", identities: [mail("klant@elders.nl")] },
   ]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), [ID(1)]);
   assert.deepEqual(r.klanten, { direct: 1 });
   // Eén leesvraag naar auth.identities op het productieproject, vóór de eerste ban.
@@ -1019,7 +1024,7 @@ test("wel ban voor een vertrokken medewerker: ook als de database de identiteit 
   const w = await portaalMet([
     {
       id: ID(1),
-      email: "oud@winco.nl",
+      email: "oud@voorbeeld.nl",
       app_metadata: { provider: "email", providers: ["email", "custom:cloudflare"] },
     },
     { id: ID(2), email: "hulp@bureau.nl", app_metadata: { provider: "custom:cloudflare" } },
@@ -1030,7 +1035,7 @@ test("wel ban voor een vertrokken medewerker: ook als de database de identiteit 
     },
   ]);
   w.staat.identiteitenAntwoord = [];
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w).sort(), [ID(1), ID(2)]);
   assert.deepEqual(r.klanten, { direct: 1 });
 });
@@ -1040,43 +1045,43 @@ test("een account met een Cloudflare- én een e-mailinlog: een vertrokken medewe
     // Was medewerker, logde ook per mail in. Uit de groep: het hele account dicht.
     {
       id: ID(1),
-      email: "oud@winco.nl",
-      identities: [mail("oud@winco.nl"), cf("oud@winco.nl")],
+      email: "oud@voorbeeld.nl",
+      identities: [mail("oud@voorbeeld.nl"), cf("oud@voorbeeld.nl")],
       app_metadata: { provider: "email", providers: ["email", "custom:cloudflare"] },
     },
     // Is medewerker en logde ook per mail in: blijft.
     {
       id: ID(2),
-      email: "anna@winco.nl",
-      identities: [mail("anna@winco.nl"), cf("anna@winco.nl")],
+      email: "anna@voorbeeld.nl",
+      identities: [mail("anna@voorbeeld.nl"), cf("anna@voorbeeld.nl")],
       app_metadata: { provider: "email", providers: ["email", "custom:cloudflare"] },
     },
-    // Zette zelf een ander adres op zijn account; Cloudflare kent hem als oud@winco.nl.
+    // Zette zelf een ander adres op zijn account; Cloudflare kent hem als oud@voorbeeld.nl.
     {
       id: ID(3),
       email: "prive@gmail.com",
-      identities: [cf("Oud@Winco.nl")],
+      identities: [cf("Oud@Voorbeeld.nl")],
       app_metadata: { providers: ["custom:cloudflare"] },
     },
-    // Medewerker met een eigen adres op het account: Cloudflare kent hem als anna@winco.nl.
+    // Medewerker met een eigen adres op het account: Cloudflare kent hem als anna@voorbeeld.nl.
     {
       id: ID(4),
       email: "anna.prive@gmail.com",
-      identities: [cf("anna@winco.nl")],
+      identities: [cf("anna@voorbeeld.nl")],
       app_metadata: { providers: ["custom:cloudflare"] },
     },
   ]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w).sort(), [ID(1), ID(3)]);
   assert.deepEqual(afgemeld(w).sort(), [ID(1), ID(3)]);
-  assert.deepEqual(r.ingetrokken, { direct: ["oud@winco.nl", "prive@gmail.com"] });
+  assert.deepEqual(r.ingetrokken, { direct: ["oud@voorbeeld.nl", "prive@gmail.com"] });
   assert.deepEqual(r.klanten, { direct: 0 }, "geen van de vier telt als klant");
   // Dat het hele account dicht is, ook de klantkant, staat in het resultaat.
   const ookPerMail = r.waarschuwingen.filter((x) =>
     /kon met hetzelfde account ook per mail/.test(x),
   );
   assert.equal(ookPerMail.length, 1);
-  assert.match(ookPerMail[0], /oud@winco\.nl/);
+  assert.match(ookPerMail[0], /oud@voorbeeld\.nl/);
 });
 
 test("een Cloudflare-account zonder eigen adres wordt beoordeeld op het adres van Cloudflare, en gemeld", async () => {
@@ -1085,29 +1090,29 @@ test("een Cloudflare-account zonder eigen adres wordt beoordeeld op het adres va
     // tweede account zonder adres.
     {
       id: ID(1),
-      email: "anna@winco.nl",
-      identities: [mail("anna@winco.nl")],
+      email: "anna@voorbeeld.nl",
+      identities: [mail("anna@voorbeeld.nl")],
       app_metadata: { providers: ["email"] },
     },
     {
       id: ID(2),
-      identities: [cf("anna@winco.nl")],
+      identities: [cf("anna@voorbeeld.nl")],
       app_metadata: { providers: ["custom:cloudflare"] },
     },
     // Hetzelfde, maar van iemand die niet meer in de groep staat: dicht.
     {
       id: ID(3),
-      identities: [cf("oud@winco.nl")],
+      identities: [cf("oud@voorbeeld.nl")],
       app_metadata: { providers: ["custom:cloudflare"] },
     },
   ]);
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(bans(w), [ID(3)]);
   assert.deepEqual(afgemeld(w), [ID(3)]);
   assert.deepEqual(r.klanten, { direct: 1 });
   assert.ok(
     r.waarschuwingen.some((x) =>
-      /anna@winco\.nl heeft via Cloudflare een account zonder adres/.test(x),
+      /anna@voorbeeld\.nl heeft via Cloudflare een account zonder adres/.test(x),
     ),
     JSON.stringify(r.waarschuwingen),
   );
@@ -1117,7 +1122,7 @@ test("geeft de database geen lijst terug op de vraag naar de Cloudflare-inlogs, 
   for (const raar of [{ rows: [] }, "ok", null, [{ email: "x@y.nl" }]]) {
     const w = await portaalMet(MENSEN());
     w.staat.identiteitenAntwoord = raar;
-    const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+    const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
     assert.match(
       r.fouten.join(" "),
       /direct: het intrekken is niet.*auth\.identities.*er is niets ingetrokken/,
@@ -1131,10 +1136,10 @@ test("geeft de database geen lijst terug op de vraag naar de Cloudflare-inlogs, 
 test("een medewerker die weer in de groep komt, krijgt bij een klantportaal de ban opgeheven; een geblokkeerde klant niet", async () => {
   const w = await portaalMet(MENSEN());
   const terug = {
-    groepen: { kantoor: { domeinen: ["winco.nl"], adressen: ["ex@bureau.nl"] } },
+    groepen: { kantoor: { domeinen: ["voorbeeld.nl"], adressen: ["ex@bureau.nl"] } },
     apps: PORTAAL.apps,
   };
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, terug));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, terug));
   const opgeheven = w.aanroepen
     .filter((a) => a.methode === "updateUserById" && a.body.ban_duration === "none")
     .map((a) => a.body.id);
@@ -1148,12 +1153,12 @@ test("Toegang bijwerken haalt de deur niet zelf weg: staat hij er nog, dan zegt 
   await richtIn(ARG, opzet(w, DEUR));
   const deurId = app(w, NAMEN.deur).id;
   w.aanroepen.length = 0;
-  const droog = await werkToegangBij({ voorvoegsel: "wi-", droogloop: true }, opzet(w, PORTAAL));
+  const droog = await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, PORTAAL));
   assert.deepEqual(w.schrijfacties(), []);
   assert.ok(
-    droog.acties.some((a) => /klantportaal direct: de deur wi-direct staat er nog/.test(a)),
+    droog.acties.some((a) => /klantportaal direct: de deur vb-direct staat er nog/.test(a)),
   );
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.equal(app(w, NAMEN.deur)?.id, deurId, "de deur staat er nog");
   assert.ok(r.acties.some((a) => /dat doet alleen App inrichten met het vinkje/.test(a)));
   assert.equal(auth(w).external_email_enabled, false, "en mail staat nog uit");
@@ -1165,23 +1170,23 @@ test("de testdatabase van een klantportaal: Toegang bijwerken trekt daar in zoal
   const w = nepWolk();
   await richtIn({ ...ARG, testdatabase: true }, opzet(w, PORTAAL));
   const url = (naam) => `https://${project(w, naam).ref}.supabase.co`;
-  w.staat.gebruikersOp[url("wi-direct")] = MENSEN();
-  w.staat.gebruikersOp[url("wi-direct-test")] = [
-    { id: ID(21), email: "anna@winco.nl" },
+  w.staat.gebruikersOp[url("vb-direct")] = MENSEN();
+  w.staat.gebruikersOp[url("vb-direct-test")] = [
+    { id: ID(21), email: "anna@voorbeeld.nl" },
     { id: ID(22), email: "vreemd@elders.nl" },
     { id: ID(23), email: "testgebruiker@stagetwo.nl" },
   ];
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, PORTAAL));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, PORTAAL));
   assert.deepEqual(r.ingetrokken, {
-    direct: ["oud@winco.nl", "hulp@bureau.nl"],
+    direct: ["oud@voorbeeld.nl", "hulp@bureau.nl"],
     "direct (test)": ["vreemd@elders.nl"],
   });
   assert.deepEqual(r.klanten, { direct: 4 });
   // De vraag naar auth.identities gaat alleen naar productie.
   const vragen = w.aanroepen.filter((a) => a.body?.query === CLOUDFLARE_IDENTITEITEN_SQL);
   assert.deepEqual(
-    vragen.map((a) => a.pad.includes(project(w, "wi-direct-test").ref)),
+    vragen.map((a) => a.pad.includes(project(w, "vb-direct-test").ref)),
     [false],
   );
 });
@@ -1194,18 +1199,18 @@ test("klantportaal geldt per app: een gewone app in hetzelfde bestand trekt in z
   const w = nepWolk();
   await richtIn(ARG, opzet(w, twee));
   await richtIn(
-    { ...ARG, app: "intern", hostname: "intern.wincoapps.com", worker: "wi-intern" },
+    { ...ARG, app: "intern", hostname: "intern.voorbeeldapps.nl", worker: "vb-intern" },
     opzet(w, twee),
   );
-  assert.ok(app(w, "wi-intern"), "de gewone app heeft zijn deur");
-  assert.equal(app(w, "wi-direct"), undefined);
-  assert.equal(auth(w, "wi-intern").external_email_enabled, false);
-  assert.equal(auth(w, "wi-intern").mailer_autoconfirm, true);
+  assert.ok(app(w, "vb-intern"), "de gewone app heeft zijn deur");
+  assert.equal(app(w, "vb-direct"), undefined);
+  assert.equal(auth(w, "vb-intern").external_email_enabled, false);
+  assert.equal(auth(w, "vb-intern").mailer_autoconfirm, true);
   const url = (naam) => `https://${project(w, naam).ref}.supabase.co`;
-  w.staat.gebruikersOp[url("wi-direct")] = [{ id: ID(1), email: "klant@elders.nl" }];
-  w.staat.gebruikersOp[url("wi-intern")] = [{ id: ID(2), email: "klant@elders.nl" }];
+  w.staat.gebruikersOp[url("vb-direct")] = [{ id: ID(1), email: "klant@elders.nl" }];
+  w.staat.gebruikersOp[url("vb-intern")] = [{ id: ID(2), email: "klant@elders.nl" }];
   w.aanroepen.length = 0;
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, twee));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, twee));
   assert.deepEqual(r.ingetrokken, { intern: ["klant@elders.nl"] });
   assert.deepEqual(r.klanten, { direct: 1 });
   assert.deepEqual(bans(w), [ID(2)]);
@@ -1214,7 +1219,7 @@ test("klantportaal geldt per app: een gewone app in hetzelfde bestand trekt in z
 test("terug naar een gewone app bant geen enkele klant: vóór App inrichten slaat de rem aan (medewerkers wel, klanten niet, rood), erna zijn de klanten afgemeld en gemarkeerd", async () => {
   const w = await portaalMet(MENSEN());
   // Het bestand zegt: gewone app. App inrichten heeft nog niet gedraaid: mail staat nog aan.
-  const r = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   // De vertrokken medewerkers gaan er gewoon uit; geen klant wordt geraakt.
   assert.deepEqual(bans(w).sort(), [ID(6), ID(8)]);
   assert.deepEqual(afgemeld(w).sort(), [ID(6), ID(8)]);
@@ -1235,7 +1240,7 @@ test("terug naar een gewone app bant geen enkele klant: vóór App inrichten sla
   w.aanroepen.length = 0;
   let r2;
   for (let keer = 0; keer < 10; keer += 1) {
-    r2 = await werkToegangBij({ voorvoegsel: "wi-" }, opzet(w, DEUR));
+    r2 = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
   }
   assert.deepEqual(bans(w), []);
   assert.deepEqual(r2.klanten, { direct: 4 });

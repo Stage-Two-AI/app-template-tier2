@@ -179,37 +179,37 @@ test("vertaling: idp_groepen zonder gekoppelde IdP geeft een duidelijke fout, ge
   assert.deepEqual(p.include, [{ azureAD: { id: "abc-123", identity_provider_id: "idp-entra" } }]);
 });
 
-test("voorvoegsel: zonder voorvoegsel geen policy, met rp- krijgt de policy rp-", () => {
+test("voorvoegsel: zonder voorvoegsel geen policy, met kl- krijgt de policy kl-", () => {
   assert.throws(() => policyVoorGroep("klant", { domeinen: ["klant.nl"] }), /voorvoegsel/);
   assert.throws(
-    () => policyVoorGroep("klant", { domeinen: ["klant.nl"] }, { voorvoegsel: "RP" }),
+    () => policyVoorGroep("klant", { domeinen: ["klant.nl"] }, { voorvoegsel: "KL" }),
     /voorvoegsel/,
   );
-  const p = policyVoorGroep("klant", { domeinen: ["klant.nl"] }, { voorvoegsel: "rp-" });
-  assert.equal(p.name, "rp-klant");
+  const p = policyVoorGroep("klant", { domeinen: ["klant.nl"] }, { voorvoegsel: "kl-" });
+  assert.equal(p.name, "kl-klant");
 });
 
 test("voorvoegsel: de hookfunctie volgt het voorvoegsel en is veilig voor SQL", () => {
   assert.equal(hookFunctie("cf-proef-"), "cf_proef_voor_aanmelden");
-  assert.equal(hookFunctie("rp-"), "rp_voor_aanmelden");
+  assert.equal(hookFunctie("kl-"), "kl_voor_aanmelden");
   assert.match(hookFunctie("a1b2-"), /^[a-z0-9_]+$/);
   for (const fout of [
     "a1-b2-",
     "cf-",
     undefined,
     "",
-    "rp",
-    "Rp-",
-    "rp_",
-    "1rp-",
-    "rp-'; drop-",
+    "kl",
+    "Kl-",
+    "kl_",
+    "1kl-",
+    "kl-'; drop-",
     `${"a".repeat(17)}-`,
   ]) {
     assert.throws(() => hookFunctie(fout), /voorvoegsel/, String(fout));
   }
 });
 
-test("synchroniseren met rp-: alleen rp-policies zijn van ons, cf-proef- blijft buiten schot", async () => {
+test("synchroniseren met kl-: alleen kl-policies zijn van ons, cf-proef- blijft buiten schot", async () => {
   const w = nepWolk({
     policies: [{ id: "ander", name: "cf-proef-oud", decision: "allow", include: [] }],
   });
@@ -219,11 +219,11 @@ test("synchroniseren met rp-: alleen rp-policies zijn van ons, cf-proef- blijft 
     accountId: "acc",
     teamDomein: "stagetwo",
   });
-  const s = await synchroniseerPolicies(cf, KLANT, { voorvoegsel: "rp-" });
+  const s = await synchroniseerPolicies(cf, KLANT, { voorvoegsel: "kl-" });
   assert.deepEqual(w.staat.policies.map((p) => p.name).sort(), [
     "cf-proef-oud",
-    "rp-klant",
-    "rp-stagetwo",
+    "kl-klant",
+    "kl-stagetwo",
   ]);
   assert.deepEqual(s.overbodig, [], "een policy met een ander voorvoegsel is nooit overbodig");
 });
@@ -231,8 +231,8 @@ test("synchroniseren met rp-: alleen rp-policies zijn van ons, cf-proef- blijft 
 test("synchroniseren: overbodig is alleen vv plus een groepsnaam, nooit een geneste of vreemde naam", async () => {
   const w = nepWolk({
     policies: [
-      { id: "oud", name: "rp-oud", decision: "allow", include: [] },
-      { id: "vreemd", name: "rp-Handmatig Gemaakt", decision: "allow", include: [] },
+      { id: "oud", name: "kl-oud", decision: "allow", include: [] },
+      { id: "vreemd", name: "kl-Handmatig Gemaakt", decision: "allow", include: [] },
       { id: "proef", name: "cf-proef-stagetwo", decision: "allow", include: [] },
     ],
   });
@@ -242,7 +242,7 @@ test("synchroniseren: overbodig is alleen vv plus een groepsnaam, nooit een gene
     accountId: "acc",
     teamDomein: "stagetwo",
   });
-  const s = await synchroniseerPolicies(cf, KLANT, { voorvoegsel: "rp-" });
+  const s = await synchroniseerPolicies(cf, KLANT, { voorvoegsel: "kl-" });
   assert.deepEqual(
     s.overbodig.map((p) => p.id),
     ["oud"],
@@ -598,7 +598,7 @@ test("aanmeld-hook van de testdatabase: e-mail alleen voor testaccounts, Cloudfl
 const PORTAAL_APP = {
   groepen: ["klant"],
   klantportaal: true,
-  afzender: "Winco Direct <noreply@wincoapps.com>",
+  afzender: "Voorbeeld Direct <noreply@voorbeeldapps.nl>",
   turnstile_sitekey: "0x4AAAAAAAOpenbareSleutel",
 };
 const metApp = (app) => ({ groepen: KLANT.groepen, apps: { direct: app } });
@@ -608,8 +608,8 @@ test("klantportaal: de lange vorm met klantportaal, afzender en captcha is geldi
   assert.equal(isKlantportaal(t, "direct"), true);
   assert.equal(captchaVanApp(t, "direct"), true);
   assert.deepEqual(afzenderVanApp(t, "direct"), {
-    adres: "noreply@wincoapps.com",
-    naam: "Winco Direct",
+    adres: "noreply@voorbeeldapps.nl",
+    naam: "Voorbeeld Direct",
   });
   assert.deepEqual(groepenVanApp(t, "direct"), ["klant"]);
   assert.deepEqual(publiekVanApp(t, "direct"), []);
@@ -709,11 +709,11 @@ test("klantportaal: zonder afzender, of met een afzender die geen adres is of HT
   for (const fout of [
     "",
     "geen-adres",
-    "Winco <geen-adres>",
-    "<b>Winco</b> <a@b.nl>",
-    "Winco {{ .Token }} <a@b.nl>",
-    'Winco" <a@b.nl>',
-    "Winco <a@b.nl> <c@d.nl>",
+    "Voorbeeld <geen-adres>",
+    "<b>Voorbeeld</b> <a@b.nl>",
+    "Voorbeeld {{ .Token }} <a@b.nl>",
+    'Voorbeeld" <a@b.nl>',
+    "Voorbeeld <a@b.nl> <c@d.nl>",
     "a@b.nl, c@d.nl",
     " <a@b.nl>",
     42,

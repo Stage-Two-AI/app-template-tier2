@@ -21,9 +21,9 @@ Wat erin zit:
 
 Alles wat het script aanmaakt heeft een naam die begint met het voorvoegsel. Dat is een
 verplichte instelling: `--voorvoegsel <vv->` of de omgevingsvariabele
-`BEHEER_VOORVOEGSEL` (de vlag gaat voor). De proef gebruikt `cf-proef-`, Richplant `rp-`.
+`BEHEER_VOORVOEGSEL` (de vlag gaat voor). De proef gebruikt `cf-proef-`, een klant bijvoorbeeld `kl-`.
 Het patroon is streng: een kleine letter, hoogstens vijftien kleine letters of cijfers,
-en precies één streepje, aan het eind (`rp-`, niet `rp-x-`). `cf-proef-` is de enige
+en precies één streepje, aan het eind (`kl-`, niet `kl-x-`). `cf-proef-` is de enige
 uitzondering; `cf-` zelf wordt geweigerd. Zo kan geen voorvoegsel met een ander
 voorvoegsel beginnen, en neemt opruimen met het ene nooit iets van het andere mee.
 Zonder voorvoegsel start het script niet.
@@ -33,7 +33,7 @@ namen die het script voor de app en de groepen in `toegang.json` maakt; een ande
 met het voorvoegsel blijft staan, met een waarschuwing. Bestaat er iets met dezelfde
 naam zónder voorvoegsel, of staat er al een andere Access-app op de hostname, dan stopt
 het script voordat het iets wijzigt. De aanmeld-hookfunctie van de testdatabase heet ook
-naar het voorvoegsel (`cf_proef_voor_aanmelden`, `rp_voor_aanmelden`).
+naar het voorvoegsel (`cf_proef_voor_aanmelden`, `kl_voor_aanmelden`).
 
 ## Voorwaarden (door Christijn)
 
@@ -279,7 +279,7 @@ honderden mensen van buiten het bedrijf zelf inloggen. In `toegang.json`:
   "direct": {
     "groepen": ["kantoor"],
     "klantportaal": true,
-    "afzender": "Winco Direct <noreply@wincoapps.com>",
+    "afzender": "Voorbeeld Direct <noreply@voorbeeldapps.nl>",
     "turnstile_sitekey": "0x4AAAAAAA..."
   }
 }
@@ -309,7 +309,7 @@ Alles gaat via GitHub in de browser; je hebt geen eigen computer met commando's 
 
 | Waar | Wat je doet | Waar het heen gaat |
 |---|---|---|
-| Resend | het domein van de afzender verifiëren (bijvoorbeeld `wincoapps.com`) en een sleutel maken met alleen het recht om te versturen | secret `SMTP_WACHTWOORD` in de omgeving van de beheer-repo (Settings, Environments, waar ook `SUPABASE_ACCESS_TOKEN` staat) |
+| Resend | het domein van de afzender verifiëren (bijvoorbeeld `voorbeeldapps.nl`) en een sleutel maken met alleen het recht om te versturen | secret `SMTP_WACHTWOORD` in de omgeving van de beheer-repo (Settings, Environments, waar ook `SUPABASE_ACCESS_TOKEN` staat) |
 | Cloudflare, Turnstile, Add widget | een widget maken voor het domein van de app, stand Managed. Je krijgt twee sleutels | de geheime (Secret Key) als secret `TURNSTILE_GEHEIM` op dezelfde plek. De openbare (Site Key) bewaar je voor stap 2 |
 
 - Goed als: beide secrets in de lijst van de omgeving staan.
@@ -788,8 +788,8 @@ proef mag terugvallen op `GITHUB_REPOSITORY`. `--wrangler` wijst naar de
 `wrangler.jsonc` van de uitgecheckte app-repo. Bijvoorbeeld:
 
 ```sh
-node beheer/inrichten-cloudflare.mjs --voorvoegsel rp- --app richplant \
-  --repo Richplant-BV/richplant-start --wrangler app/wrangler.jsonc --droogloop
+node beheer/inrichten-cloudflare.mjs --voorvoegsel kl- --app shop \
+  --repo klant-org/shop-start --wrangler app/wrangler.jsonc --droogloop
 ```
 
 `gh` gebruikt `GH_TOKEN`. In een beheer-repo is dat het kortlevende token van de GitHub

@@ -64,7 +64,7 @@ function opzet(w, extra = {}) {
 // ---------------------------------------------------------------- argumenten
 
 const PROEF = ["--voorvoegsel", "cf-proef-"];
-const RP = ["--voorvoegsel", "rp-", "--repo", "Richplant-BV/richplant-start"];
+const KL = ["--voorvoegsel", "kl-", "--repo", "klant-org/shop-start"];
 
 test("argumenten: app verplicht, modi sluiten elkaar uit", () => {
   assert.deepEqual(leesArgumenten([...PROEF, "--app", "cf-proef", "--droogloop"]), {
@@ -114,54 +114,47 @@ test("argumenten: zonder voorvoegsel stopt het script met een duidelijke melding
     () => leesArgumenten(["--app", "cf-proef", "--droogloop"], {}),
     /voorvoegsel ontbreekt.*--voorvoegsel.*BEHEER_VOORVOEGSEL/,
   );
-  for (const fout of ["rp", "RP-", "rp_", "-rp-", "rp-'x-", `${"a".repeat(17)}-`]) {
+  for (const fout of ["kl", "KL-", "kl_", "-kl-", "kl-'x-", `${"a".repeat(17)}-`]) {
     assert.throws(() => leesArgumenten(["--voorvoegsel", fout, "--app", "a"]), /voorvoegsel/, fout);
   }
-  const uitEnv = leesArgumenten(["--toegang"], { BEHEER_VOORVOEGSEL: "rp-" });
-  assert.equal(uitEnv.voorvoegsel, "rp-", "BEHEER_VOORVOEGSEL telt als instelling");
+  const uitEnv = leesArgumenten(["--toegang"], { BEHEER_VOORVOEGSEL: "kl-" });
+  assert.equal(uitEnv.voorvoegsel, "kl-", "BEHEER_VOORVOEGSEL telt als instelling");
   const vlagWint = leesArgumenten(["--voorvoegsel", "cf-proef-", "--toegang"], {
-    BEHEER_VOORVOEGSEL: "rp-",
+    BEHEER_VOORVOEGSEL: "kl-",
   });
   assert.equal(vlagWint.voorvoegsel, "cf-proef-");
 });
 
 test("voorvoegsel: precies één streepje aan het eind, cf-proef- is de enige uitzondering", () => {
-  for (const fout of ["cf-", "rp-x-", "cf-ander-", "cf-proef-x-"]) {
+  for (const fout of ["cf-", "kl-x-", "cf-ander-", "cf-proef-x-"]) {
     assert.throws(() => valideerVoorvoegsel(fout), /voorvoegsel/, fout);
   }
-  assert.equal(valideerVoorvoegsel("rp-"), "rp-");
+  assert.equal(valideerVoorvoegsel("kl-"), "kl-");
   assert.equal(valideerVoorvoegsel("cf-proef-"), "cf-proef-");
 });
 
 test("argumenten: buiten de proef zijn --repo en --wrangler verplicht", () => {
-  const actions = { GITHUB_REPOSITORY: "Richplant-BV/stack-beheer" };
+  const actions = { GITHUB_REPOSITORY: "klant-org/stack-beheer" };
   assert.throws(
     () =>
-      leesArgumenten(
-        ["--voorvoegsel", "rp-", "--app", "richplant", "--wrangler", "a/w.jsonc"],
-        actions,
-      ),
+      leesArgumenten(["--voorvoegsel", "kl-", "--app", "shop", "--wrangler", "a/w.jsonc"], actions),
     /--repo/,
     "buiten de proef nooit terugvallen op de eigen repo",
   );
   assert.throws(
-    () =>
-      leesArgumenten(["--voorvoegsel", "rp-", "--app", "richplant", "--wrangler", "a/w.jsonc"], {}),
+    () => leesArgumenten(["--voorvoegsel", "kl-", "--app", "shop", "--wrangler", "a/w.jsonc"], {}),
     /--repo/,
   );
-  assert.throws(() => leesArgumenten([...RP, "--app", "richplant"], actions), /--wrangler/);
-  const a = leesArgumenten(
-    [...RP, "--app", "richplant", "--wrangler", "app/wrangler.jsonc"],
-    actions,
-  );
-  assert.equal(a.repo, "Richplant-BV/richplant-start");
+  assert.throws(() => leesArgumenten([...KL, "--app", "shop"], actions), /--wrangler/);
+  const a = leesArgumenten([...KL, "--app", "shop", "--wrangler", "app/wrangler.jsonc"], actions);
+  assert.equal(a.repo, "klant-org/shop-start");
   assert.equal(a.wrangler, "app/wrangler.jsonc");
   assert.throws(
-    () => leesArgumenten(["--voorvoegsel", "rp-", "--repo", "geen-org", "--toegang"]),
+    () => leesArgumenten(["--voorvoegsel", "kl-", "--repo", "geen-org", "--toegang"]),
     /--repo/,
   );
   assert.equal(
-    leesArgumenten(["--voorvoegsel", "rp-", "--toegang"], actions).repo,
+    leesArgumenten(["--voorvoegsel", "kl-", "--toegang"], actions).repo,
     null,
     "toegang bijwerken heeft geen repo nodig",
   );
@@ -425,43 +418,43 @@ test("GitHub: de openbare previewwaarden staan als PREVIEW_-repovariabelen", asy
   });
 });
 
-test("voorvoegsel rp- en --repo: alles krijgt rp- en alles gaat naar die repo", async () => {
+test("voorvoegsel kl- en --repo: alles krijgt kl- en alles gaat naar die repo", async () => {
   const w = nepWolk({ workerBestaat: true });
   const arg = {
     ...ARG,
-    app: "richplant",
-    hostname: "richplant-start.richplant.nl",
-    worker: "richplant-start",
-    voorvoegsel: "rp-",
-    repo: "Richplant-BV/richplant-start",
+    app: "shop",
+    hostname: "shop-start.klant.nl",
+    worker: "shop-start",
+    voorvoegsel: "kl-",
+    repo: "klant-org/shop-start",
   };
   const toegang = {
-    groepen: { richplant: { domeinen: ["richplant.nl"] } },
-    apps: { richplant: ["richplant"] },
+    groepen: { shop: { domeinen: ["klant.nl"] } },
+    apps: { shop: ["shop"] },
   };
   await richtIn(arg, opzet(w, { toegang }));
   assert.deepEqual(
     w.staat.policies.map((p) => p.name),
-    ["rp-richplant"],
+    ["kl-shop"],
   );
   assert.deepEqual(w.staat.apps.map((a) => a.name).sort(), [
-    "rp-richplant",
-    "rp-richplant-inlog",
-    "rp-richplant-worker",
+    "kl-shop",
+    "kl-shop-inlog",
+    "kl-shop-worker",
   ]);
   assert.deepEqual(
     w.staat.projecten.map((p) => p.name),
-    ["rp-richplant"],
+    ["kl-shop"],
   );
   const gh = w.aanroepen.filter((a) => a.soort === "gh");
   assert.ok(gh.length > 0);
   for (const a of gh) {
-    assert.equal(a.args[a.args.indexOf("--repo") + 1], "Richplant-BV/richplant-start");
+    assert.equal(a.args[a.args.indexOf("--repo") + 1], "klant-org/shop-start");
     assert.equal(a.args.includes("Stage-Two-AI/app-template-tier2"), false);
   }
 });
 
-test("voorvoegsel rp-: opruimen raakt alleen rp-namen", async () => {
+test("voorvoegsel kl-: opruimen raakt alleen kl-namen", async () => {
   const w = nepWolk({
     workerBestaat: true,
     policies: [{ id: "proef-pol", name: "cf-proef-stagetwo", decision: "allow", include: [] }],
@@ -477,11 +470,11 @@ test("voorvoegsel rp-: opruimen raakt alleen rp-namen", async () => {
   });
   const arg = {
     ...ARG,
-    app: "richplant",
-    voorvoegsel: "rp-",
-    repo: "Richplant-BV/richplant-start",
+    app: "shop",
+    voorvoegsel: "kl-",
+    repo: "klant-org/shop-start",
   };
-  const toegang = { groepen: { rp: { domeinen: ["richplant.nl"] } }, apps: { richplant: ["rp"] } };
+  const toegang = { groepen: { kl: { domeinen: ["klant.nl"] } }, apps: { shop: ["kl"] } };
   const d = opzet(w, { toegang });
   await richtIn(arg, d);
   await ruimOp(arg, d);
@@ -500,29 +493,29 @@ test("voorvoegsel rp-: opruimen raakt alleen rp-namen", async () => {
 });
 
 test("opruimen verwijdert alleen de exacte namen van deze app en deze groepen", async () => {
-  // Namen die met rp- beginnen maar niet uit appNamen of toegang.json volgen (zoals
-  // die van een genest voorvoegsel rp-x-) blijven staan, met een waarschuwing. Ze komen
+  // Namen die met kl- beginnen maar niet uit appNamen of toegang.json volgen (zoals
+  // die van een genest voorvoegsel kl-x-) blijven staan, met een waarschuwing. Ze komen
   // pas na de inrichting in de wolk, zodat alleen ruimOp ze kan raken.
   const w = nepWolk();
   const arg = {
     ...ARG,
-    app: "richplant",
-    voorvoegsel: "rp-",
-    repo: "Richplant-BV/richplant-start",
+    app: "shop",
+    voorvoegsel: "kl-",
+    repo: "klant-org/shop-start",
   };
-  const toegang = { groepen: { rp: { domeinen: ["richplant.nl"] } }, apps: { richplant: ["rp"] } };
+  const toegang = { groepen: { kl: { domeinen: ["klant.nl"] } }, apps: { shop: ["kl"] } };
   const d = opzet(w, { toegang });
   await richtIn(arg, d);
-  w.staat.policies.push({ id: "genest-pol", name: "rp-x-rp", decision: "allow", include: [] });
+  w.staat.policies.push({ id: "genest-pol", name: "kl-x-kl", decision: "allow", include: [] });
   w.staat.apps.push({
     id: "genest-app",
-    name: "rp-x-richplant",
+    name: "kl-x-shop",
     type: "self_hosted",
     domain: "x.nl",
   });
   w.staat.projecten.push({
     ref: "genestref",
-    name: "rp-x-richplant",
+    name: "kl-x-shop",
     organization_slug: "stagetwo",
     status: "ACTIVE_HEALTHY",
   });
@@ -539,7 +532,7 @@ test("opruimen verwijdert alleen de exacte namen van deze app en deze groepen", 
     w.staat.projecten.map((p) => p.ref),
     ["genestref"],
   );
-  assert.match(r.waarschuwingen.join(" "), /rp-x-richplant/);
+  assert.match(r.waarschuwingen.join(" "), /kl-x-shop/);
 });
 
 test("zonder voorvoegsel in de argumenten weigert de inrichting vóór er iets gebeurt", async () => {
@@ -1257,10 +1250,10 @@ test("vraag: een fout met een FormData-body noemt methode, pad en status zoals a
 test("maakPlaceholder: module die 503 geeft, daarna workers.dev en previews aan", async () => {
   const w = nepWolk();
   const cf = cloudflareClient({ fetchFn: w.fetchFn, token: "t", accountId: "acc" });
-  await cf.maakPlaceholder("rp-app");
+  await cf.maakPlaceholder("kl-app");
   assert.deepEqual(w.schrijfacties(), [
-    "PUT cf/workers/scripts/rp-app",
-    "POST cf/workers/scripts/rp-app/subdomain",
+    "PUT cf/workers/scripts/kl-app",
+    "POST cf/workers/scripts/kl-app/subdomain",
   ]);
   const form = w.aanroepen[0].body;
   assert.deepEqual(JSON.parse(await form.get("metadata").text()), {
@@ -1275,20 +1268,20 @@ test("maakPlaceholder: module die 503 geeft, daarna workers.dev en previews aan"
   const antwoord = await worker.fetch(new Request("https://x.test/"));
   assert.equal(antwoord.status, 503);
   assert.equal(await antwoord.text(), "Deze app wordt ingericht.");
-  assert.equal(await cf.workerBestaat("rp-app"), true);
+  assert.equal(await cf.workerBestaat("kl-app"), true);
 });
 
 test("verwijderWorker: true als hij er was, false bij 404, andere fouten gaan door", async () => {
   const w = nepWolk({ workerBestaat: true });
   const cf = cloudflareClient({ fetchFn: w.fetchFn, token: "t", accountId: "acc" });
-  assert.equal(await cf.verwijderWorker("rp-app"), true);
-  assert.equal(await cf.verwijderWorker("rp-app"), false);
+  assert.equal(await cf.verwijderWorker("kl-app"), true);
+  assert.equal(await cf.verwijderWorker("kl-app"), false);
   const kapot = nepWolk({
     workerBestaat: true,
     faal: (methode) => (methode === "DELETE" ? { status: 500, message: "stuk" } : null),
   });
   const cf2 = cloudflareClient({ fetchFn: kapot.fetchFn, token: "t", accountId: "acc" });
-  await assert.rejects(() => cf2.verwijderWorker("rp-app"), /DELETE .* gaf 500/);
+  await assert.rejects(() => cf2.verwijderWorker("kl-app"), /DELETE .* gaf 500/);
 });
 
 // ---------------------------------------------------------------- testdatabase
@@ -1700,15 +1693,15 @@ function nepFetchOrgs(projecten, verzoeken = []) {
 }
 
 const PROJECTEN_ORGS = [
-  { name: "wc-overzicht", organization_slug: "winco", status: "ACTIVE_HEALTHY" },
-  { name: "wc-plantas", organization_slug: "plantas", status: "ACTIVE_HEALTHY" },
+  { name: "wc-overzicht", organization_slug: "voorbeeld", status: "ACTIVE_HEALTHY" },
+  { name: "wc-partner", organization_slug: "partner", status: "ACTIVE_HEALTHY" },
   { name: "vreemd", organization_slug: "ander", status: "ACTIVE_HEALTHY" },
-  { name: "wc-weg", organization_slug: "winco", status: "REMOVED" },
+  { name: "wc-weg", organization_slug: "voorbeeld", status: "REMOVED" },
 ];
 
 test("organisaties: één of meer, met komma's en spaties", () => {
-  assert.deepEqual(organisaties("winco"), ["winco"]);
-  assert.deepEqual(organisaties(" winco , plantas "), ["winco", "plantas"]);
+  assert.deepEqual(organisaties("voorbeeld"), ["voorbeeld"]);
+  assert.deepEqual(organisaties(" voorbeeld , partner "), ["voorbeeld", "partner"]);
   assert.deepEqual(organisaties(""), []);
   assert.deepEqual(organisaties(undefined), []);
 });
@@ -1716,7 +1709,7 @@ test("organisaties: één of meer, met komma's en spaties", () => {
 test("projecten: alleen uit de genoemde organisaties", async () => {
   const een = supabaseBeheer({
     token: "t",
-    orgSlug: "winco",
+    orgSlug: "voorbeeld",
     fetchFn: nepFetchOrgs(PROJECTEN_ORGS),
   });
   assert.deepEqual(
@@ -1725,12 +1718,12 @@ test("projecten: alleen uit de genoemde organisaties", async () => {
   );
   const twee = supabaseBeheer({
     token: "t",
-    orgSlug: "winco,plantas",
+    orgSlug: "voorbeeld,partner",
     fetchFn: nepFetchOrgs(PROJECTEN_ORGS),
   });
   assert.deepEqual(
     (await twee.projecten()).map((p) => p.name),
-    ["wc-overzicht", "wc-plantas"],
+    ["wc-overzicht", "wc-partner"],
   );
 });
 
@@ -1738,26 +1731,26 @@ test("maakProject: een nieuw project komt in de eerste organisatie", async () =>
   const verzoeken = [];
   const b = supabaseBeheer({
     token: "t",
-    orgSlug: "winco,plantas",
+    orgSlug: "voorbeeld,partner",
     fetchFn: nepFetchOrgs(PROJECTEN_ORGS, verzoeken),
   });
   await b.maakProject("wc-nieuw", "geheim");
-  assert.equal(verzoeken.at(-1).body.organization_slug, "winco");
+  assert.equal(verzoeken.at(-1).body.organization_slug, "voorbeeld");
 });
 
 test("--opruimen van één app laat een policy staan die andere apps nog gebruiken", async () => {
-  // Het geval Winco (23-10-2026): drie apps delen de groep kernteam. Opruimen van
+  // Het geval Voorbeeld (23-10-2026): drie apps delen de groep kernteam. Opruimen van
   // alleen overzicht mag die policy niet weghalen, want pilot en intern hangen eraan.
   // De groep solo gebruikt alleen overzicht; die policy mag wel weg.
   const toegang = {
     groepen: {
       kernteam: { adressen: ["info@stagetwo.nl"] },
-      plantas: { domeinen: ["plantas.nl"] },
+      partner: { domeinen: ["partner.nl"] },
       solo: { adressen: ["solo@stagetwo.nl"] },
     },
     apps: {
       pilot: ["kernteam"],
-      intern: ["kernteam", "plantas"],
+      intern: ["kernteam", "partner"],
       overzicht: ["kernteam", "solo"],
     },
   };
@@ -1766,14 +1759,14 @@ test("--opruimen van één app laat een policy staan die andere apps nog gebruik
   const argVoor = (app) => ({
     ...ARG,
     app,
-    hostname: `${app}.winco.nl`,
+    hostname: `${app}.voorbeeld.nl`,
     worker: app,
-    repo: `Winco-Holland-B-V/${app}`,
+    repo: `voorbeeld-org/${app}`,
     voorvoegsel: "wc-",
   });
   for (const app of Object.keys(toegang.apps)) await richtIn(argVoor(app), d);
   const policyNamen = () => w.staat.policies.map((p) => p.name).sort();
-  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-plantas", "wc-solo"]);
+  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-partner", "wc-solo"]);
 
   const droog = await ruimOp({ ...argVoor("overzicht"), droogloop: true }, d);
   const droogPolicies = droog.verwijderd.filter((v) => v.soort === "Access-policy");
@@ -1787,7 +1780,7 @@ test("--opruimen van één app laat een policy staan die andere apps nog gebruik
   );
 
   const r = await ruimOp(argVoor("overzicht"), d);
-  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-plantas"]);
+  assert.deepEqual(policyNamen(), ["wc-kernteam", "wc-partner"]);
   assert.match(
     r.waarschuwingen.join(" "),
     /wc-kernteam blijft staan \(gebruikt door pilot, intern\)/,

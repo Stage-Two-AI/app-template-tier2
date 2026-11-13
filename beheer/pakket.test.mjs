@@ -104,3 +104,56 @@ test("proef-workflows: de knop Controle van buitenaf heeft een eigen concurrency
     assert.equal((tekst.match(/^\s+env:/gm) ?? []).length, 1, yml);
   }
 });
+
+// ---------------------------------------------------------------- geen klantnamen
+
+/**
+ * Deze map gaat naar elke klant (via beheer-template). Er staat dus geen naam of domein van een
+ * echte klant in: niet in de README, een voorbeeld, een foutmelding, commentaar of testgegevens.
+ * De namen staan hier in stukken, zodat deze test zichzelf niet vindt.
+ */
+const KLANTNAMEN = [
+  ["win", "co"],
+  ["plan", "tas"],
+  ["rich", "plant"],
+  ["together", "2", "grow"],
+  ["together", "to", "grow"],
+  ["t", "2", "g"],
+].map((delen) => delen.join(""));
+/**
+ * Twee bestanden zijn bevroren: de vastgelegde aanroepen van versie 42 en de scenario's
+ * waarmee ze zijn gemaakt. Daarin staat nog een voorbeeldnaam van toen; ze veranderen pas als
+ * de vergelijking met versie 42 vervalt.
+ */
+const BEVROREN = ["regressie-42.json", "regressie-scenarios.mjs"];
+
+function alleBestanden(map) {
+  return readdirSync(map, { withFileTypes: true }).flatMap((e) => {
+    if (e.name === "node_modules") return [];
+    const pad = join(map, e.name);
+    return e.isDirectory() ? alleBestanden(pad) : [pad];
+  });
+}
+
+test("geen klantnamen of klantdomeinen in beheer/: de README, voorbeelden, foutmeldingen, commentaar en testgegevens gebruiken klant.nl, Voorbeeld en shop", () => {
+  const patroon = new RegExp(KLANTNAMEN.join("|"), "i");
+  const gevonden = [];
+  for (const pad of alleBestanden(BEHEER)) {
+    const naam = relative(BEHEER, pad);
+    if (BEVROREN.includes(naam)) continue;
+    readFileSync(pad, "utf8")
+      .split("\n")
+      .forEach((regel, i) => {
+        const m = regel.match(patroon);
+        if (m) gevonden.push(`${naam}:${i + 1}: ${m[0]}`);
+      });
+    assert.doesNotMatch(naam, patroon, `de bestandsnaam ${naam}`);
+  }
+  assert.deepEqual(gevonden, []);
+  // De proef-workflows horen bij deze map; ook daar geen klantnaam.
+  if (heeftWorkflows) {
+    for (const yml of readdirSync(workflows).filter((n) => n.startsWith("proef-"))) {
+      assert.doesNotMatch(readFileSync(join(workflows, yml), "utf8"), patroon, yml);
+    }
+  }
+});
