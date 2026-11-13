@@ -65,6 +65,11 @@ jobs:
           CLOUDFLARE_GROEPEN_IDP: ${{ vars.CLOUDFLARE_GROEPEN_IDP }}
           # Optioneel: met een DSN zet de inrichting Sentry aan in de app.
           VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          # Alleen voor een klantportaal ("klantportaal": true in toegang.json): de sleutel
+          # van Resend voor de inlogmail en de geheime sleutel van de Turnstile-widget.
+          # Zonder klantportaal mogen ze ontbreken (leeg); het script eist ze alleen dan.
+          SMTP_WACHTWOORD: ${{ secrets.SMTP_WACHTWOORD }}
+          TURNSTILE_GEHEIM: ${{ secrets.TURNSTILE_GEHEIM }}
           # Invoer via de omgeving, nooit rechtstreeks in het script: zo kan een
           # waarde geen shell-opdracht worden.
           APP: ${{ inputs.app }}
