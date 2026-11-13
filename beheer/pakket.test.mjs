@@ -74,3 +74,33 @@ test("pakket: imports blijven in beheer/, op de config-controle na, en pakketten
   }
   assert.deepEqual(fouten, []);
 });
+
+// ---------------------------------------------------------------- de proef-workflows
+
+const workflows = resolve(BEHEER, "..", ".github", "workflows");
+const heeftWorkflows = existsSync(join(workflows, "proef-controle.yml"));
+
+test("proef-workflows: de knop Controle van buitenaf heeft een eigen concurrency-groep (hij vervangt nooit een wachtende Toegang bijwerken), krijgt alleen leessleutels en leidt stdout nergens heen", {
+  skip: heeftWorkflows ? false : "een losse kopie van beheer/ heeft de proef-workflows niet",
+}, () => {
+  const lees = (naam) => readFileSync(join(workflows, naam), "utf8");
+  const groep = (yml) =>
+    lees(yml).match(/concurrency:\n(?:\s*#.*\n)*\s*group: (\S+)\n\s*cancel-in-progress: (\S+)/);
+  const controle = groep("proef-controle.yml");
+  assert.equal(groep("proef-toegang.yml")[1], groep("proef-inrichten.yml")[1]);
+  assert.notEqual(controle[1], groep("proef-toegang.yml")[1]);
+  assert.equal(controle[2], "false");
+  const knop = lees("proef-controle.yml");
+  assert.doesNotMatch(knop, /\btee\b|GITHUB_STEP_SUMMARY"/);
+  assert.deepEqual([...knop.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]).sort(), [
+    "CLOUDFLARE_PROEF_TOKEN",
+    "SUPABASE_ACCESS_TOKEN",
+    "SUPABASE_ORG_SLUG",
+  ]);
+  for (const yml of ["proef-inrichten.yml", "proef-controle.yml", "proef-toegang.yml"]) {
+    const tekst = lees(yml);
+    // Invoer gaat via de omgeving; geheimen staan op precies één stap.
+    assert.doesNotMatch(tekst.split("run: |")[1] ?? "", /\$\{\{/, yml);
+    assert.equal((tekst.match(/^\s+env:/gm) ?? []).length, 1, yml);
+  }
+});

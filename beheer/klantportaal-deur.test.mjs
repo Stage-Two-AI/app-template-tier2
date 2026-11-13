@@ -328,6 +328,17 @@ test("workers.dev: de doorsteekcontrole met --klantportaal keurt niet goed zonde
       return antwoord(302, "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/x");
     if (u.includes("supabase.co/auth/v1/authorize"))
       return antwoord(302, "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/y");
+    if (u.includes("supabase.co/auth/v1/settings"))
+      return {
+        ...antwoord(200),
+        text: async () =>
+          JSON.stringify({
+            external: { email: true, anonymous_users: false },
+            mailer_autoconfirm: false,
+          }),
+      };
+    if (u.includes("supabase.co/auth/v1/otp"))
+      return { ...antwoord(400), text: async () => '{"error_code":"captcha_failed"}' };
     return antwoord(401);
   };
   const basis = {

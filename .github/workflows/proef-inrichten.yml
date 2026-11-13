@@ -27,7 +27,8 @@ on:
       deur_weghalen:
         # Alleen voor een klantportaal, en alleen nadat een run zonder dit vinkje alles heeft
         # klaargezet en het inloggen per mail achter de deur is getest. Zonder dit vinkje
-        # verandert geen enkele run iets aan de deur. Zie "Klantportaal" in beheer/README.md.
+        # verandert geen enkele run iets aan de deur; met dit vinkje verandert een run alleen
+        # de deur. Zie "Klantportaal" in beheer/README.md.
         description: Deur weghalen (klantportaal live zetten)
         type: boolean
         default: false
@@ -92,4 +93,5 @@ jobs:
           if [ "$OPRUIMEN" = "true" ]; then args+=(--opruimen); fi
           if [ "$TWEEDE_DOORGANG" = "true" ]; then args+=(--tweede-doorgang); fi
           if [ "$DEUR_WEGHALEN" = "true" ]; then args+=(--deur-weghalen); fi
+          # Het script schrijft zelf een leesbare samenvatting bij de run (GITHUB_STEP_SUMMARY).
           node beheer/inrichten-cloudflare.mjs "${args[@]}"
