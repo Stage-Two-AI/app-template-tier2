@@ -386,8 +386,8 @@ export function tekstVanPlan(p) {
   regels.push("");
   regels.push(
     p.weg === "A"
-      ? "Weg A: de app heeft de indeling van de template. Draai dit opnieuw met --overnemen."
-      : "Weg B: de app heeft een oudere of eigen indeling. Bij MET DE HAND neemt --overnemen de versie van de template in zijn geheel; daarna zet je er de eigen routes en imports van de app weer in (git show HEAD:<pad>). Leg de bouwer eerst uit wat er verandert.",
+      ? "Weg A: de app heeft de indeling van de template. Overnemen doet --overnemen; los daarna elk CONFLICT op."
+      : "Weg B: de app heeft een oudere of eigen indeling. Bij MET DE HAND neemt --overnemen de versie van de template in zijn geheel; daarna zet je er de eigen routes en imports van de app weer in (git show HEAD:<pad>). Leg de bouwer vóór --overnemen uit wat er verandert. Daarna: --nakijken.",
   );
   return regels.join("\n");
 }
