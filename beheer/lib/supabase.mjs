@@ -185,6 +185,10 @@ export function klantportaalInstellingen({ afzender, smtpWachtwoord, captcha, ca
     external_email_enabled: true,
     mailer_autoconfirm: false,
     mailer_allow_unverified_email_sign_ins: false,
+    // Zelf een inlog aan een account hangen of ervan afhalen blijft uit. Anders kan een
+    // medewerker zijn Cloudflare-inlog loskoppelen, als "klant" verder gaan met dezelfde
+    // sessie, en bij zijn vertrek aan Toegang bijwerken ontsnappen.
+    security_manual_linking_enabled: false,
     smtp_host: SMTP_HOST,
     smtp_port: SMTP_POORT,
     smtp_user: SMTP_GEBRUIKER,

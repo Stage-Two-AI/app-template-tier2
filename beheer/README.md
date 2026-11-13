@@ -380,6 +380,8 @@ zonder iemand in te trekken.
   klant. Alleen de ban opheffen helpt niet: de volgende run zet hem terug.
 - Beoordeeld wordt het adres waarmee Cloudflare iemand binnenliet, niet een adres dat hij
   zelf op zijn account zette.
+- Zelf een inlog van een account afhalen staat uit (`security_manual_linking_enabled`), zodat
+  een medewerker zijn Cloudflare-inlog niet kan loskoppelen om als klant door te gaan.
 
 **Medewerkers bij een klantportaal.** Omdat elk adres nu eerst bewezen moet worden
 (`mailer_autoconfirm` uit) en Cloudflare aan Supabase niet meldt dat een adres gecontroleerd

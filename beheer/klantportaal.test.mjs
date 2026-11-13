@@ -375,6 +375,7 @@ const BEKENDE_VELDEN = [
   "external_email_enabled",
   "mailer_autoconfirm",
   "mailer_allow_unverified_email_sign_ins",
+  "security_manual_linking_enabled",
   "smtp_host",
   "smtp_port",
   "smtp_user",
@@ -405,6 +406,7 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
   assert.equal(a.external_email_enabled, true);
   assert.equal(a.mailer_autoconfirm, false, "een adres moet eerst bewezen worden");
   assert.equal(a.mailer_allow_unverified_email_sign_ins, false);
+  assert.equal(a.security_manual_linking_enabled, false, "geen inlog loskoppelen");
   assert.equal(a.smtp_host, "smtp.resend.com");
   assert.equal(a.smtp_port, "465");
   assert.equal(a.smtp_user, "resend");
