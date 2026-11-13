@@ -147,6 +147,49 @@ describe("klantportaal-overnemen: de lijsten kloppen met de template", () => {
       expect(existsSync(join(WORTEL, pad)), pad).toBe(true);
     }
   });
+
+  /**
+   * Er ontbreekt niets: elk bestand van de template in de mappen van het klantportaal (en elk
+   * bestand met "klantportaal" in de naam) gaat mee met elke versie (stack-manifest), of het
+   * script neemt het over (NIEUW, SAMENVOEGEN, src/main.tsx en src/start.tsx), of het staat
+   * hieronder met de reden waarom niet. Een nieuw bestand daar valt zo op.
+   */
+  const BEWUST_NIET: Record<string, string> = {
+    "supabase/migrations/20261114100000_klantportaal.sql":
+      "stap 2 van de route kopieert hem met een eigen tijdstempel",
+    "e2e/global-setup.ts": "stap 2 van de route neemt alleen geefTestrol over",
+    "e2e/happy-path.spec.ts": "van de app zelf; niet gewijzigd voor het klantportaal",
+    "e2e/start.spec.ts": "van de app zelf; niet gewijzigd voor het klantportaal",
+    "src/features/auth/use-session.ts": "bestond al vóór het klantportaal, niet gewijzigd",
+    "tests/rls/items.test.ts": "de tests van het voorbeeld items; stap 6 zegt wat de app zelf test",
+  };
+  const MAPPEN = /^(?:src\/features\/auth|tests\/rls|tests\/lib|supabase\/templates|e2e)\//;
+  const BUITEN = /^(?:beheer|\.github|docs)\//;
+
+  it.runIf(inDeTemplate())(
+    "elk bestand van het klantportaal gaat mee: manifest, script of een reden",
+    () => {
+      const manifest = JSON.parse(
+        readFileSync(join(WORTEL, ".claude/stack-manifest.json"), "utf8"),
+      );
+      const bekend = new Set<string>([
+        ...manifest.vanDeTemplate.vervangen,
+        ...(manifest.vanDeTemplate.alsHetOntbreekt ?? []),
+        ...mod.NIEUW,
+        ...mod.SAMENVOEGEN,
+        "src/main.tsx",
+        "src/start.tsx",
+        ...Object.keys(BEWUST_NIET),
+      ]);
+      const bestanden = git(WORTEL, "ls-files")
+        .split("\n")
+        .filter((pad) => pad && !BUITEN.test(pad))
+        .filter((pad) => MAPPEN.test(pad) || /klantportaal/i.test(pad));
+      expect(bestanden.length).toBeGreaterThan(20);
+      expect(bestanden.filter((pad) => !bekend.has(pad))).toEqual([]);
+      for (const pad of Object.keys(BEWUST_NIET)) expect(bestanden, pad).toContain(pad);
+    },
+  );
 });
 
 describe("klantportaal-overnemen: weg A, de indeling van de template", () => {
