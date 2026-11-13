@@ -698,7 +698,8 @@ function strengsteOordeel(oordelen) {
  * Cloudflare-inlog zonder enig adres staat in `onbekend`, als `id:<gebruikers-id>`.
  * Bij een gewone app (geen klantportaal, niet de testdatabase) blijft alleen een account met
  * het klantkenmerk van een gesloten portaal buiten schot (isOudKlant); `klanten` staat dan
- * alleen in het resultaat als er zo'n account is.
+ * alleen in het resultaat als er zo'n account is. Is er zo'n account, dan staat het adres van
+ * elk ander account dat alleen per mail kan inloggen gemaskeerd in het resultaat.
  * `zonderAdres` noemt de accounts met een Cloudflare-inlog die zelf geen adres hebben;
  * `ookPerMail` de ingetrokken accounts die daarnaast per mail konden inloggen.
  */
@@ -730,8 +731,12 @@ export async function trekIn({
     // Ingetrokken accounts die daarnaast per mail konden inloggen: het hele account is dicht.
     uit.ookPerMail = [];
   }
+  // Was deze gewone app een klantportaal (er is een account met het klantkenmerk), dan komt het
+  // adres van een account dat alleen per mail kan inloggen nooit leesbaar in het resultaat.
+  // Een app die nooit klantportaal was heeft zo'n kenmerk niet en houdt de uitvoer van versie 42.
+  const wasPortaal = !klantportaal && !test.size && gebruikers.some(isOudKlant);
   for (const g of gebruikers) {
-    let naam = g.email;
+    let naam = wasPortaal && lijktKlant(g) ? maskeerAdres(g.email) : g.email;
     let oordeel;
     if (klantportaal) {
       if (!heeftCloudflareInlog(g, cloudflare)) {

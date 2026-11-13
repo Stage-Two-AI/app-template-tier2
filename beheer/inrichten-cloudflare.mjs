@@ -1041,9 +1041,10 @@ async function stapSentry(arg, d, { droog }) {
  * Een gewone app: precies als op versie 42 (alleen policies en inlogmethoden). Bij een
  * klantportaal komt daar bij: het merk (PORTAAL_MERK), en een gewenst adres dat ontbreekt
  * wordt toegevoegd. Nooit vervangen: een adres dat iemand er met de hand bij zette, blijft
- * bewaakt. Heeft een gewone app het merk nog (het portaal is net gesloten), dan gaat het weg.
+ * bewaakt. Heeft een gewone app het merk nog, dan gaat het pas weg als App inrichten het portaal
+ * in dezelfde run heeft gesloten (`portaalGesloten`).
  */
-async function stapWorker(arg, d, v, policyIds) {
+async function stapWorker(arg, d, v, policyIds, { portaalGesloten = false } = {}) {
   const stap = "4 Access op de Worker";
   let placeholder = false;
   if (!(await d.cf.workerBestaat(arg.worker))) {
@@ -1088,9 +1089,10 @@ async function stapWorker(arg, d, v, policyIds) {
       anders.push("merk klantportaal");
       extra.custom_deny_message = PORTAAL_MERK;
     }
-  } else if (heeftPortaalMerk(v.workerAccess)) {
+  } else if (portaalGesloten && heeftPortaalMerk(v.workerAccess)) {
     // Het portaal is in deze run gesloten (de deur staat er, inloggen per mail is uit, de
-    // klanten hebben het kenmerk): nu pas mag het merk weg.
+    // klanten hebben het kenmerk): nu pas mag het merk weg. De tweede doorgang sluit geen
+    // portaal en laat het merk dus staan.
     anders.push("merk klantportaal weggehaald");
     extra.custom_deny_message = "";
   }
@@ -1640,7 +1642,7 @@ export async function richtIn(arg, d) {
   // 4 Access op de Worker, vóór 3.6: pas met de GitHub-variabelen kan er uitgerold
   // worden, en dan moet de deur er al staan. Zo nodig zet deze stap eerst een
   // placeholder neer, want workers.dev staat in beide standen aan.
-  w ??= await stapWorker(arg, d, v, policyIds);
+  w ??= await stapWorker(arg, d, v, policyIds, { portaalGesloten: sluit });
   stap(w.stap, w.actie);
   if (w.waarschuwing) resultaat.waarschuwingen.push(w.waarschuwing);
 
@@ -2143,6 +2145,14 @@ export async function werkToegangBij(arg, d) {
         "gepland: policies gelijkzetten, apps koppelen, intrekken",
         ...publiek,
         ...klantportaalRegels(t, vv, apps),
+        // Een app die volgens het merk nog klantportaal is, maar niet meer zo in het bestand
+        // staat: de echte run laat de klanten met rust en eindigt rood tot App inrichten draait.
+        ...doelApps
+          .filter((app) => !isKlantportaal(t, app) && merkVan(app))
+          .map(
+            (app) =>
+              `${app}: staat als gewone app in toegang.json maar is nog ingericht als klantportaal; de echte run trekt alleen medewerkers in en eindigt met "wacht op App inrichten"`,
+          ),
         ...hooks,
       ],
       ...(waarschuwingen.length ? { waarschuwingen } : {}),

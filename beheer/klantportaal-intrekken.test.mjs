@@ -9,6 +9,7 @@ import {
   eindstatus,
   richtIn,
   samenvatting,
+  tweedeDoorgang,
   uitvoerRegel,
   wachtOpInrichten,
   werkToegangBij,
@@ -36,6 +37,7 @@ import {
   project,
   stap,
 } from "./klantportaal-opzet.mjs";
+import { PORTAAL_MERK } from "./lib/cloudflare.mjs";
 import { klantportaalInstellingen, SESSIE } from "./lib/supabase.mjs";
 import { MELDING_MEDEWERKER, portaalAanmeldHookSql } from "./lib/toegang.mjs";
 import { nepWolk } from "./nep-wolk.mjs";
@@ -658,4 +660,29 @@ test("een klantportaal komt altijd vóór de gewone apps aan de beurt: stopt de 
     /api-keys gaf 500/,
   );
   assert.deepEqual(bans(w), [ID(1)], "bij het klantportaal direct is al ingetrokken");
+});
+
+test("het merk blijft tot App inrichten het portaal heeft gesloten: de tweede doorgang en Toegang bijwerken halen het niet weg, en een klantadres staat ook bij een gesloten portaal nooit leesbaar in de uitvoer", async () => {
+  const w = await portaalMet([klant(1, "inkoop@bloemist.nl"), medewerker(2, "anna@voorbeeld.nl")]);
+  assert.equal(app(w, NAMEN.worker).custom_deny_message, PORTAAL_MERK);
+  // Klantportaal uit het bestand; nog geen App inrichten. De tweede doorgang en Toegang
+  // bijwerken laten het merk staan, dus de klanten blijven beschermd.
+  await tweedeDoorgang(ARG, opzet(w, DEUR));
+  const droog = await werkToegangBij({ voorvoegsel: "vb-", droogloop: true }, opzet(w, DEUR));
+  assert.match(droog.acties.join(" "), /direct: staat als gewone app.*wacht op App inrichten/);
+  await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
+  assert.equal(app(w, NAMEN.worker).custom_deny_message, PORTAAL_MERK);
+  assert.deepEqual(bans(w), []);
+  // App inrichten sluit het portaal en haalt dan pas het merk weg.
+  await richtIn(ARG, opzet(w, DEUR));
+  assert.equal(app(w, NAMEN.worker).custom_deny_message, "");
+  // Een account dat alleen per mail kan inloggen en het kenmerk mist (met de hand gemaakt in
+  // Supabase, na het sluiten): het wordt ingetrokken zoals bij elke gewone app, maar het adres
+  // staat gemaskeerd in het resultaat, want dit was een klantportaal.
+  w.staat.gebruikers.push(klant(9, "later@handel.nl"));
+  w.aanroepen.length = 0;
+  const r = await werkToegangBij({ voorvoegsel: "vb-" }, opzet(w, DEUR));
+  assert.deepEqual(bans(w), [ID(9)]);
+  assert.deepEqual(r.ingetrokken, { direct: ["l***@handel.nl"] });
+  assert.doesNotMatch(uitvoerRegel(eindstatus("toegang", r)), /later@|inkoop@/);
 });
