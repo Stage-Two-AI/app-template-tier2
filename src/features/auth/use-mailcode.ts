@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import {
+  adresVingerafdruk,
   BEGIN,
   bewaar,
   controleerCode,
@@ -139,8 +140,11 @@ export function useMailcode(
       const op = Date.now();
       setNu(op);
       if (uitkomst.ok) {
+        // Alleen een aanvraag die Supabase echt aannam, telt als "hier aangevraagd".
         const gedeeld = gedeeldeOpslag();
-        if (gedeeld) merkAangevraagd(gedeeld, op);
+        if (gedeeld && uitkomst.verstuurd) {
+          merkAangevraagd(gedeeld, await adresVingerafdruk(adres), op);
+        }
         stuur({ soort: "verstuurd", email: leesAdres(adres) ?? adres, op, opnieuw });
       } else {
         stuur({ soort: "mislukt", fout: uitkomst.fout });
@@ -164,13 +168,13 @@ export function useMailcode(
         nu: Date.now(),
       });
       // Gelukt: Supabase meldt de sessie zelf (use-session.ts) en de app stuurt door. De
-      // pagina blijft tot dat moment op "bezig" staan.
+      // pagina blijft tot dat moment op "bezig" staan. De aanvraag blijft nog even bewaard:
+      // de app vergelijkt het adres van het account ermee en wist hem dan
+      // (app-met-database.tsx).
       if (uitkomst.ok) {
         // Ingelogd: het tabblad onthoudt het adres niet langer.
         const kluis = opslag();
         if (kluis) bewaar(kluis, BEGIN);
-        const gedeeld = gedeeldeOpslag();
-        if (gedeeld) wisAangevraagd(gedeeld);
       } else {
         stuur({ soort: "mislukt", fout: uitkomst.fout });
       }
@@ -178,16 +182,19 @@ export function useMailcode(
     [auth, toestand.email, toestand.verstuurdOp],
   );
 
-  const anderAdres = useCallback(() => stuur({ soort: "ander-adres" }), []);
+  const anderAdres = useCallback(() => {
+    // Een ander adres: de vorige aanvraag telt niet meer als "hier aangevraagd".
+    const gedeeld = gedeeldeOpslag();
+    if (gedeeld) wisAangevraagd(gedeeld);
+    stuur({ soort: "ander-adres" });
+  }, []);
 
   const bevestigLink = useCallback(async () => {
     if (!begin.tokenHash) return;
     stuur({ soort: "bezig", waarmee: "controleren" });
     const uitkomst = await controleerLink(auth, begin.tokenHash);
-    if (uitkomst.ok) {
-      const gedeeld = gedeeldeOpslag();
-      if (gedeeld) wisAangevraagd(gedeeld);
-    } else {
+    // Gelukt: de app vergelijkt het adres van het account met de aanvraag en wist die dan.
+    if (!uitkomst.ok) {
       maakAdresSchoon();
       stuur({ soort: "link-mislukt", fout: uitkomst.fout });
     }

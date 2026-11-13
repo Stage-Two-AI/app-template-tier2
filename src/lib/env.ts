@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { leesInlogdiensten } from "@/features/auth/inlogdienst";
+import { Omgevingsfout } from "@/lib/startfout";
 
 /**
  * Omgevingsvariabelen worden hier één keer gevalideerd, bij het opstarten van de app.
@@ -78,7 +79,9 @@ const velden = z
   })
   .superRefine((waarden, ctx) => {
     const diensten = leesInlogdiensten(waarden.VITE_INLOGDIENST);
-    if (!diensten.ok) ctx.addIssue({ code: "custom", message: diensten.fout });
+    if (!diensten.ok) {
+      ctx.addIssue({ code: "custom", message: diensten.fout, path: ["VITE_INLOGDIENST"] });
+    }
 
     const url = Boolean(waarden.VITE_SUPABASE_URL);
     const sleutel = Boolean(waarden.VITE_SUPABASE_ANON_KEY);
@@ -86,6 +89,7 @@ const velden = z
       ctx.addIssue({
         code: "custom",
         message: url ? "VITE_SUPABASE_ANON_KEY ontbreekt" : "VITE_SUPABASE_URL ontbreekt",
+        path: [url ? "VITE_SUPABASE_ANON_KEY" : "VITE_SUPABASE_URL"],
       });
     }
   });
@@ -94,12 +98,29 @@ export const envSchema = z.preprocess(leegIsAfwezig, velden);
 
 const parsed = envSchema.safeParse(import.meta.env);
 
-if (!parsed.success) {
-  const details = parsed.error.issues.map((issue) => `- ${issue.message}`).join("\n");
-  throw new Error(
+/**
+ * De fout bij omgevingsvariabelen die niet kloppen. De melding (met de waarden en wat een
+ * ontwikkelaar moet doen) gaat naar de console; op het scherm komen alleen de namen
+ * (lib/startfout.ts), want dat scherm ziet bij een klantportaal iedereen op internet.
+ */
+export function omgevingsfout(issues: { message: string; path: readonly PropertyKey[] }[]) {
+  const details = issues.map((issue) => `- ${issue.message}`).join("\n");
+  const namen = [
+    ...new Set(
+      issues.map((issue) =>
+        typeof issue.path[0] === "string"
+          ? issue.path[0]
+          : (/^VITE_\w+/.exec(issue.message)?.[0] ?? "onbekend"),
+      ),
+    ),
+  ];
+  return new Omgevingsfout(
     `De omgevingsvariabelen kloppen niet:\n${details}\n\nKopieer .env.example naar .env.local en vul de waarden in, of draai \`pnpm env:local\` als je lokaal met Supabase werkt.`,
+    namen,
   );
 }
+
+if (!parsed.success) throw omgevingsfout(parsed.error.issues);
 
 export const env = parsed.data;
 

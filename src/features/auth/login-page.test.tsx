@@ -150,6 +150,33 @@ describe("LoginPage met andere diensten", () => {
     });
   });
 
+  it("bij alleen mailcode waarschuwt de eigen link in dezelfde browser niet, een link zonder aanvraag wel", async () => {
+    const LINK = "/login?token_hash=pkce_0123456789abcdef0123456789abcdef&type=email";
+    render(<LoginPage dienst="mailcode" />);
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await userEvent.click(screen.getByRole("button", { name: "Stuur inloglink" }));
+    await screen.findByText("Kijk in je mail: daar staat een link om in te loggen.");
+    expect(JSON.stringify({ ...window.localStorage })).not.toContain("piet");
+    cleanup();
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst="mailcode" />);
+    expect(screen.queryByTestId("link-waarschuwing")).toBeNull();
+    cleanup();
+    window.localStorage.clear();
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst="mailcode" />);
+    expect(screen.getByTestId("link-waarschuwing")).toBeInTheDocument();
+  });
+
+  it("bij alleen mailcode onthoudt een mislukte aanvraag niets", async () => {
+    signInWithOtp.mockResolvedValue({ data: {}, error: { message: "nee", status: 422 } });
+    render(<LoginPage dienst="mailcode" />);
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await userEvent.click(screen.getByRole("button", { name: "Stuur inloglink" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(window.localStorage.length).toBe(0);
+  });
+
   it("controleert bij mailcode eerst het adres, zonder Supabase aan te roepen", async () => {
     render(<LoginPage dienst="mailcode" />);
     await userEvent.type(screen.getByLabelText("E-mailadres"), "geen-adres");

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  adresVingerafdruk,
   BEGIN,
   bewaar,
   CODE_GELDIG_MS,
@@ -10,6 +11,7 @@ import {
   isDienstInlogBegonnen,
   isHeleCode,
   isHierAangevraagd,
+  leesAanvraag,
   leesAdres,
   leesCode,
   leesLink,
@@ -57,7 +59,7 @@ describe("leesAdres en leesCode", () => {
 describe("vraagCode", () => {
   it("vraagt Supabase om een mail naar het schone adres, terug naar de inlogpagina", async () => {
     const auth = nepAuth();
-    expect(await vraagCode(auth, " Piet@Klant.nl ", TERUG)).toEqual({ ok: true });
+    expect(await vraagCode(auth, " Piet@Klant.nl ", TERUG)).toEqual({ ok: true, verstuurd: true });
     expect(auth.signInWithOtp).toHaveBeenCalledWith({
       email: "piet@klant.nl",
       options: { emailRedirectTo: TERUG, shouldCreateUser: true },
@@ -66,7 +68,10 @@ describe("vraagCode", () => {
 
   it("stuurt het bewijs van de controle tegen robots mee als die aan staat", async () => {
     const auth = nepAuth();
-    expect(await vraagCode(auth, "piet@klant.nl", TERUG, "bewijs-123")).toEqual({ ok: true });
+    expect(await vraagCode(auth, "piet@klant.nl", TERUG, "bewijs-123")).toEqual({
+      ok: true,
+      verstuurd: true,
+    });
     expect(auth.signInWithOtp).toHaveBeenCalledWith({
       email: "piet@klant.nl",
       options: { emailRedirectTo: TERUG, shouldCreateUser: true, captchaToken: "bewijs-123" },
@@ -104,7 +109,12 @@ describe("vraagCode", () => {
       { message: "Email address is invalid", status: 400, code: "email_address_invalid" },
     ];
     for (const otp of weigeringen) {
-      expect(await vraagCode(nepAuth({ otp }), "piet@klant.nl", TERUG)).toEqual({ ok: true });
+      // Voor de gebruiker hetzelfde; intern weet de pagina dat er geen mail weg is, en
+      // onthoudt hij geen aanvraag.
+      expect(await vraagCode(nepAuth({ otp }), "piet@klant.nl", TERUG)).toEqual({
+        ok: true,
+        verstuurd: false,
+      });
     }
   });
 
@@ -132,6 +142,7 @@ describe("vraagCode", () => {
     ]) {
       expect(await vraagCode(nepAuth({ otp }), "medewerker@bedrijf.nl", TERUG)).toEqual({
         ok: true,
+        verstuurd: false,
       });
     }
   });
@@ -415,17 +426,26 @@ describe("onthouden tijdens het wisselen naar de mail-app", () => {
     expect(opslag.inhoud.size).toBe(0);
   });
 
-  it("onthoudt dat deze browser een code aanvroeg: alleen het tijdstip, een kwartier lang", () => {
+  it("onthoudt dat deze browser een code aanvroeg: de vingerafdruk van het adres en het tijdstip, een kwartier lang", async () => {
     const opslag = nepOpslag();
     expect(isHierAangevraagd(opslag, nu)).toBe(false);
-    merkAangevraagd(opslag, nu);
-    expect([...opslag.inhoud.values()]).toEqual([String(nu)]);
+    const vinger = await adresVingerafdruk(" Piet@Klant.nl ");
+    expect(vinger).toMatch(/^[0-9a-f]{64}$/);
+    expect(vinger).toBe(await adresVingerafdruk("piet@klant.nl"));
+    expect(vinger).not.toBe(await adresVingerafdruk("piet@klant.nl.voorbeeld.nl"));
+    merkAangevraagd(opslag, vinger, nu);
+    expect([...opslag.inhoud.values()]).toEqual([JSON.stringify({ adres: vinger, op: nu })]);
+    expect([...opslag.inhoud.values()].join()).not.toContain("piet");
+    expect(leesAanvraag(opslag, nu)).toEqual({ adres: vinger, op: nu });
     expect(isHierAangevraagd(opslag, nu + CODE_GELDIG_MS)).toBe(true);
     expect(isHierAangevraagd(opslag, nu + CODE_GELDIG_MS + 1)).toBe(false);
     expect(isHierAangevraagd(opslag, nu - 1)).toBe(false);
     wisAangevraagd(opslag);
     expect(opslag.inhoud.size).toBe(0);
     opslag.setItem("inlogcode-aangevraagd", "geen getal");
+    expect(isHierAangevraagd(opslag, nu)).toBe(false);
+    // Het oude formaat (alleen een tijdstip) telt niet meer.
+    opslag.setItem("inlogcode-aangevraagd", String(nu));
     expect(isHierAangevraagd(opslag, nu)).toBe(false);
   });
 
@@ -452,7 +472,7 @@ describe("onthouden tijdens het wisselen naar de mail-app", () => {
         throw new Error("geen opslag");
       },
     };
-    merkAangevraagd(kapot, nu);
+    merkAangevraagd(kapot, "a".repeat(64), nu);
     merkDienstInlog(kapot, nu);
     wisAangevraagd(kapot);
     expect(isHierAangevraagd(kapot, nu)).toBe(false);

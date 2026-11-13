@@ -43,13 +43,15 @@ jobs:
       - name: Klantportaal aan - de poort in de echte database
         if: always()
         run: |
-          psql "$(grep '^SUPABASE_DB_URL=' .env.test | cut -d= -f2-)" -v ON_ERROR_STOP=1 -c \
-            'create policy "items_poort" on public.items as restrictive for all to authenticated using (public.is_medewerker() or public.is_goedgekeurde_klant())'
+          db="$(grep '^SUPABASE_DB_URL=' .env.test | cut -d= -f2-)"
           cp stack.config.json "$RUNNER_TEMP/stack.config.json"
+          # Ook als de controle rood is: de poort en de config gaan terug, anders ziet de
+          # browsertest hierna geen items (de testgebruiker is geen goedgekeurde klant).
+          trap 'cp "$RUNNER_TEMP/stack.config.json" stack.config.json; psql "$db" -c "drop policy if exists items_poort on public.items"' EXIT
+          psql "$db" -v ON_ERROR_STOP=1 -c \
+            'create policy "items_poort" on public.items as restrictive for all to authenticated using (public.is_medewerker() or public.is_goedgekeurde_klant())'
           node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("stack.config.json","utf8"));c.klantportaal=true;fs.writeFileSync("stack.config.json",JSON.stringify(c,null,2))'
           pnpm exec vitest run --config vitest.rls.config.ts tests/rls/open-policies.test.ts
-          cp "$RUNNER_TEMP/stack.config.json" stack.config.json
-          psql "$(grep '^SUPABASE_DB_URL=' .env.test | cut -d= -f2-)" -v ON_ERROR_STOP=1 -c 'drop policy "items_poort" on public.items'
       - run: pnpm exec playwright install --with-deps chromium
         if: always()
       - name: End-to-end test

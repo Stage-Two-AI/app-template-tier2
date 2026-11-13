@@ -5,9 +5,11 @@ import { Label } from "@/components/ui/label";
 import { InlogMetCode } from "@/features/auth/inlog-met-code";
 import { type Inlogdienst, inlogVorm, startInloggen } from "@/features/auth/inlogdienst";
 import {
+  adresVingerafdruk,
   foutUitAdres,
   isDienstInlogBegonnen,
   leesLink,
+  merkAangevraagd,
   merkDienstInlog,
 } from "@/features/auth/mailcode";
 import { env, inlogdiensten, testloginVoorDev } from "@/lib/env";
@@ -32,6 +34,15 @@ function terugNaar(): string {
 function tabblad(): Storage | null {
   try {
     return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Gedeeld door de tabbladen van deze browser; zie `merkAangevraagd` in mailcode.ts. */
+function gedeeldeOpslag(): Storage | null {
+  try {
+    return window.localStorage;
   } catch {
     return null;
   }
@@ -180,6 +191,11 @@ function MailcodeFormulier() {
         terugNaar: terugNaar(),
         email: adres.data,
       });
+      // Zoals bij een klantportaal: deze browser vroeg de link aan, voor dit adres. Dan
+      // waarschuwt de pagina niet als de link straks hier opent, en vergelijkt de app na het
+      // inloggen het adres (zie merkAangevraagd in mailcode.ts).
+      const gedeeld = gedeeldeOpslag();
+      if (gedeeld) merkAangevraagd(gedeeld, await adresVingerafdruk(adres.data), Date.now());
       setVerstuurd(true);
     } catch {
       setFout("Er ging iets mis bij het versturen. Controleer je e-mailadres.");

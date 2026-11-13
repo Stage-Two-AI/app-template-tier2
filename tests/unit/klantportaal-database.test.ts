@@ -119,9 +119,16 @@ describe("de databasecontrole: de beoordeling", () => {
         ],
       }),
     ).toEqual([]);
+    // Een tabel van Supabase zonder RLS is van Supabase (realtime.subscription); alleen de
+    // tabellen waar de app policies op zet, moeten RLS houden.
     expect(
-      beoordeel({ relaties: [tabel("storage.x", { supabase: true, rls: false, anon: false })] }),
-    ).toEqual(["storage.x: row level security staat uit, en bezoekers hebben er rechten op"]);
+      beoordeel({ relaties: [tabel("realtime.subscription", { supabase: true, rls: false })] }),
+    ).toEqual([]);
+    expect(
+      beoordeel({
+        relaties: [tabel("storage.objects", { supabase: true, rls: false, anon: false })],
+      }),
+    ).toEqual(["storage.objects: row level security staat uit, en bezoekers hebben er rechten op"]);
     expect(
       beoordeel({ relaties: [tabel("public.orders", { eigenaarBezoeker: true })] }),
     ).toHaveLength(1);

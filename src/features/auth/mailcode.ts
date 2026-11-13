@@ -123,7 +123,12 @@ function storing(error: AuthFout): Fout | null {
   return error.status !== undefined && error.status >= 500 ? fout("dienst") : null;
 }
 
-export type Uitkomst = { ok: true } | { ok: false; fout: Fout };
+/**
+ * `verstuurd` (alleen bij `vraagCode`): heeft Supabase de aanvraag echt aangenomen? De pagina
+ * toont bij een stille weigering hetzelfde als bij een verstuurde mail (regel 1 hierboven),
+ * maar onthoudt dan niet dat er hier een code is aangevraagd.
+ */
+export type Uitkomst = { ok: true; verstuurd?: boolean } | { ok: false; fout: Fout };
 
 /**
  * Stap 1: vraag een code aan voor dit adres. Supabase stuurt één mail met de code en een
@@ -151,12 +156,12 @@ export async function vraagCode(
         ...(captchaToken ? { captchaToken } : {}),
       },
     });
-    if (!error) return { ok: true };
+    if (!error) return { ok: true, verstuurd: true };
     const zichtbaar = zichtbareFout(error);
     // Elke andere weigering (onbekend adres, geen nieuwe accounts, een hook die nee zegt, ook
     // als die als storing terugkomt) ziet er voor de gebruiker hetzelfde uit als een
     // verstuurde mail.
-    return zichtbaar ? { ok: false, fout: zichtbaar } : { ok: true };
+    return zichtbaar ? { ok: false, fout: zichtbaar } : { ok: true, verstuurd: false };
   } catch {
     return { ok: false, fout: fout("verbinding") };
   }
@@ -374,18 +379,61 @@ function wis(opslag: Opslag, sleutel: string): void {
 }
 
 /**
- * Deze browser heeft net een code aangevraagd. Alleen het tijdstip wordt bewaard, geen adres,
- * en in localStorage: een link uit de mail opent meestal in een nieuw tabblad van dezelfde
- * browser, en dat tabblad moet dit kunnen zien. Komt iemand binnen via een link terwijl dit
- * ontbreekt, dan is de mail niet in deze browser aangevraagd en waarschuwt de pagina eerst
- * (inlog-met-code.tsx): zo'n link kan van een ander komen, die je in zíjn account laat inloggen.
+ * Een vingerafdruk van een e-mailadres (SHA-256, als hex): zo onthoudt de browser welk adres
+ * hier een code aanvroeg, zonder het adres zelf op te slaan.
  */
-export function merkAangevraagd(opslag: Opslag, nu: number): void {
-  zetTijd(opslag, SLEUTEL_AANGEVRAAGD, nu);
+export async function adresVingerafdruk(adres: string): Promise<string> {
+  const tekst = new TextEncoder().encode(leesAdres(adres) ?? adres.trim().toLowerCase());
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const hash = new Uint8Array(await subtle.digest("SHA-256", tekst));
+    return Array.from(hash, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Zonder Web Crypto (een pagina over http buiten localhost): een eenvoudige vingerafdruk.
+  let h = 0x811c9dc5;
+  for (const b of tekst) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return `fnv-${h.toString(16)}`;
+}
+
+const aanvraagSchema = z.object({ adres: z.string().min(8), op: z.number() });
+
+/**
+ * Deze browser heeft net een code aangevraagd, en Supabase heeft die aanvraag aangenomen.
+ * Bewaard worden de vingerafdruk van het adres en het tijdstip, niet het adres zelf, in
+ * localStorage: een link uit de mail opent meestal in een nieuw tabblad van dezelfde browser,
+ * en dat tabblad moet dit kunnen zien.
+ *
+ * Komt iemand binnen via een link terwijl er geen aanvraag is, dan is de mail niet in deze
+ * browser aangevraagd en waarschuwt de pagina eerst (inlog-met-code.tsx): zo'n link kan van
+ * een ander komen, die je in zíjn account laat inloggen. Na het inloggen vergelijkt de app de
+ * vingerafdruk met het adres van het account (app-met-database.tsx) en zegt het als dat niet
+ * het aangevraagde adres is: een ander kan je eerst zelf een code laten aanvragen en je dan
+ * zijn link sturen.
+ */
+export function merkAangevraagd(opslag: Opslag, adres: string, nu: number): void {
+  try {
+    opslag.setItem(SLEUTEL_AANGEVRAAGD, JSON.stringify({ adres, op: nu }));
+  } catch {
+    // Geen opslag: dan weten we het straks niet, en kiest de pagina de voorzichtige kant.
+  }
+}
+
+/** De aanvraag van de afgelopen tijd die een code geldig is, of null. */
+export function leesAanvraag(opslag: Opslag, nu: number): { adres: string; op: number } | null {
+  try {
+    const bewaard = aanvraagSchema.safeParse(
+      JSON.parse(opslag.getItem(SLEUTEL_AANGEVRAAGD) ?? "null"),
+    );
+    if (!bewaard.success) return null;
+    const oud = nu - bewaard.data.op;
+    return oud >= 0 && oud <= CODE_GELDIG_MS ? bewaard.data : null;
+  } catch {
+    return null;
+  }
 }
 
 export function isHierAangevraagd(opslag: Opslag, nu: number): boolean {
-  return binnenTijd(opslag, SLEUTEL_AANGEVRAAGD, nu);
+  return leesAanvraag(opslag, nu) !== null;
 }
 
 export function wisAangevraagd(opslag: Opslag): void {

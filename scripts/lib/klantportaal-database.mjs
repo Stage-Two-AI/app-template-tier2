@@ -47,6 +47,9 @@ export const BASISFUNCTIES = [
   "klant_adres_gewijzigd",
 ];
 
+/** Tabellen van Supabase waar een app zelf policies op zet; daar moet RLS aan blijven. */
+const MET_POLICIES_VAN_DE_APP = ["storage.objects", "storage.buckets", "realtime.messages"];
+
 /** Tabellen waar een eigen trigger de goedkeuring of de sessies kan omzeilen. */
 const ADMINISTRATIE = ["auth.users", "auth.identities", "auth.sessions", "public.klanten"];
 
@@ -272,7 +275,9 @@ export function beoordeelDatabase(model, config = {}, basis = verwachteBasis()) 
     }
     if (r.soort === "r" || r.soort === "p") {
       if (r.supabase) {
-        if (bereikbaar && !r.rls) {
+        // Tabellen van Supabase zelf zijn van Supabase; sommige staan bewust zonder RLS
+        // (realtime.subscription). Alleen die waar de app policies op zet, houden RLS aan.
+        if (bereikbaar && MET_POLICIES_VAN_DE_APP.includes(r.naam) && !r.rls) {
           problemen.push(
             `${r.naam}: row level security staat uit, en bezoekers hebben er rechten op`,
           );
@@ -428,7 +433,7 @@ export function vergelijkBasis(gevonden, verwacht) {
     if (!t) problemen.push(`de trigger ${eis.naam} op ${eis.tabel} ontbreekt. ${herstel}`);
     else if (t.definitie !== eis.definitie || t.aan !== eis.aan) {
       problemen.push(
-        `de trigger ${eis.naam} op ${eis.tabel} is gewijzigd of staat uit. ${herstel}`,
+        `de trigger ${eis.naam} op ${eis.tabel} is gewijzigd of staat uit (nu: ${t.definitie}; ${t.aan === "D" ? "uit" : `aan, ${t.aan}`}). ${herstel}`,
       );
     }
   }

@@ -369,7 +369,9 @@ describe("klantportaal: een klant logt in met de code uit de mail", () => {
     await userEvent.type(code, "12345678");
     await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(window.sessionStorage.length).toBe(0));
-    expect(window.localStorage.length).toBe(0);
+    // De aanvraag blijft tot de app het adres van het account ermee heeft vergeleken
+    // (app-met-database.tsx); daar wordt hij gewist.
+    expect(window.localStorage.length).toBe(1);
     // De volgende op dit tabblad begint bij een leeg formulier.
     cleanup();
     render(<LoginPage dienst={KLANTPORTAAL} />);
@@ -575,7 +577,33 @@ describe("klantportaal: de link uit de mail", () => {
     expect(screen.queryByTestId("link-waarschuwing")).toBeNull();
     expect(screen.getByText("Je bent er bijna. Klik op de knop om in te loggen.")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Inloggen" }));
-    await waitFor(() => expect(window.localStorage.length).toBe(0));
+    await waitFor(() => expect(verifyOtp).toHaveBeenCalledTimes(1));
+  });
+
+  it("een aanvraag die Supabase stil weigerde, telt niet: dan waarschuwt de link wel", async () => {
+    signInWithOtp.mockResolvedValue({
+      data: {},
+      error: { message: "Signups not allowed for otp", status: 422, code: "otp_disabled" },
+    });
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naarCodestap();
+    expect(window.localStorage.length).toBe(0);
+    cleanup();
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByTestId("link-waarschuwing")).toBeInTheDocument();
+  });
+
+  it("na 'Ander e-mailadres' telt de vorige aanvraag niet meer", async () => {
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await naarCodestap();
+    expect(window.localStorage.length).toBe(1);
+    await userEvent.click(screen.getByRole("button", { name: "Ander e-mailadres" }));
+    expect(window.localStorage.length).toBe(0);
+    cleanup();
+    window.history.replaceState(null, "", LINK);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(screen.getByTestId("link-waarschuwing")).toBeInTheDocument();
   });
 
   it("waarschuwt weer als de aanvraag ouder is dan de mail geldig is", async () => {
