@@ -1,5 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Outlet } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { begonViaDienst, OpnieuwAlsMedewerker } from "@/features/auth/medewerkersessie";
 import { WachtOpGoedkeuring } from "@/features/auth/wacht-op-goedkeuring";
@@ -15,6 +16,10 @@ import { supabase } from "@/lib/supabase";
  * - iedereen anders meldt zich aan als klant (`klant_aanmelden()`, niet goedgekeurd) en ziet,
  *   tot een medewerker hem goedkeurt, het scherm uit wacht-op-goedkeuring.tsx;
  * - een goedgekeurde klant: de app.
+ *
+ * Het makkelijkst als omhulling om alle routes van de app behalve /login, met `PortaalRoute`
+ * (hieronder) als route zonder pad. Geneste routes en de vangroute vallen er dan vanzelf onder,
+ * en de routes zelf blijven zoals ze waren.
  *
  * Dit is alleen wat de gebruiker te zien krijgt. De grens zelf is de database: een scherm
  * zonder deze omhulling krijgt nog steeds niets.
@@ -88,4 +93,17 @@ export function Portaaltoegang({ session, children }: { session: Session; childr
     );
   }
   return <>{children}</>;
+}
+
+/**
+ * `Portaaltoegang` als route zonder pad, om alle routes van de app behalve /login heen. Zonder
+ * sessie doet hij niets: de routes eronder sturen dan zelf door naar /login.
+ */
+export function PortaalRoute({ session }: { session: Session | null }) {
+  if (!session) return <Outlet />;
+  return (
+    <Portaaltoegang session={session}>
+      <Outlet />
+    </Portaaltoegang>
+  );
 }

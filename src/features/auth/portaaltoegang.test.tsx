@@ -1,6 +1,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type Antwoord = { data: unknown; error: { message: string } | null };
@@ -13,7 +14,7 @@ vi.mock("@/lib/supabase", () => ({
   supabase: { rpc, auth: { signOut: vi.fn(), signInWithOAuth: vi.fn() } },
 }));
 
-const { bepaalToegang, Portaaltoegang } = await import("./portaaltoegang");
+const { bepaalToegang, PortaalRoute, Portaaltoegang } = await import("./portaaltoegang");
 
 /** Een sessie met een token zoals Supabase het maakt; alleen `amr` en het adres doen mee. */
 function sessie(methode: "oauth" | "otp"): Session {
@@ -116,5 +117,52 @@ describe("Portaaltoegang", () => {
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("Het lukte niet");
     expect(screen.queryByText("De app")).toBeNull();
+  });
+});
+
+describe("PortaalRoute: de omhulling om alle routes behalve /login", () => {
+  function app(s: Session | null, pad: string) {
+    render(
+      <MemoryRouter initialEntries={[pad]}>
+        <Routes>
+          <Route path="/login" element={<p>Inlogpagina</p>} />
+          <Route element={<PortaalRoute session={s} />}>
+            <Route path="/" element={s ? <p>Startpagina</p> : <Navigate to="/login" replace />} />
+            <Route
+              path="/klanten/:id/*"
+              element={s ? <p>Een klant</p> : <Navigate to="/login" replace />}
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("houdt een geneste route en de vangroute tegen tot de klant is goedgekeurd", async () => {
+    zeg({ klant: false });
+    app(sessie("otp"), "/klanten/7/notities");
+    expect(
+      await screen.findByRole("heading", { name: "Je account wacht op goedkeuring" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Een klant")).toBeNull();
+    cleanup();
+    app(sessie("otp"), "/bestaat-niet");
+    expect(
+      await screen.findByRole("heading", { name: "Je account wacht op goedkeuring" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Startpagina")).toBeNull();
+  });
+
+  it("laat een goedgekeurde klant door naar de geneste route", async () => {
+    zeg({ klant: true });
+    app(sessie("otp"), "/klanten/7/notities");
+    expect(await screen.findByText("Een klant")).toBeInTheDocument();
+  });
+
+  it("zonder sessie: niets gevraagd, door naar /login", () => {
+    app(null, "/klanten/7");
+    expect(screen.getByText("Inlogpagina")).toBeInTheDocument();
+    expect(rpc).not.toHaveBeenCalled();
   });
 });
