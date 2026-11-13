@@ -291,6 +291,15 @@ De template zelf is geen klantportaal: de schakelaar staat uit en `items` heeft 
 niet. Zonder de schakelaar verandert er voor een app niets. Een bestaande app een klantportaal
 maken gaat stap voor stap met de route `docs/routes/klantportaal.md`.
 
+**Edge functions vallen buiten de guard.** Een functie in `supabase/functions/` draait met de
+geheimen van de app (de `service_role`, een sleutel van een andere dienst) en ziet de regels in
+de database alleen als ze er zelf naar vraagt. Bij een klantportaal vraagt daarom elke functie
+die iets doet op basis van wat de gebruiker meestuurt, of die rijen van de gebruiker leest of
+schrijft, eerst met het token van de aanroeper aan de database of die mag:
+`is_medewerker()` of `is_goedgekeurde_klant()` (het voorbeeld staat in stap 4 van de route),
+en anders geeft ze 403. `pnpm guard:rls` en de databasetests zien een functie zonder die vraag
+niet; nalopen is werk van de bouwer, bij elke nieuwe functie.
+
 **Een klant wijzigt zijn e-mailadres niet zelf.** Dat loopt via een medewerker, en de
 inrichting zet de mail voor een adreswijziging dicht. Gebeurt het toch (een beheerder past
 het adres aan in Supabase), dan loopt het adres in `klanten` mee, vervalt de goedkeuring tot

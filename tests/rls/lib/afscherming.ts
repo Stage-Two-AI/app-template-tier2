@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect } from "vitest";
 import type { Database } from "../../../src/lib/database.types";
@@ -22,8 +24,34 @@ import type { Database } from "../../../src/lib/database.types";
  *     });
  *   });
  *
+ * Bij een klantportaal (`"klantportaal": true` in stack.config.json) mag een account zonder
+ * goedkeuring niets. Daarom is elke testgebruiker van `maakActor` (en dus A en B hierboven) dan
+ * vanzelf een goedgekeurde klant: de bestaande tests van de app blijven werken zonder ze een voor
+ * een aan te passen. Voor een test die juist een account zonder goedkeuring nodig heeft:
+ * `maakActor("vreemde", { goedgekeurd: false })`. Een test met een eigen hulp die zelf
+ * gebruikers maakt (`auth.admin.createUser`, `signInWithPassword`), roept na het maken
+ * `keurGoedAlsKlant` aan. Zonder de schakelaar verandert er niets: geen extra aanroep.
+ *
  * Deze hulp is van de template en komt met elke versie mee.
  */
+
+/** Staat de schakelaar van het klantportaal aan in stack.config.json van deze app? */
+function leesKlantportaal(): boolean {
+  try {
+    const pad = fileURLToPath(new URL("../../../stack.config.json", import.meta.url));
+    const config: unknown = JSON.parse(readFileSync(pad, "utf8"));
+    return (
+      typeof config === "object" &&
+      config !== null &&
+      "klantportaal" in config &&
+      config.klantportaal === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+export const KLANTPORTAAL = leesKlantportaal();
 
 function nodig(naam: string, waarde: string | undefined): string {
   if (!waarde) {
@@ -52,8 +80,30 @@ export type Actor = {
   client: SupabaseClient<Database>;
 };
 
-/** Een nieuwe testgebruiker, ingelogd. Ruim hem op met `verwijderActor`. */
-export async function maakActor(label: string): Promise<Actor> {
+/**
+ * Maakt van een testaccount een goedgekeurde klant van het klantportaal. Ongetypeerd: in een app
+ * zonder klantportaal kennen de databasetypes de tabel `klanten` niet, en dit bestand moet daar
+ * ook de typecontrole halen.
+ */
+export async function keurGoedAlsKlant(actor: Pick<Actor, "id" | "email">): Promise<void> {
+  const alsAdmin = admin as unknown as SupabaseClient;
+  const { error } = await alsAdmin
+    .from("klanten")
+    .upsert({ user_id: actor.id, e_mail: actor.email, goedgekeurd: true });
+  if (error) throw new Error(`Goedkeuren als klant mislukt: ${error.message}`);
+}
+
+/**
+ * Een nieuwe testgebruiker, ingelogd. Ruim hem op met `verwijderActor`.
+ *
+ * `goedgekeurd`: is het account een goedgekeurde klant van het klantportaal? Standaard ja als
+ * de schakelaar `"klantportaal": true` aan staat, anders nee (en dan gebeurt er niets extra).
+ * Met `false` heeft het account geen regel in `klanten`: aangemeld noch goedgekeurd.
+ */
+export async function maakActor(
+  label: string,
+  opties: { goedgekeurd?: boolean } = {},
+): Promise<Actor> {
   const email = `rls-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@voorbeeld.nl`;
   const password = "rls-test-wachtwoord-123";
 
@@ -70,7 +120,9 @@ export async function maakActor(label: string): Promise<Actor> {
   const inlog = await client.auth.signInWithPassword({ email, password });
   if (inlog.error) throw new Error(`Kon niet inloggen als testgebruiker: ${inlog.error.message}`);
 
-  return { id: data.user.id, email, client };
+  const actor = { id: data.user.id, email, client };
+  if (opties.goedgekeurd ?? KLANTPORTAAL) await keurGoedAlsKlant(actor);
+  return actor;
 }
 
 export async function verwijderActor(actor: Actor | undefined): Promise<void> {

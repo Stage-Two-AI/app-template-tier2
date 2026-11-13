@@ -47,6 +47,17 @@ describe("de routes in docs/routes/", () => {
     for (const route of genoemd) expect(existsSync(resolve(WORTEL, route ?? "")), route).toBe(true);
   });
 
+  it.each(routes)(
+    "%s: elk script dat de route noemt, bestaat en gaat mee met elke versie",
+    (route) => {
+      const scripts = [...lees(route).matchAll(/scripts\/[\w-]+\.mjs/g)].map((m) => m[0]);
+      for (const script of scripts) {
+        expect(existsSync(resolve(WORTEL, script)), script).toBe(true);
+        expect(manifest.vanDeTemplate.vervangen, script).toContain(script);
+      }
+    },
+  );
+
   it.each(routes)("%s heeft geen em-dash (huisstijl)", (route) => {
     expect(lees(route)).not.toContain("—");
   });

@@ -49,9 +49,13 @@ export function nepWolk({
   ghVariabelen = {},
   ghSecrets = {},
   // Bestanden op de standaardtak van de app-repo, voor `gh api repos/<repo>/contents/<pad>`.
-  // Standaard een app op versie 43: env.ts leest de lijst van inlogdiensten (alleen de
-  // inrichting van een klantportaal kijkt daarnaar).
-  ghBestanden = { "src/lib/env.ts": "leesInlogdiensten(waarden.VITE_INLOGDIENST)" },
+  // Standaard een app op versie 43 die zelf een klantportaal is: env.ts leest de lijst van
+  // inlogdiensten en stack.config.json heeft de schakelaar (alleen de inrichting van een
+  // klantportaal kijkt daarnaar).
+  ghBestanden = {
+    "src/lib/env.ts": "leesInlogdiensten(waarden.VITE_INLOGDIENST)",
+    "stack.config.json": '{ "database": true, "klantportaal": true, "open_tabellen": {} }',
+  },
   faal = () => null,
   poolerFout = null,
   // Turnstile: de geheimen die siteverify kent; null = elk geheim klopt.

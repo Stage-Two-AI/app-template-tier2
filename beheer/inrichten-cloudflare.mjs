@@ -459,11 +459,34 @@ export const KLANTPORTAAL_INLOGDIENST = "cloudflare,mailcode";
 export const APP_KENMERK = { bestand: "src/lib/env.ts", tekst: "leesInlogdiensten" };
 
 /**
+ * De schakelaar van de app zelf: `"klantportaal": true` in `stack.config.json`. Zonder die
+ * schakelaar eist `pnpm guard:rls` in de app de poort niet, en bewaakt niets dat elke regel in
+ * de database alleen medewerkers en goedgekeurde klanten doorlaat. Zonder deur zijn die regels
+ * de enige grens; dus geen klantportaal in toegang.json zonder de schakelaar in de app.
+ */
+export const APP_SCHAKELAAR = { bestand: "stack.config.json", sleutel: "klantportaal" };
+
+/**
+ * Staat de schakelaar aan in de tekst van stack.config.json? Echte JSON, geen tekst zoeken:
+ * `"klantportaal": false` of de sleutel in een uitleg telt niet. null (geen bestand) en
+ * ongeldige JSON zijn ook nee.
+ */
+export function schakelaarAan(tekst) {
+  if (typeof tekst !== "string") return false;
+  try {
+    const config = JSON.parse(tekst);
+    return config !== null && typeof config === "object" && config[APP_SCHAKELAAR.sleutel] === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * De verkenning van een klantportaal, alleen lezen. Geeft wat de run nodig heeft en `gemis`:
  * elke reden waarom de echte run vóór de eerste wijziging stopt (een droogloop toont ze als
  * waarschuwing). Leest: de auth-config van productie (als het project er is), de variabelen
- * van omgeving production en `src/lib/env.ts` van de app-repo, en vraagt Turnstile of het
- * geheim klopt.
+ * van omgeving production, `src/lib/env.ts` en `stack.config.json` van de app-repo (de
+ * schakelaar, APP_SCHAKELAAR), en vraagt Turnstile of het geheim klopt.
  */
 async function verkenPortaal(arg, d, o) {
   const { t, tijdelijk, project, deur, schrijven } = o;
@@ -509,10 +532,12 @@ async function verkenPortaal(arg, d, o) {
   // droogloop zonder sleutel voor GitHub kan dat niet lezen en zegt dat.
   let variabelen = null;
   let appBegrijpt = null;
+  let appSchakelaar = null;
   try {
     if (!arg.repo) throw new Error("geen repo bekend");
     const env = await leesGhBestand(d, arg.repo, APP_KENMERK.bestand);
     appBegrijpt = Boolean(env?.includes(APP_KENMERK.tekst));
+    appSchakelaar = schakelaarAan(await leesGhBestand(d, arg.repo, APP_SCHAKELAAR.bestand));
     variabelen = Object.fromEntries(
       (await leesGhVariabelen(d, SECRET_OMGEVING, arg.repo)).map((x) => [x.name, x.value]),
     );
@@ -522,6 +547,11 @@ async function verkenPortaal(arg, d, o) {
   if (appBegrijpt === false) {
     gemis.push(
       `${kp}: de app in ${arg.repo} begrijpt de inlog van een klantportaal nog niet (${APP_KENMERK.bestand} op main leest VITE_INLOGDIENST niet met ${APP_KENMERK.tekst}). Met ${KLANTPORTAAL_INLOGDIENST} zou de app in de browser niet meer opstarten. Werk de app eerst bij naar versie 43 of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
+    );
+  }
+  if (appSchakelaar === false) {
+    gemis.push(
+      `${kp}: de app in ${arg.repo} is zelf nog geen klantportaal: in ${APP_SCHAKELAAR.bestand} op main staat niet "${APP_SCHAKELAAR.sleutel}": true. Zonder deur zijn de regels in de database de enige grens, en zonder die schakelaar controleert niets in de app dat elke regel alleen medewerkers en goedgekeurde klanten doorlaat. De bouwer volgt eerst in de app de route docs/routes/klantportaal.md (die zet de schakelaar en de regels), merget dat, en daarna draai je App inrichten opnieuw`,
     );
   }
 
@@ -563,7 +593,7 @@ async function verkenPortaal(arg, d, o) {
       );
     }
   }
-  return { gemis, auth, variabelen, appBegrijpt, live, functies, captcha, sitekey };
+  return { gemis, auth, variabelen, appBegrijpt, appSchakelaar, live, functies, captcha, sitekey };
 }
 
 /** De twee adressen die de Access op de Worker hoort te bewaken: workers.dev en de previews. */
@@ -1403,7 +1433,7 @@ export async function richtIn(arg, d) {
       resultaat.waarschuwingen.push(...portaalWaarschuwingen(arg, v));
       if (v.portaal.appBegrijpt === null) {
         resultaat.waarschuwingen.push(
-          `klantportaal ${arg.app}: de app-repo was in deze droogloop niet te lezen, dus er is niet nagegaan of de app de inlog van een klantportaal begrijpt en wat er al in omgeving production staat. De echte run doet dat wel, vóór de eerste wijziging`,
+          `klantportaal ${arg.app}: de app-repo was in deze droogloop niet te lezen, dus er is niet nagegaan of de app de inlog van een klantportaal begrijpt, of de app zelf de schakelaar "klantportaal": true heeft en wat er al in omgeving production staat. De echte run doet dat wel, vóór de eerste wijziging`,
         );
       }
       if (v.project) {

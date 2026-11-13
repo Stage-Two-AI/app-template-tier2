@@ -35,6 +35,13 @@ bepalen alleen de regels in de database (RLS). Dit is wat de bouwer in stap 0 be
   wijziging uit de app-repo: `src/lib/env.ts` op `main` moet `VITE_INLOGDIENST` lezen met
   `leesInlogdiensten`. Een oudere app (of een app van de openbare template) start met
   `cloudflare,mailcode` niet meer op; dan stopt de inrichting.
+- De app is zelf een klantportaal: `stack.config.json` op `main` heeft `"klantportaal": true`
+  (de route `docs/routes/klantportaal.md` in de app zet hem). Met die schakelaar eist de
+  controle in de app (`pnpm guard:rls` en de databasetests) dat elke regel alleen medewerkers en
+  goedgekeurde klanten doorlaat. De inrichting leest het bestand als JSON, vóór de eerste
+  wijziging, bij elke run van een klantportaal (met en zonder het vinkje). Staat de schakelaar
+  er niet, dan stopt de run en verandert er niets, ook niet aan de deur. Een gewone app leest
+  de inrichting hier niet: daar is de deur de grens.
 - Elke tabel heeft regels die op de rol van de gebruiker letten, en een nieuw account ziet
   niets. Een recht van een medewerker hangt nooit aan iets wat een klant zelf kan krijgen,
   zoals een e-mailadres of het account zelf. Een maillogin op het adres van een medewerker
