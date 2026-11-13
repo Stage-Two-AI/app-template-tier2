@@ -137,7 +137,8 @@ gebouwde bestanden en iconen erbij. De rest van de app blijft achter de deur. Tw
 
 **Een recht hangt nooit aan iets wat een klant zelf kan claimen.** Dit geldt voor een
 klantportaal: een app zonder deur op het domein, waar medewerkers via Cloudflare inloggen en
-klanten met een code per mail (`VITE_INLOGDIENST=cloudflare,mailcode`). Iedereen kan daar de
+klanten met een code per mail (tien cijfers, een kwartier geldig;
+`VITE_INLOGDIENST=cloudflare,mailcode`). Iedereen kan daar de
 inlogpagina openen en per mail een account maken. De regels in de database zijn dan de enige
 grens, en die mogen dus alleen leunen op wat een klant niet zelf in de hand heeft.
 

@@ -46,12 +46,13 @@ describe("leesAdres en leesCode", () => {
     expect(leesAdres("")).toBeNull();
   });
 
-  it("houdt van een geplakte code alleen de acht cijfers over", () => {
-    expect(leesCode("1234 5678")).toBe("12345678");
-    expect(leesCode("1234-5678\n")).toBe("12345678");
-    expect(leesCode("1234567890")).toBe("12345678");
+  it("houdt van een geplakte code alleen de tien cijfers over", () => {
+    expect(leesCode("12345 67890")).toBe("1234567890");
+    expect(leesCode("12345-67890\n")).toBe("1234567890");
+    expect(leesCode("123456789012")).toBe("1234567890");
     expect(leesCode("abc")).toBe("");
-    expect(isHeleCode("12345678")).toBe(true);
+    expect(isHeleCode("1234567890")).toBe(true);
+    expect(isHeleCode("12345678")).toBe(false);
     expect(isHeleCode("123456")).toBe(false);
   });
 });
@@ -161,10 +162,10 @@ describe("controleerCode", () => {
 
   it("controleert de code als eenmalige e-mailcode", async () => {
     const auth = nepAuth();
-    expect(await controleerCode(auth, "piet@klant.nl", "1234 5678", vers)).toEqual({ ok: true });
+    expect(await controleerCode(auth, "piet@klant.nl", "12345 67890", vers)).toEqual({ ok: true });
     expect(auth.verifyOtp).toHaveBeenCalledWith({
       email: "piet@klant.nl",
-      token: "12345678",
+      token: "1234567890",
       type: "email",
     });
   });
@@ -186,7 +187,7 @@ describe("controleerCode", () => {
     const uitkomst = await controleerCode(
       nepAuth({ verify: afgewezen }),
       "piet@klant.nl",
-      "00000000",
+      "0000000000",
       vers,
     );
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "code" } });
@@ -197,7 +198,7 @@ describe("controleerCode", () => {
     const uitkomst = await controleerCode(
       nepAuth({ verify: afgewezen }),
       "piet@klant.nl",
-      "12345678",
+      "1234567890",
       oud,
     );
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "verlopen" } });
@@ -205,13 +206,13 @@ describe("controleerCode", () => {
 
   it("zegt bij een storing niet dat de code fout is", async () => {
     const verify = { message: "boem", status: 500 };
-    const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "12345678", vers);
+    const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "1234567890", vers);
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "dienst" } });
   });
 
   it("zegt het bij te veel pogingen", async () => {
     const verify = { message: "rate limit", status: 429, code: "over_request_rate_limit" };
-    const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "12345678", vers);
+    const uitkomst = await controleerCode(nepAuth({ verify }), "piet@klant.nl", "1234567890", vers);
     expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "te-vaak" } });
   });
 });

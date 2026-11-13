@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CODE_GELDIG_MS, CODE_LENGTE } from "../../src/features/auth/mailcode";
 
 /**
- * Lokaal en in CI moet inloggen met een code per mail hetzelfde gaan als in productie: acht
+ * Lokaal en in CI moet inloggen met een code per mail hetzelfde gaan als in productie: tien
  * cijfers, een kwartier geldig, één mail met code en link, en de mail in de lokale
  * mailvanger. Deze test houdt supabase/config.toml, het mailsjabloon, de inlogpagina en de
  * CI bij elkaar; de echte inlog test e2e/klantportaal.spec.ts.
@@ -24,7 +24,7 @@ describe("supabase/config.toml: de mailcode lokaal", () => {
   const toml = lees("supabase/config.toml");
   const email = blok(toml, "auth.email");
 
-  it("acht cijfers en een kwartier, net als de inlogpagina zegt", () => {
+  it("tien cijfers en een kwartier, net als de inlogpagina zegt", () => {
     expect(email).toMatch(new RegExp(`^otp_length = ${CODE_LENGTE}$`, "m"));
     expect(email).toMatch(new RegExp(`^otp_expiry = ${CODE_GELDIG_MS / 1000}$`, "m"));
   });

@@ -16,7 +16,7 @@ import { useMailcode } from "@/features/auth/use-mailcode";
 
 /**
  * De inlogpagina van een klantportaal: klanten vullen hun e-mailadres in en krijgen een
- * code van acht cijfers, medewerkers loggen in via Cloudflare. Deze component tekent alleen;
+ * code van tien cijfers, medewerkers loggen in via Cloudflare. Deze component tekent alleen;
  * de stappen en regels staan in mailcode.ts.
  *
  * Deze pagina staat open voor iedereen en geeft niemand rechten: dat doet de database.
@@ -143,7 +143,7 @@ function AdresStap({ mailcode, robot, toonFout }: MetRobot & { toonFout: boolean
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
       <p className="text-sm text-muted-foreground">
-        Vul je e-mailadres in. Je krijgt een mail met een code van acht cijfers.
+        Vul je e-mailadres in. Je krijgt een mail met een code van tien cijfers.
       </p>
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">E-mailadres</Label>
@@ -189,7 +189,7 @@ function CodeStap({ mailcode, robot }: MetRobot) {
   function wijzig(invoer: string) {
     const nieuw = leesCode(invoer);
     setCode(nieuw);
-    // Acht cijfers getypt of geplakt (of door de telefoon ingevuld): meteen controleren.
+    // Tien cijfers getypt of geplakt (of door de telefoon ingevuld): meteen controleren.
     if (isHeleCode(nieuw) && nieuw !== code && !bezig) void mailcode.controleer(nieuw);
   }
 
@@ -206,7 +206,7 @@ function CodeStap({ mailcode, robot }: MetRobot) {
       </p>
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="code">Code van acht cijfers</Label>
+          <Label htmlFor="code">Code van tien cijfers</Label>
           <Input
             ref={veld}
             id="code"
@@ -216,7 +216,7 @@ function CodeStap({ mailcode, robot }: MetRobot) {
             autoComplete="one-time-code"
             pattern="[0-9]*"
             required
-            className="h-14 text-center font-mono text-2xl tracking-[0.4em]"
+            className="h-14 text-center font-mono text-2xl tracking-[0.25em]"
             placeholder={"•".repeat(CODE_LENGTE)}
             value={code}
             aria-invalid={toestand.fout ? true : undefined}

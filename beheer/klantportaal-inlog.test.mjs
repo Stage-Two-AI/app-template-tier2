@@ -230,7 +230,7 @@ test("adres wijzigen: een account is niet naar het adres van een ander te zetten
   assert.match(i.mailer_templates_email_change_content, /neem dan contact op met Voorbeeld Direct/);
   // De uitnodiging logt niet in: alleen een verwijzing naar de inlogpagina op het eigen domein.
   assert.deepEqual(i.mailer_templates_invite_content.match(/\{\{[^}]*\}\}/g), ["{{ .SiteURL }}"]);
-  // Wie de code van acht cijfers wil raden om de wijziging toch te bevestigen, moet er twee raden.
+  // Wie de code van tien cijfers wil raden om de wijziging toch te bevestigen, moet er twee raden.
   assert.equal(i.mailer_secure_email_change_enabled, true);
   // De sjablonen zijn gewone tekst: een sjabloon dat Supabase Auth niet kan lezen, vervangt het
   // stil door het standaardsjabloon. Ook met een naam vol leestekens blijft het leesbaar.
@@ -364,9 +364,9 @@ test("mailgrens opmaken: de captcha staat standaard aan, want de tellers per IP-
   }
 });
 
-test("code raden: acht cijfers, en het aantal gokken per IP-adres klopt met wat de uitleg zegt (de voorraad van 30 telt mee)", () => {
-  assert.equal(CODE_LENGTE, 8);
-  assert.equal(inst().mailer_otp_length, 8);
+test("code raden: tien cijfers, en het aantal gokken per IP-adres klopt met wat de uitleg zegt (de voorraad van 30 telt mee)", () => {
+  assert.equal(CODE_LENGTE, 10);
+  assert.equal(inst().mailer_otp_length, 10);
   const verify = teller(REM.rate_limit_verify);
   let gokken = 0;
   for (let s = 0; s < CODE_GELDIG_SECONDEN; s += 1) while (verify(s)) gokken += 1;
@@ -387,17 +387,22 @@ test("code raden: acht cijfers, en het aantal gokken per IP-adres klopt met wat 
   assert.ok(Math.abs(perDag - GOKKEN_PER_DAG) <= 1, `${perDag} gokken per dag vanaf één IP-adres`);
   const kans = (adressen, cijfers = CODE_LENGTE) =>
     1 - (1 - 10 ** -cijfers) ** (adressen * GOKKEN_PER_DAG);
-  // Honderd adressen: ongeveer 0,15 procent per dag. Met zes cijfers was dat ruim 13 procent.
-  assert.ok(kans(100) > 0.0014 && kans(100) < 0.0016, `${(kans(100) * 100).toFixed(3)}%`);
+  // Honderd adressen: ongeveer 0,0015 procent per dag. Met acht cijfers was dat 0,15 procent,
+  // met zes ruim 13 procent.
+  assert.ok(kans(100) > 0.000014 && kans(100) < 0.000016, `${(kans(100) * 100).toFixed(5)}%`);
+  assert.ok(kans(100, 8) > 0.0014 && kans(100, 8) < 0.0016);
   assert.ok(kans(100, 6) > 0.13);
   // De aanname: de teller telt per letterlijk IP-adres. Eén aansluiting met IPv6 heeft er
-  // miljarden; telt Supabase die niet samen, dan is met 65.536 adressen de kans ruim de helft.
-  assert.ok(kans(65536) > 0.5);
+  // miljarden; telt Supabase die niet samen, dan is met 65.536 adressen de kans ongeveer 1
+  // procent per dag. Met acht cijfers was dat ruim de helft: daarom tien.
+  assert.ok(kans(65536) > 0.009 && kans(65536) < 0.01, `${(kans(65536) * 100).toFixed(2)}%`);
+  assert.ok(kans(65536, 8) > 0.5);
   // KLANTPORTAAL.md zegt precies dit en belooft niet meer: de som, en de aanname als open punt
   // vóór de eerste klant.
   const uitleg = readFileSync(new URL("./KLANTPORTAAL.md", import.meta.url), "utf8");
   assert.match(uitleg, /1470 gokken per IP-adres per dag/);
-  assert.match(uitleg, /0,15 procent/);
+  assert.match(uitleg, /0,0015 procent/);
+  assert.match(uitleg, /ongeveer 1 procent per dag/);
   assert.match(
     uitleg,
     /Open punten vóór de eerste klant[\s\S]*IPv6[\s\S]*Vraag\s+dit bij Supabase na/,

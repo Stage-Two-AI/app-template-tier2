@@ -58,14 +58,14 @@ test("een nieuwe klant logt in met de code uit de mail", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Vul de code in" })).toBeVisible();
   await expect(page.getByText(nieuweKlant)).toBeVisible();
-  const codevak = page.getByLabel("Code van acht cijfers");
+  const codevak = page.getByLabel("Code van tien cijfers");
   await expect(codevak).toBeFocused();
   await expect(codevak).toHaveAttribute("autocomplete", "one-time-code");
   await expect(codevak).toHaveAttribute("inputmode", "numeric");
 
   const { code } = await leesMail();
-  expect(code).toMatch(/^\d{8}$/);
-  // Acht cijfers typen is genoeg: de pagina controleert de code dan zelf.
+  expect(code).toMatch(/^\d{10}$/);
+  // Tien cijfers typen is genoeg: de pagina controleert de code dan zelf.
   await codevak.pressSequentially(code);
 
   await expect(page.getByRole("heading", { name: "Mijn lijst" })).toBeVisible();
@@ -99,8 +99,8 @@ test("een verkeerde code geeft een nette melding en geen toegang", async ({ page
   await expect(page.getByRole("heading", { name: "Vul de code in" })).toBeVisible();
 
   const { code } = await leesMail();
-  const fout = code === "00000000" ? "00000001" : "00000000";
-  const codevak = page.getByLabel("Code van acht cijfers");
+  const fout = code === "0000000000" ? "0000000001" : "0000000000";
+  const codevak = page.getByLabel("Code van tien cijfers");
   await codevak.pressSequentially(fout);
   await expect(page.getByRole("alert")).toContainText("Deze code klopt niet");
   await expect(page.getByRole("heading", { name: "Mijn lijst" })).toBeHidden();
@@ -251,7 +251,7 @@ test("na het inloggen blijft de klant op de app, wat er ook in het adres stond",
   await page.getByLabel("E-mailadres").fill(tikfout);
   await page.getByRole("button", { name: "Doorgaan" }).click();
   const { code } = await leesMail();
-  await page.getByLabel("Code van acht cijfers").pressSequentially(code);
+  await page.getByLabel("Code van tien cijfers").pressSequentially(code);
   await expect(page.getByRole("heading", { name: "Mijn lijst" })).toBeVisible();
   expect(new URL(page.url()).hostname).toBe("127.0.0.1");
   expect(new URL(page.url()).pathname).toBe("/");

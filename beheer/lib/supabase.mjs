@@ -79,12 +79,14 @@ export const SMTP_POORT = "465";
 export const SMTP_GEBRUIKER = "resend";
 
 /**
- * De inlogcode: acht cijfers, een kwartier geldig. Acht in plaats van zes omdat een fout
- * antwoord de code niet ongeldig maakt en Supabase Auth geen teller per account heeft: met
- * zes cijfers en een paar honderd IP-adressen was een account in een dag te raden (zie REM).
- * De inlogpagina van de app moet dezelfde lengte verwachten.
+ * De inlogcode: tien cijfers (het meeste wat Supabase Auth toestaat), een kwartier geldig. Een
+ * fout antwoord maakt de code niet ongeldig, Supabase Auth heeft geen teller per account voor
+ * foute pogingen, en wie Supabase rechtstreeks aanroept, heeft per IP-adres een eigen teller:
+ * met zes cijfers en een paar honderd IP-adressen was een account in een dag te raden, met acht
+ * en de adressen van één aansluiting met IPv6 ook nog (zie REM). De inlogpagina van de app moet
+ * dezelfde lengte verwachten (CODE_LENGTE in src/features/auth/mailcode.ts).
  */
-export const CODE_LENGTE = 8;
+export const CODE_LENGTE = 10;
 export const CODE_GELDIG_SECONDEN = 15 * 60;
 
 /**
@@ -117,13 +119,14 @@ export const BURST = 30;
  *   rate_limit_verify      aanvullen per vijf minuten per IP-adres voor het inwisselen van
  *                          een code of link, ook met een voorraad van 30. 5: in het kwartier
  *                          dat een code geldt zijn dat 30 + 3 x 5 = 45 gokken per IP-adres,
- *                          op honderd miljoen mogelijkheden (acht cijfers). Over een hele
- *                          dag is het 30 + 288 x 5 = 1470 gokken per IP-adres (GOKKEN_PER_DAG).
+ *                          op tien miljard mogelijkheden (tien cijfers). Over een hele dag
+ *                          is het 30 + 288 x 5 = 1470 gokken per IP-adres (GOKKEN_PER_DAG).
  *                          Met honderd IP-adressen is de kans op één goede gok dan ongeveer
- *                          0,15 procent per dag; met zes cijfers was dat ruim 13 procent.
- *                          Aanname: de teller telt per letterlijk adres. Eén aansluiting
- *                          met IPv6 heeft er miljarden; telt het platform van Supabase die
- *                          niet samen, dan is deze grens voor zo'n aanvaller veel zwakker.
+ *                          0,0015 procent per dag (met acht cijfers 0,15, met zes ruim 13
+ *                          procent). Aanname: de teller telt per letterlijk adres. Eén
+ *                          aansluiting met IPv6 heeft er miljarden; telt het platform van
+ *                          Supabase die niet samen, dan is de kans met 65.536 adressen
+ *                          ongeveer 1 procent per dag (met acht cijfers ruim de helft).
  *                          Zie "Open punten vóór de eerste klant" in KLANTPORTAAL.md.
  *
  * De tellers per IP-adres houden dus één mens tegen, geen aanvaller die de mailgrens wil
@@ -200,7 +203,7 @@ export function inlogmail(naam) {
     inhoud: [
       `<h2>Inloggen bij ${n}</h2>`,
       "<p>Vul deze code in op de inlogpagina:</p>",
-      '<p style="font-size: 28px; font-weight: bold; letter-spacing: 6px"><span id="code">{{ .Token }}</span></p>',
+      '<p style="font-size: 28px; font-weight: bold; letter-spacing: 4px"><span id="code">{{ .Token }}</span></p>',
       `<p>De code is ${minuten} minuten geldig en werkt één keer.</p>`,
       `<p>Of <a id="link" href="${INLOGLINK}">log in met deze link</a>.</p>`,
       `<p>Heb je dit niet zelf, zojuist, op de inlogpagina van ${n} aangevraagd? Dan hoef je niets te doen. Klik niet op de link en geef de code aan niemand; zonder de code kan niemand inloggen.</p>`,
@@ -409,7 +412,7 @@ export const GESLOTEN_PORTAAL = {
  *
  * Adres wijzigen, de controlecode en de uitnodiging krijgen een mail zonder link en zonder
  * code (neutraleMails), en `mailer_secure_email_change_enabled` staat aan: mocht iemand een
- * code van acht cijfers willen raden om een adreswijziging toch te bevestigen, dan moet hij er
+ * code van tien cijfers willen raden om een adreswijziging toch te bevestigen, dan moet hij er
  * twee raden (die voor het oude en die voor het nieuwe adres).
  * `smtpWachtwoord` en `captchaGeheim` zijn geheimen. Ze staan alleen in de body van de PATCH
  * en nooit in een melding of in het resultaat.

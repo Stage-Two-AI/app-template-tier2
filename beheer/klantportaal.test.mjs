@@ -286,7 +286,7 @@ test("droogloop: toont in beide richtingen wat er met de deur en de mail zou geb
   );
   const mail = stap(r, "3.4 auth-config");
   assert.match(mail, /klantportaal: inloggen per mail aan/);
-  assert.match(mail, /code van 8 cijfers.*15 minuten/);
+  assert.match(mail, /code van 10 cijfers.*15 minuten/);
   assert.match(mail, /Voorbeeld Direct <noreply@voorbeeldapps\.nl>/);
   assert.match(mail, /mailer_autoconfirm uit/);
   assert.match(mail, /captcha aan \(Turnstile/);
@@ -531,7 +531,7 @@ test("mail: productie van een klantportaal krijgt inloggen per mail, Resend, cod
   assert.equal(a.smtp_pass, SMTP);
   assert.equal(a.smtp_admin_email, "noreply@voorbeeldapps.nl");
   assert.equal(a.smtp_sender_name, "Voorbeeld Direct");
-  assert.equal(a.mailer_otp_length, 8);
+  assert.equal(a.mailer_otp_length, 10);
   assert.equal(a.mailer_otp_exp, 900);
   // De rem.
   assert.equal(a.rate_limit_email_sent, 100);
@@ -600,7 +600,7 @@ test("mail: de getallen van de rem en de code staan op één plek", () => {
     rate_limit_verify: 5,
   });
   assert.equal(CODE_GELDIG_SECONDEN, 900);
-  assert.equal(CODE_LENGTE, 8);
+  assert.equal(CODE_LENGTE, 10);
 });
 
 test("mail: de naam van de afzender kan geen HTML of sjabloonopdracht worden", () => {

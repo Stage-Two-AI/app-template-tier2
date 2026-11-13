@@ -65,7 +65,7 @@ export function linksUit(html: string): string[] {
 /**
  * Roep dit aan vóórdat de code wordt aangevraagd. Het onthoudt welke mails er al waren en
  * geeft een functie terug die wacht op de eerstvolgende nieuwe mail voor dit adres, en daar
- * de code van acht cijfers en de link uit haalt.
+ * de code van tien cijfers en de link uit haalt.
  *
  *   const leesMail = await wachtOpInlogmail({ email });
  *   ... code aanvragen ...
@@ -84,7 +84,7 @@ export async function wachtOpInlogmail(o: {
         `Geen nieuwe inlogmail voor ${o.email} in de mailvanger op ${basis(o.mailUrl)}. Draait de lokale Supabase met de mailvanger aan?`,
       );
     }
-    const code = /id="code"[^>]*>\s*(\d{8})\s*</.exec(html)?.[1];
+    const code = /id="code"[^>]*>\s*(\d{10})\s*</.exec(html)?.[1];
     const link = /id="link"[^>]*href="([^"]+)"/.exec(html)?.[1];
     if (!code || !link) {
       throw new Error(

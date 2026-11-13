@@ -274,7 +274,7 @@ Gebruik je geen klantportaal, dan hoef je niets te doen en verandert er niets.
 
 Een klantportaal is een app die open is voor klanten: een webshop of een portaal waar mensen
 van buiten het bedrijf zelf inloggen. Het eigen domein van de app staat dan open voor iedereen
-en klanten loggen in per mail, met een code van acht cijfers of een link. Wat dicht blijft: het
+en klanten loggen in per mail, met een code van tien cijfers of een link. Wat dicht blijft: het
 `workers.dev`-adres en de previews (achter Cloudflare, zoals altijd), en medewerkers loggen in
 via Cloudflare, zoals altijd. Voor klanten staat er niets in `toegang.json`: de groepen daar
 zijn bij een klantportaal alleen nog de medewerkers. Voor een gewone app verandert er niets.
@@ -386,7 +386,7 @@ voor de app klaar, en laat de deur staan. Je mag hem zo vaak herhalen als je wil
    Je ziet nu de inlogpagina voor klanten: het vak E-mailadres met de knop Doorgaan, en
    daaronder de knop Inloggen voor medewerkers.
 4. Vul een privéadres in (niet je werkadres: dat weigert het portaal, want het is van een
-   medewerker), klik Doorgaan en vul de code van acht cijfers uit de mail in.
+   medewerker), klik Doorgaan en vul de code van tien cijfers uit de mail in.
 5. Test daarna de link. Daarvoor heb je een tweede mail nodig, want een code en een link uit
    dezelfde mail werken samen maar één keer: ga weer naar `/login`, klik Uitloggen, wacht een
    minuut (een adres krijgt hoogstens één mail per minuut), vraag opnieuw een mail aan en klik

@@ -11,7 +11,7 @@ staat hier één keer.
 | Het eigen domein | achter de deur (Access-app `<vv><app>`) | open, geen Access-app (na stap 5) |
 | `workers.dev` en de previews per pull request | dicht (Access op de Worker) | dicht, ongewijzigd |
 | Inloggen voor medewerkers | via Cloudflare (SaaS-app `<vv><app>-inlog`, de groepen) | hetzelfde, ongewijzigd |
-| Inloggen per mail in productie | uit | aan: een code van acht cijfers en een link, 15 minuten geldig |
+| Inloggen per mail in productie | uit | aan: een code van tien cijfers en een link, 15 minuten geldig |
 | Inloggen met een wachtwoord | kan niet (e-mail staat uit) | kan niet: een hook weigert elke sessie met een wachtwoord |
 | Een account maken per mail | kan niet | iedereen, behalve op een adres of domein van een medewerker (een hook) |
 | Anoniem aanmelden en de meldingsmails van Supabase | zoals het project staat | uitdrukkelijk uit |
@@ -31,7 +31,7 @@ klantportaal kan iedereen de app openen en een account maken. Wat zo iemand kan 
 bepalen alleen de regels in de database (RLS). Dit is wat de bouwer in stap 0 bevestigt:
 
 - De app staat op versie 43 of later en heeft het inlogscherm met beide manieren, met een
-  codevak van acht cijfers en de Turnstile-widget. De inrichting leest dat vóór de eerste
+  codevak van tien cijfers en de Turnstile-widget. De inrichting leest dat vóór de eerste
   wijziging uit de app-repo: `src/lib/env.ts` op `main` moet `VITE_INLOGDIENST` lezen met
   `leesInlogdiensten`. Een oudere app (of een app van de openbare template) start met
   `cloudflare,mailcode` niet meer op; dan stopt de inrichting.
@@ -128,7 +128,7 @@ De mail gaat via Resend over SMTP (`smtp.resend.com`, poort 465, gebruiker `rese
 van de afzender moet passen op het patroon dat Supabase voor `smtp_admin_email` hanteert;
 `toegang.json` gebruikt hetzelfde patroon. Er is één inlogmail, "Inloggen bij <naam>", in
 dezelfde vorm als het lokale sjabloon van de app (`supabase/templates/inlogcode.html`): de code
-van acht cijfers en een link, allebei 15 minuten geldig en één keer te gebruiken. Supabase
+van tien cijfers en een link, allebei 15 minuten geldig en één keer te gebruiken. Supabase
 verstuurt hem in drie gevallen: een bekend adres vraagt een code (`magic_link`), een adres
 zonder account (`confirmation`: de eerste keer van een nieuwe klant, de eerste inlog van een
 nieuwe medewerker via Cloudflare, maar ook als een ander dat adres opgeeft) en de herstelroute
@@ -195,15 +195,17 @@ Auth stuurt.
 | mails per uur, het hele project samen (`rate_limit_email_sent`) | 100 | Een mailbom kost hoogstens 2400 mails per dag. Is de grens bereikt, dan krijgt dat uur niemand meer een inlogmail |
 | tijd tussen twee mails naar hetzelfde adres (`smtp_max_frequency`) | 60 seconden | Eén adres krijgt hoogstens één mail per minuut |
 | aanvragen per IP-adres (`rate_limit_otp`) | 5 per vijf minuten, na een voorraad van 30 | Supabase heeft zes tellers per IP-adres, elk met een eigen voorraad van 30 die meteen op mag |
-| pogingen om een code of link in te wisselen, per IP-adres (`rate_limit_verify`) | 5 per vijf minuten, na een voorraad van 30 | 1470 gokken per IP-adres per dag, op honderd miljoen mogelijkheden |
+| pogingen om een code of link in te wisselen, per IP-adres (`rate_limit_verify`) | 5 per vijf minuten, na een voorraad van 30 | 1470 gokken per IP-adres per dag, op tien miljard mogelijkheden |
 
 - **De tellers per IP-adres houden één mens tegen, geen aanvaller.** Door de voorraad van 30
   per teller (vast in Supabase) kan één computer zonder captcha in een paar minuten de 100
   mails van het uur opmaken. Daarom staat de captcha standaard aan.
-- **Een code raden.** Een fout antwoord maakt een code niet ongeldig; daarom acht cijfers in
-  plaats van zes. Met 1470 gokken per IP-adres per dag en honderd IP-adressen is de kans op één
-  goede gok ongeveer 0,15 procent per dag (met zes cijfers was dat ruim 13 procent). Zie "Open
-  punten vóór de eerste klant" voor de aanname over IPv6.
+- **Een code raden.** Een fout antwoord maakt een code niet ongeldig, er is geen teller per
+  account voor foute pogingen, en rechtstreeks bij Supabase heeft elk IP-adres een eigen teller;
+  daarom tien cijfers, het meeste wat Supabase toestaat. Met 1470 gokken per IP-adres per dag en
+  honderd IP-adressen is de kans op één goede gok ongeveer 0,0015 procent per dag (met acht
+  cijfers 0,15 procent, met zes ruim 13 procent). Zie "Open punten vóór de eerste klant" voor de
+  aanname over IPv6.
 - **Een ingelogde klant kan zelf mails uitlokken.** Adres wijzigen en de controlecode vragen
   geen captcha. Eén account kan zo ruim honderd mails per uur laten versturen en daarmee de
   mailgrens van dat uur opmaken. In die mails staat niets bruikbaars, en de afzender is een
@@ -341,12 +343,11 @@ klantportaal is. Het wijzigt niets.
 Deze punten volgen uit documentatie of broncode en zijn nog niet op een echt account geprobeerd.
 Loop ze na in de proef vóór de eerste klant live gaat.
 
-- **IPv6 en de code van acht cijfers.** De som bij "De rem" klopt alleen als "een IP-adres" ook
+- **IPv6 en de code van tien cijfers.** De som bij "De rem" klopt alleen als "een IP-adres" ook
   echt één aanvaller is. In de broncode telt Supabase Auth per letterlijk adres, en één gewone
   aansluiting met IPv6 heeft er miljarden. Telt het platform van Supabase zulke adressen niet
-  samen, dan haalt één aanvaller met 65.000 adressen een kans van ruim de helft per dag. Vraag
-  dit bij Supabase na, en kies anders voor een code van tien cijfers (`CODE_LENGTE`, samen met
-  het codevak in de app).
+  samen, dan haalt één aanvaller met 65.536 adressen ongeveer 1 procent per dag (met acht cijfers
+  was dat ruim de helft; tien is het meeste wat Supabase toestaat). Vraag dit bij Supabase na.
 - **Het merk.** Dat Cloudflare `custom_deny_message` in de lijst Access-apps teruggeeft, en een
   lege tekst accepteert om hem weg te halen. De nep-wolk neemt beide aan; de openbare
   documentatie noemt het veld wel, maar zegt niets over wissen met een lege tekst. Wat er
