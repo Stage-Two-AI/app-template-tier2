@@ -58,6 +58,14 @@ const velden = z
      */
     VITE_SENTRY_DSN: z.string().optional(),
     /**
+     * De openbare sleutel (sitekey) van Cloudflare Turnstile: de controle tegen robots op het
+     * inlogformulier voor klanten (src/features/auth/robotcontrole.ts). Leeg of afwezig: de
+     * controle staat uit en er verandert niets. Hoort bij de schakelaar `captcha` van de
+     * inrichting: staat de controle bij Supabase aan, dan moet deze sleutel er zijn, anders
+     * kan geen klant meer een code aanvragen.
+     */
+    VITE_TURNSTILE_SITEKEY: z.string().optional(),
+    /**
      * De testlogin: e-mail en wachtwoord van de vaste testgebruiker in de testdatabase.
      * `pnpm testlogin` zet ze in .env.development.local (het wachtwoord wordt elke nacht
      * vernieuwd); dat bestand leest Vite alleen in de dev-server.

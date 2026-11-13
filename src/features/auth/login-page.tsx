@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InlogMetCode } from "@/features/auth/inlog-met-code";
 import { type Inlogdienst, inlogVorm, startInloggen } from "@/features/auth/inlogdienst";
-import { inlogdiensten, testloginVoorDev } from "@/lib/env";
+import { env, inlogdiensten, testloginVoorDev } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { credentialsSchema, fieldErrors } from "@/lib/validation";
 
@@ -43,15 +43,25 @@ function foutUitAdres(): string | null {
 export function LoginPage({
   dienst: opgegeven = inlogdiensten,
   testlogin = testloginVoorDev(),
+  robotSleutel = env.VITE_TURNSTILE_SITEKEY,
 }: {
   dienst?: Inlogdienst | readonly Inlogdienst[];
   /** Alleen lokaal in de dev-server: de testgebruiker van de testdatabase (`pnpm testlogin`). */
   testlogin?: { email: string; wachtwoord: string } | null;
+  /** De sitekey van Turnstile voor het formulier van klanten; leeg is uit (robotcontrole.ts). */
+  robotSleutel?: string;
 }) {
   const diensten = typeof opgegeven === "string" ? [opgegeven] : opgegeven;
   const [dienst = "wachtwoord"] = diensten;
   if (diensten.length > 1) {
-    return <InlogMetCode diensten={diensten} auth={supabase.auth} terugNaar={terugNaar} />;
+    return (
+      <InlogMetCode
+        diensten={diensten}
+        auth={supabase.auth}
+        terugNaar={terugNaar}
+        robotSleutel={robotSleutel}
+      />
+    );
   }
   const vorm = inlogVorm(dienst);
   if (vorm === "wachtwoord") return <WachtwoordFormulier testlogin={testlogin} />;

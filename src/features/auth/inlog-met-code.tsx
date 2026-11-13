@@ -3,7 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { type InlogAuth, type Inlogdienst, startInloggen } from "@/features/auth/inlogdienst";
-import { CODE_LENGTE, isHeleCode, leesCode, type MailcodeAuth } from "@/features/auth/mailcode";
+import {
+  CODE_LENGTE,
+  isFoutVanDienst,
+  isHeleCode,
+  leesCode,
+  type MailcodeAuth,
+} from "@/features/auth/mailcode";
+import { type Robotcontrole, useRobotcontrole } from "@/features/auth/robotcontrole";
 import { useMailcode } from "@/features/auth/use-mailcode";
 
 /**
@@ -46,23 +53,29 @@ export function InlogMetCode({
   diensten,
   auth,
   terugNaar,
+  robotSleutel,
 }: {
   diensten: readonly Inlogdienst[];
   auth: MailcodeAuth & InlogAuth;
   terugNaar: () => string;
+  /** De sitekey van Turnstile; leeg of afwezig is uit. Zie robotcontrole.ts. */
+  robotSleutel?: string;
 }) {
   const metMail = diensten.includes("mailcode");
   const knoppen = diensten.filter(isKnopdienst);
-  const mailcode = useMailcode(auth, terugNaar);
+  const robot = useRobotcontrole(metMail ? robotSleutel : undefined);
+  const mailcode = useMailcode(auth, terugNaar, robot);
   const { toestand } = mailcode;
+  // Een weigering na de knop voor medewerkers gaat niet over het adresveld van de klant.
+  const vanDienst = toestand.fout !== null && isFoutVanDienst(toestand.fout.soort);
 
   if (toestand.stap === "link") return <LinkStap mailcode={mailcode} />;
-  if (metMail && toestand.stap === "code") return <CodeStap mailcode={mailcode} />;
+  if (metMail && toestand.stap === "code") return <CodeStap mailcode={mailcode} robot={robot} />;
 
   return (
     <Pagina kop="Inloggen">
-      {metMail ? <AdresStap mailcode={mailcode} /> : null}
-      {toestand.fout && !metMail ? <Melding>{toestand.fout.tekst}</Melding> : null}
+      {toestand.fout && (vanDienst || !metMail) ? <Melding>{toestand.fout.tekst}</Melding> : null}
+      {metMail ? <AdresStap mailcode={mailcode} robot={robot} toonFout={!vanDienst} /> : null}
       {metMail && knoppen.length > 0 ? (
         <div className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden="true">
           <span className="h-px flex-1 bg-border" />
@@ -78,17 +91,26 @@ export function InlogMetCode({
 }
 
 type StapProps = { mailcode: ReturnType<typeof useMailcode> };
+type MetRobot = StapProps & { robot: Robotcontrole | null };
 
-function AdresStap({ mailcode }: StapProps) {
+/** Hier zet Turnstile zijn widget neer. Meestal blijft het vak leeg en onzichtbaar. */
+function Robotvak({ robot }: { robot: Robotcontrole | null }) {
+  return robot ? (
+    <div ref={robot.vak} data-testid="robotcontrole" className="empty:hidden" />
+  ) : null;
+}
+
+function AdresStap({ mailcode, robot, toonFout }: MetRobot & { toonFout: boolean }) {
   const { toestand } = mailcode;
+  const fout = toonFout ? toestand.fout : null;
   const [adres, setAdres] = useState(toestand.email);
   const veld = useRef<HTMLInputElement>(null);
   const bezig = toestand.bezig !== null;
 
   useEffect(() => {
     // Bij een fout terug naar het veld, zodat een schermlezer en het toetsenbord daar staan.
-    if (toestand.fout) veld.current?.focus();
-  }, [toestand.fout]);
+    if (fout) veld.current?.focus();
+  }, [fout]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -115,12 +137,13 @@ function AdresStap({ mailcode }: StapProps) {
           required
           className="h-12 text-base"
           value={adres}
-          aria-invalid={toestand.fout?.soort === "adres" ? true : undefined}
-          aria-describedby={toestand.fout ? "email-fout" : undefined}
+          aria-invalid={fout?.soort === "adres" ? true : undefined}
+          aria-describedby={fout ? "email-fout" : undefined}
           onChange={(event) => setAdres(event.target.value)}
         />
       </div>
-      {toestand.fout ? <Melding id="email-fout">{toestand.fout.tekst}</Melding> : null}
+      {fout ? <Melding id="email-fout">{fout.tekst}</Melding> : null}
+      <Robotvak robot={robot} />
       <Button type="submit" size="lg" className="h-12 text-base" disabled={bezig}>
         {bezig ? "Bezig…" : "Doorgaan"}
       </Button>
@@ -128,7 +151,7 @@ function AdresStap({ mailcode }: StapProps) {
   );
 }
 
-function CodeStap({ mailcode }: StapProps) {
+function CodeStap({ mailcode, robot }: MetRobot) {
   const { toestand, wachtNog } = mailcode;
   const [code, setCode] = useState("");
   const veld = useRef<HTMLInputElement>(null);
@@ -188,6 +211,8 @@ function CodeStap({ mailcode }: StapProps) {
           {controleren ? "Bezig…" : "Inloggen"}
         </Button>
       </form>
+      {/* Voor "Stuur een nieuwe code": ook die aanvraag heeft een bewijs nodig. */}
+      <Robotvak robot={robot} />
       <div className="flex flex-col gap-1 text-sm">
         <p className="text-muted-foreground">Geen mail gekregen? Kijk ook bij ongewenste mail.</p>
         <div className="flex flex-wrap justify-between gap-x-4">

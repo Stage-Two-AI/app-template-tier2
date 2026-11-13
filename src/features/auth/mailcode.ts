@@ -27,7 +27,18 @@ export const WACHT_OPNIEUW_MS = 60 * 1000;
 /** Het deel van de Supabase-auth dat hier nodig is; zo is het los te testen. */
 export type MailcodeAuth = Pick<SupabaseClient["auth"], "signInWithOtp" | "verifyOtp">;
 
-export type FoutSoort = "adres" | "code" | "verlopen" | "link" | "te-vaak" | "verbinding" | "uit";
+export type FoutSoort =
+  | "adres"
+  | "code"
+  | "verlopen"
+  | "link"
+  | "te-vaak"
+  | "verbinding"
+  | "uit"
+  | "robot"
+  | "dienst"
+  | "bevestig-adres"
+  | "adres-bezet";
 export type Fout = { soort: FoutSoort; tekst: string };
 
 const TEKST: Record<FoutSoort, string> = {
@@ -38,7 +49,19 @@ const TEKST: Record<FoutSoort, string> = {
   "te-vaak": "Te veel pogingen. Wacht een minuut en probeer het dan opnieuw.",
   verbinding: "Er is geen verbinding. Controleer je internet en probeer het opnieuw.",
   uit: "Inloggen per mail staat voor deze app niet aan.",
+  robot:
+    "De controle of je geen robot bent is niet gelukt. Wacht even tot de controle klaar is en probeer het opnieuw. Blijft het zo, ververs dan de pagina.",
+  dienst: "Inloggen is niet gelukt. Probeer het opnieuw.",
+  "bevestig-adres":
+    "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Log daarna uit en kies opnieuw Inloggen voor medewerkers.",
+  "adres-bezet":
+    "Inloggen voor medewerkers lukt nog niet, omdat je e-mailadres niet bevestigd kon worden. Vraag je beheerder om dit op te lossen.",
 };
+
+/** Fouten die niet over het e-mailadres van een klant gaan en dus niet bij dat veld horen. */
+export function isFoutVanDienst(soort: FoutSoort): boolean {
+  return soort === "dienst" || soort === "bevestig-adres" || soort === "adres-bezet";
+}
 
 export function fout(soort: FoutSoort): Fout {
   return { soort, tekst: TEKST[soort] };
@@ -80,6 +103,8 @@ type AuthFout = { status?: number; code?: string; name?: string };
 function zichtbareFout(error: AuthFout): Fout | null {
   if (error.status === 429 || error.code?.startsWith("over_")) return fout("te-vaak");
   if (error.code === "email_provider_disabled") return fout("uit");
+  // De controle tegen robots (captcha) staat aan bij Supabase en keurde deze aanvraag af.
+  if (error.code === "captcha_failed") return fout("robot");
   const geenAntwoord = error.status === undefined || error.status === 0 || error.status >= 500;
   if (geenAntwoord || error.name === "AuthRetryableFetchError") return fout("verbinding");
   return null;
@@ -91,18 +116,27 @@ export type Uitkomst = { ok: true } | { ok: false; fout: Fout };
  * Stap 1: vraag een code aan voor dit adres. Supabase stuurt één mail met de code en een
  * link. `shouldCreateUser` staat aan: wie een account mag krijgen, bewaakt de server (de
  * before-user-created-hook van de inrichting), niet de browser.
+ *
+ * Staat bij Supabase de controle tegen robots aan, dan weigert Supabase elke aanvraag zonder
+ * `captchaToken`. Het controleren van de code (stap 2) vraagt er geen.
  */
 export async function vraagCode(
   auth: MailcodeAuth,
   adres: string,
   terugNaar: string,
+  /** Het bewijs van de controle tegen robots; alleen als die aan staat (robotcontrole.tsx). */
+  captchaToken?: string,
 ): Promise<Uitkomst> {
   const email = leesAdres(adres);
   if (!email) return { ok: false, fout: fout("adres") };
   try {
     const { error } = await auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: terugNaar, shouldCreateUser: true },
+      options: {
+        emailRedirectTo: terugNaar,
+        shouldCreateUser: true,
+        ...(captchaToken ? { captchaToken } : {}),
+      },
     });
     if (!error) return { ok: true };
     const zichtbaar = zichtbareFout(error);
@@ -172,14 +206,30 @@ export async function controleerLink(auth: MailcodeAuth, tokenHash: string): Pro
  * Kwam Supabase terug op de inlogpagina met een fout in het adres? Geeft dan een vaste
  * tekst. De tekst uit het adres zelf wordt nooit getoond: deze pagina staat open voor
  * iedereen, en dan kan een vreemde anders met een link eigen tekst op het inlogscherm zetten.
+ *
+ * Eén weigering krijgt een eigen uitleg, omdat de gebruiker er zelf iets aan kan doen.
+ * Cloudflare zegt er bij Supabase niet bij dat een adres gecontroleerd is. Een medewerker
+ * die voor het eerst via Cloudflare inlogt, krijgt daarom van Supabase een mail om zijn
+ * adres te bevestigen, en komt hier terug met `provider_email_needs_verification` ("Unverified
+ * email with custom:cloudflare. A confirmation email has been sent ..."). Hoort het adres al
+ * bij een ander account, dan komt er geen mail ("... Verify the email with custom:cloudflare
+ * in order to sign in"); dat kan alleen de beheerder oplossen. De Engelse tekst dient hier
+ * alleen om die twee uit elkaar te houden.
  */
 export function foutUitAdres(zoekdeel: string, hash: string): Fout | null {
   const params = new URLSearchParams(zoekdeel);
   const anker = new URLSearchParams(hash.replace(/^#/, ""));
   const lees = (naam: string) => params.get(naam) ?? anker.get(naam);
-  if (!lees("error") && !lees("error_code") && !lees("error_description")) return null;
-  if (lees("error_code") === "otp_expired") return fout("link");
-  return { soort: "link", tekst: "Inloggen is niet gelukt. Probeer het opnieuw." };
+  const code = lees("error_code");
+  const uitleg = lees("error_description") ?? "";
+  if (!lees("error") && !code && !uitleg) return null;
+  if (code === "otp_expired") return fout("link");
+  if (code === "provider_email_needs_verification" || /^Unverified email with /i.test(uitleg)) {
+    return fout(
+      /confirmation email has been sent/i.test(uitleg) ? "bevestig-adres" : "adres-bezet",
+    );
+  }
+  return fout("dienst");
 }
 
 // --- De toestand van het formulier -------------------------------------------------------

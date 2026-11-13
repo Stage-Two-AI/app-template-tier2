@@ -57,6 +57,28 @@ describe("vraagCode", () => {
     });
   });
 
+  it("stuurt het bewijs van de controle tegen robots mee als die aan staat", async () => {
+    const auth = nepAuth();
+    expect(await vraagCode(auth, "piet@klant.nl", TERUG, "bewijs-123")).toEqual({ ok: true });
+    expect(auth.signInWithOtp).toHaveBeenCalledWith({
+      email: "piet@klant.nl",
+      options: { emailRedirectTo: TERUG, shouldCreateUser: true, captchaToken: "bewijs-123" },
+    });
+  });
+
+  it("zegt het als Supabase de controle tegen robots afkeurt, in plaats van te doen alsof er een mail is", async () => {
+    const auth = nepAuth({
+      otp: {
+        message: "captcha protection: request disallowed (no captcha_token found)",
+        status: 400,
+        code: "captcha_failed",
+      },
+    });
+    const uitkomst = await vraagCode(auth, "piet@klant.nl", TERUG);
+    expect(uitkomst).toMatchObject({ ok: false, fout: { soort: "robot" } });
+    expect(uitkomst.ok ? "" : uitkomst.fout.tekst).not.toContain("captcha");
+  });
+
   it("weigert een ongeldig adres zonder Supabase aan te roepen", async () => {
     const auth = nepAuth();
     const uitkomst = await vraagCode(auth, "geen-adres", TERUG);
@@ -196,6 +218,36 @@ describe("foutUitAdres", () => {
     const uitkomst = foutUitAdres(vreemd, "");
     expect(uitkomst?.tekst).toBe("Inloggen is niet gelukt. Probeer het opnieuw.");
     expect(foutUitAdres("", "#error_description=Bel+0900")?.tekst).not.toContain("0900");
+  });
+
+  it("legt uit wat een nieuwe medewerker moet doen na 'Unverified email' van Supabase", () => {
+    // Zo komt Supabase terug na de knop voor medewerkers (internal/api/external.go).
+    const terug =
+      "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent+to+your+custom%3Acloudflare+email";
+    for (const uitkomst of [foutUitAdres(terug, ""), foutUitAdres("", `#${terug.slice(1)}`)]) {
+      expect(uitkomst?.soort).toBe("bevestig-adres");
+      expect(uitkomst?.tekst).toContain("klik op de link in die mail");
+      expect(uitkomst?.tekst).toContain("Inloggen voor medewerkers");
+      expect(uitkomst?.tekst).not.toMatch(/unverified|custom:cloudflare|confirmation/i);
+    }
+  });
+
+  it("zegt bij 'Unverified email' zonder mail dat de beheerder het moet oplossen", () => {
+    const terug =
+      "?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+Verify+the+email+with+custom%3Acloudflare+in+order+to+sign+in";
+    const uitkomst = foutUitAdres(terug, "");
+    expect(uitkomst?.soort).toBe("adres-bezet");
+    expect(uitkomst?.tekst).toContain("Vraag je beheerder");
+    expect(uitkomst?.tekst).not.toMatch(/unverified|custom:cloudflare|verify/i);
+  });
+
+  it("herkent de weigering ook zonder foutcode, en neemt de tekst nooit over", () => {
+    const uitkomst = foutUitAdres(
+      "?error=access_denied&error_description=Unverified+email+with+custom%3Acloudflare.+Bel+0900-1234",
+      "",
+    );
+    expect(uitkomst?.soort).toBe("adres-bezet");
+    expect(uitkomst?.tekst).not.toContain("0900");
   });
 
   it("herkent een verlopen link", () => {

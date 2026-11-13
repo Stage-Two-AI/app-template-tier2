@@ -4,6 +4,7 @@ import {
   bewaar,
   controleerCode,
   controleerLink,
+  fout,
   foutUitAdres,
   herstel,
   leesAdres,
@@ -53,7 +54,18 @@ function maakAdresSchoon(): void {
   window.history.replaceState(null, "", window.location.pathname);
 }
 
-export function useMailcode(auth: MailcodeAuth, terugNaar: () => string): Mailcode {
+/**
+ * De controle tegen robots, als die aan staat (robotcontrole.tsx). `haalToken` geeft het
+ * bewijs voor één aanvraag, of null als de controle niet lukte; `verbruikt` vraagt daarna
+ * een nieuw bewijs aan, want elk bewijs werkt één keer.
+ */
+export type Robot = { haalToken: () => Promise<string | null>; verbruikt: () => void };
+
+export function useMailcode(
+  auth: MailcodeAuth,
+  terugNaar: () => string,
+  robot: Robot | null = null,
+): Mailcode {
   const [begin] = useState(beginToestand);
   const [toestand, stuur] = useReducer(volgende, begin.toestand);
   const [nu, setNu] = useState(() => Date.now());
@@ -73,7 +85,22 @@ export function useMailcode(auth: MailcodeAuth, terugNaar: () => string): Mailco
   const stuurCode = useCallback(
     async (adres: string, opnieuw: boolean) => {
       stuur({ soort: "bezig", waarmee: opnieuw ? "opnieuw" : "versturen" });
-      const uitkomst = await vraagCode(auth, adres, terugNaar());
+      let bewijs: string | undefined;
+      if (robot) {
+        // Eerst het adres: een tikfout hoeft niet op de controle te wachten.
+        if (!leesAdres(adres)) {
+          stuur({ soort: "mislukt", fout: fout("adres") });
+          return;
+        }
+        const token = await robot.haalToken();
+        if (!token) {
+          stuur({ soort: "mislukt", fout: fout("robot") });
+          return;
+        }
+        bewijs = token;
+      }
+      const uitkomst = await vraagCode(auth, adres, terugNaar(), bewijs);
+      robot?.verbruikt();
       const op = Date.now();
       setNu(op);
       if (uitkomst.ok) {
@@ -82,7 +109,7 @@ export function useMailcode(auth: MailcodeAuth, terugNaar: () => string): Mailco
         stuur({ soort: "mislukt", fout: uitkomst.fout });
       }
     },
-    [auth, terugNaar],
+    [auth, terugNaar, robot],
   );
 
   const verstuur = useCallback((adres: string) => stuurCode(adres, false), [stuurCode]);

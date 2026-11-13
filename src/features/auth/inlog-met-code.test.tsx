@@ -76,6 +76,186 @@ describe("klantportaal: de knop voor medewerkers", () => {
   });
 });
 
+describe("klantportaal: Supabase weigert een medewerker na de knop van Cloudflare", () => {
+  const ONBEVESTIGD =
+    "/login?error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+A+confirmation+email+has+been+sent+to+your+custom%3Acloudflare+email";
+
+  it("zegt in gewoon Nederlands wat de medewerker moet doen, zonder de ruwe tekst", async () => {
+    window.history.replaceState(null, "", ONBEVESTIGD);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    const melding = await screen.findByRole("alert");
+    expect(melding).toHaveTextContent(
+      "Je e-mailadres moet nog één keer bevestigd worden. Je hebt daarvoor een mail gekregen: klik op de link in die mail. Log daarna uit en kies opnieuw Inloggen voor medewerkers.",
+    );
+    expect(document.body).not.toHaveTextContent(/unverified|custom:cloudflare|access_denied/i);
+    expect(window.location.search).toBe("");
+    expect(signInWithOAuth).not.toHaveBeenCalled();
+  });
+
+  it("hangt die melding niet aan het adresveld van de klant", async () => {
+    window.history.replaceState(null, "", ONBEVESTIGD);
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    await screen.findByRole("alert");
+    const veld = screen.getByLabelText("E-mailadres");
+    expect(veld).not.toHaveAttribute("aria-describedby");
+    expect(veld).not.toHaveAttribute("aria-invalid");
+    // De knop voor medewerkers en het formulier voor klanten staan er gewoon nog.
+    expect(screen.getByRole("button", { name: "Inloggen voor medewerkers" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Doorgaan" })).toBeEnabled();
+  });
+
+  it("zegt het als alleen de beheerder het kan oplossen", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/login#error=access_denied&error_code=provider_email_needs_verification&error_description=Unverified+email+with+custom%3Acloudflare.+Verify+the+email+with+custom%3Acloudflare+in+order+to+sign+in",
+    );
+    render(<LoginPage dienst={KLANTPORTAAL} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Vraag je beheerder");
+    expect(document.body).not.toHaveTextContent(/unverified|custom:cloudflare/i);
+  });
+});
+
+describe("klantportaal: de controle tegen robots (Turnstile) als schakelaar", () => {
+  type Opties = { sitekey: string; callback: (token: string) => void; appearance: string };
+  let widgets: { vak: HTMLElement; opties: Opties }[] = [];
+  const reset = vi.fn();
+  const remove = vi.fn();
+
+  function zetNepTurnstile() {
+    widgets = [];
+    window.turnstile = {
+      render: (vak, opties) => {
+        widgets.push({ vak, opties });
+        return `widget-${widgets.length}`;
+      },
+      reset,
+      remove,
+    };
+  }
+
+  afterEach(() => {
+    delete window.turnstile;
+    for (const script of document.head.querySelectorAll("script")) script.remove();
+  });
+
+  it("zonder sleutel: geen script, geen widget, geen token; alles zoals het was", async () => {
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="" />);
+    await naarCodestap();
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+    expect(screen.queryByTestId("robotcontrole")).toBeNull();
+    expect(signInWithOtp).toHaveBeenCalledWith({
+      email: "piet@klant.nl",
+      options: { emailRedirectTo: `${window.location.origin}/login`, shouldCreateUser: true },
+    });
+  });
+
+  it("met sleutel: laadt het script van Cloudflare", () => {
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    const script = document.head.querySelector<HTMLScriptElement>("script");
+    expect(script?.src).toBe(
+      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+    );
+  });
+
+  it("met sleutel: stuurt het bewijs van de widget mee bij het aanvragen van de code", async () => {
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(widgets).toHaveLength(1));
+    expect(widgets[0]?.opties.sitekey).toBe("sleutel-van-de-site");
+    expect(widgets[0]?.opties.appearance).toBe("interaction-only");
+    expect(widgets[0]?.vak).toBe(screen.getByTestId("robotcontrole"));
+    widgets[0]?.opties.callback("bewijs-1");
+
+    await naarCodestap();
+    expect(signInWithOtp).toHaveBeenCalledWith({
+      email: "piet@klant.nl",
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+        shouldCreateUser: true,
+        captchaToken: "bewijs-1",
+      },
+    });
+  });
+
+  it("wacht op de widget als iemand sneller klikt dan de controle klaar is", async () => {
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(widgets).toHaveLength(1));
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
+    expect(screen.getByRole("button", { name: "Bezig…" })).toBeDisabled();
+    expect(signInWithOtp).not.toHaveBeenCalled();
+
+    widgets[0]?.opties.callback("bewijs-laat");
+    await screen.findByLabelText("Code van zes cijfers");
+    expect(signInWithOtp.mock.calls[0]?.[0].options.captchaToken).toBe("bewijs-laat");
+  });
+
+  it("gebruikt voor een nieuwe code een nieuw bewijs: elk bewijs werkt één keer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(widgets).toHaveLength(1));
+    widgets[0]?.opties.callback("bewijs-1");
+    await user.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await user.click(screen.getByRole("button", { name: "Doorgaan" }));
+    await screen.findByLabelText("Code van zes cijfers");
+    // De widget van het eerste scherm is weg; die op het codescherm haalt een nieuw bewijs.
+    await waitFor(() => expect(widgets).toHaveLength(2));
+    expect(remove).toHaveBeenCalledWith("widget-1");
+    expect(widgets[1]?.vak).toBe(screen.getByTestId("robotcontrole"));
+    widgets[1]?.opties.callback("bewijs-2");
+
+    await vi.advanceTimersByTimeAsync(61_000);
+    const opnieuw = await screen.findByRole(
+      "button",
+      { name: "Stuur een nieuwe code" },
+      { timeout: 4000 },
+    );
+    await user.click(opnieuw);
+    await waitFor(() => expect(signInWithOtp).toHaveBeenCalledTimes(2));
+    expect(signInWithOtp.mock.calls[1]?.[0].options.captchaToken).toBe("bewijs-2");
+    // En daarna vraagt de pagina de widget om weer een nieuw bewijs.
+    expect(reset).toHaveBeenCalledWith("widget-2");
+  });
+
+  it("zegt het als de controle niet lukt, en vraagt dan geen code aan", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await waitFor(() => expect(widgets).toHaveLength(1));
+    await user.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await user.click(screen.getByRole("button", { name: "Doorgaan" }));
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(await screen.findByRole("alert")).toHaveTextContent("geen robot");
+    expect(signInWithOtp).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("E-mailadres")).toHaveValue("piet@klant.nl");
+  });
+
+  it("zegt het als Supabase de controle afkeurt (sleutel hier ontbreekt of klopt niet)", async () => {
+    signInWithOtp.mockResolvedValue({
+      data: {},
+      error: { message: "captcha protection", status: 400, code: "captcha_failed" },
+    });
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="" />);
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "piet@klant.nl");
+    await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("geen robot");
+    expect(screen.queryByLabelText("Code van zes cijfers")).toBeNull();
+  });
+
+  it("een tikfout in het adres wacht niet op de controle", async () => {
+    zetNepTurnstile();
+    render(<LoginPage dienst={KLANTPORTAAL} robotSleutel="sleutel-van-de-site" />);
+    await userEvent.type(screen.getByLabelText("E-mailadres"), "geen-adres");
+    await userEvent.click(screen.getByRole("button", { name: "Doorgaan" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("geen geldig e-mailadres");
+  });
+});
+
 describe("klantportaal: een klant logt in met de code uit de mail", () => {
   it("vraagt de code aan en toont daarna het codevak, klaar voor een telefoon", async () => {
     render(<LoginPage dienst={KLANTPORTAAL} />);

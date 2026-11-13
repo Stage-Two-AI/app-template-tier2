@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { env } from "./env";
+import { env, envSchema } from "./env";
 
 describe("env", () => {
   it("praat standaard met het schema public", () => {
@@ -143,5 +143,19 @@ describe("testloginVoorDev", () => {
     });
     expect(uitkomst.success).toBe(true);
     expect(uitkomst.data?.VITE_TESTLOGIN_WACHTWOORD).toBeUndefined();
+  });
+});
+
+describe("VITE_TURNSTILE_SITEKEY", () => {
+  it("is er standaard niet: de controle tegen robots staat dan uit", () => {
+    expect(env.VITE_TURNSTILE_SITEKEY).toBeUndefined();
+    expect(envSchema.safeParse({ VITE_TURNSTILE_SITEKEY: "" }).data?.VITE_TURNSTILE_SITEKEY).toBe(
+      undefined,
+    );
+  });
+
+  it("neemt een sleutel over zoals hij is", () => {
+    const uitkomst = envSchema.safeParse({ VITE_TURNSTILE_SITEKEY: "0x4AAAAAAA-voorbeeld" });
+    expect(uitkomst.data?.VITE_TURNSTILE_SITEKEY).toBe("0x4AAAAAAA-voorbeeld");
   });
 });
