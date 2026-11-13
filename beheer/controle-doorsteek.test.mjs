@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { controleer } from "./controle-doorsteek.mjs";
+import { adressenVoor, controleer } from "./controle-doorsteek.mjs";
+import { cloudflareClient } from "./lib/cloudflare.mjs";
+import { supabaseBeheer } from "./lib/supabase.mjs";
+import { nepWolk } from "./nep-wolk.mjs";
 
 const ACCESS = "https://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/cf-proef.stagetwo.nl";
 
@@ -237,4 +240,144 @@ test("zonder --klantportaal is een open domein nog steeds gezakt (AE2)", async (
   const rapport = await controleer({ ...OPTIES, fetchFn });
   assert.equal(uitkomst(rapport, "AE2")[0].geslaagd, false);
   assert.equal(uitkomst(rapport, "KP1").length, 0);
+});
+
+test("klantportaal: 'dicht' is alleen een doorverwijzing naar de loginpagina van Access; een typfout in een adres (onbereikbaar of 404) is gezakt, niet goedgekeurd", async () => {
+  // De echte adressen staan wagenwijd open; de opgegeven adressen bevatten een typfout.
+  const open = {
+    ...PORTAAL,
+    [OPTIES.workersDev]: { status: 200 },
+    [OPTIES.previewUrl]: { status: 200 },
+  };
+  for (const route of [
+    { status: 404 }, // workers.dev: "There is nothing here yet"
+    { fout: "getaddrinfo ENOTFOUND" },
+    { status: 401 },
+    { status: 403 },
+    { status: 302, naar: "https://elders.voorbeeld.test/cdn-cgi/access/login/x" },
+    { status: 302, naar: "https://stagetwo.cloudflareaccess.com/iets-anders" },
+    { status: 302, naar: "http://stagetwo.cloudflareaccess.com/cdn-cgi/access/login/x" },
+    { status: 302, naar: "https://nep.cloudflareaccess.com.kwaad.test/cdn-cgi/access/login/x" },
+  ]) {
+    const { fetchFn } = nepNet({
+      ...open,
+      "https://cf-prof.stagetwo-acc.workers.dev/": route,
+      "https://pr-1-cf-proef.stagetwoacc.workers.dev/": route,
+    });
+    const rapport = await controleer({
+      ...OPTIES,
+      klantportaal: true,
+      fetchFn,
+      workersDev: "https://cf-prof.stagetwo-acc.workers.dev/",
+      previewUrl: "https://pr-1-cf-proef.stagetwoacc.workers.dev/",
+    });
+    const gezakt = rapport.filter((r) => r.geslaagd === false).map((r) => r.wat);
+    assert.deepEqual(gezakt, ["workers.dev-adres", "preview zonder login"], JSON.stringify(route));
+    assert.match(
+      uitkomst(rapport, "AE5")[0].bewijs,
+      /onbekend: geen doorverwijzing naar de loginpagina van Access.*klopt het adres/,
+    );
+  }
+  // Kent de inrichting het team, dan telt alleen de loginpagina van dát team.
+  const { fetchFn } = nepNet(PORTAAL);
+  const goed = await controleer({
+    ...OPTIES,
+    klantportaal: true,
+    fetchFn,
+    team: "stagetwo.cloudflareaccess.com",
+  });
+  assert.deepEqual(
+    goed.filter((r) => r.geslaagd === false),
+    [],
+  );
+  const ander = await controleer({
+    ...OPTIES,
+    klantportaal: true,
+    fetchFn,
+    team: "anderteam.cloudflareaccess.com",
+  });
+  assert.equal(ander.filter((r) => r.geslaagd === false).length, 3);
+  // Zonder klantportaal blijft de controle zoals hij was (een adres dat niet bestaat is dicht).
+  const gewoon = await controleer({
+    ...OPTIES,
+    workersDev: "https://bestaat-niet.workers.dev/",
+    fetchFn: nepNet(DICHT).fetchFn,
+  });
+  assert.equal(uitkomst(gewoon, "AE6")[0].geslaagd, true);
+});
+
+test("de knop: de controle zoekt zelf de adressen op die de inrichting kent (domein, workers.dev, de vaste preview, het project, de openbare sleutel, klantportaal of niet); niemand typt iets", async () => {
+  const w = nepWolk({
+    projecten: [
+      {
+        ref: "refaaaaaaaaaaaaaaaaa",
+        name: "wi-direct",
+        organization_slug: "winco",
+        status: "ACTIVE_HEALTHY",
+      },
+    ],
+  });
+  const gemaskeerd = [];
+  const d = (toegang) => ({
+    cf: cloudflareClient({
+      fetchFn: w.fetchFn,
+      token: "t",
+      accountId: "acc",
+      teamDomein: "stagetwo",
+    }),
+    supabase: supabaseBeheer({ fetchFn: w.fetchFn, token: "t", orgSlug: "winco" }),
+    toegang,
+    maskeer: (x) => gemaskeerd.push(x),
+  });
+  const groepen = { kantoor: { domeinen: ["winco.nl"] } };
+  const arg = {
+    app: "direct",
+    voorvoegsel: "wi-",
+    hostname: "direct.wincoapps.com",
+    worker: "wi-direct",
+    stand: "standaard",
+  };
+  const portaal = {
+    groepen,
+    apps: {
+      direct: { groepen: ["kantoor"], klantportaal: true, afzender: "a@winco.nl", captcha: false },
+    },
+  };
+  assert.deepEqual(await adressenVoor(arg, d(portaal)), {
+    hostname: "direct.wincoapps.com",
+    projectRef: "refaaaaaaaaaaaaaaaaa",
+    anonKey: "anon-refaaaaaaaaaaaaaaaaa",
+    workersDev: "https://wi-direct.stagetwo-acc.workers.dev/",
+    previewUrl: "https://actueel-wi-direct.stagetwo-acc.workers.dev/",
+    klantportaal: true,
+    team: "stagetwo.cloudflareaccess.com",
+  });
+  assert.deepEqual(
+    gemaskeerd,
+    ["geheim-sr-refaaaaaaaaaaaaaaaaa"],
+    "de service role blijft uit het logboek",
+  );
+  // Alleen lezen.
+  assert.deepEqual(w.schrijfacties(), []);
+  const gewoon = await adressenVoor(arg, d({ groepen, apps: { direct: ["kantoor"] } }));
+  assert.equal(gewoon.klantportaal, false);
+  // De tijdelijke stand: workers.dev is dan het adres van de app zelf.
+  const tijdelijk = await adressenVoor(
+    { ...arg, hostname: null, stand: "tijdelijk" },
+    d({ groepen, apps: { direct: ["kantoor"] } }),
+  );
+  assert.equal(tijdelijk.hostname, "wi-direct.stagetwo-acc.workers.dev");
+  assert.equal(tijdelijk.workersDev, undefined);
+  await assert.rejects(
+    () => adressenVoor({ ...arg, app: "bestaat-niet" }, d(portaal)),
+    /staat niet in beheer\/toegang\.json/,
+  );
+  await assert.rejects(
+    () =>
+      adressenVoor(arg, {
+        ...d(portaal),
+        supabase: { projecten: async () => [], sleutels: async () => ({}) },
+      }),
+    /draai eerst App inrichten/,
+  );
 });
