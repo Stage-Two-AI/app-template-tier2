@@ -72,6 +72,144 @@ export function authInstellingen({ hostname, worker, subdomein }) {
   };
 }
 
+/** Mail van een klantportaal gaat via Resend, over SMTP (standaardkeuze 8 van uitgave 43). */
+export const SMTP_HOST = "smtp.resend.com";
+/** Poort 465: versleuteld vanaf de eerste byte. De gebruikersnaam is bij Resend altijd `resend`. */
+export const SMTP_POORT = "465";
+export const SMTP_GEBRUIKER = "resend";
+
+/** De inlogcode: zes cijfers, een kwartier geldig (standaardkeuze 9). */
+export const CODE_LENGTE = 6;
+export const CODE_GELDIG_SECONDEN = 15 * 60;
+
+/**
+ * De rem op een open inlogformulier. De eenheden komen uit de broncode van Supabase Auth
+ * (internal/api/apilimiter en internal/conf), nagelezen op 13-11-2026:
+ *
+ *   rate_limit_email_sent  mails per uur, voor het hele project samen. 100: ruim voor een
+ *                          drukke ochtend (een klant logt zelden opnieuw in, een sessie
+ *                          blijft staan), en een mailbom kost hoogstens 2400 mails per dag.
+ *                          Is de grens bereikt, dan krijgt dat uur niemand meer een mail;
+ *                          daarvoor is de schakelaar `captcha`.
+ *   smtp_max_frequency     seconden tussen twee mails naar hetzelfde adres. 60: één adres
+ *                          krijgt hoogstens één mail per minuut.
+ *   rate_limit_otp         aanvragen (code, aanmelding, opnieuw sturen) per vijf minuten per
+ *                          IP-adres. 15: één mens heeft er één of twee nodig, een kantoor
+ *                          achter één adres kan ermee vooruit.
+ *   rate_limit_verify      pogingen om een code of link in te wisselen, per vijf minuten per
+ *                          IP-adres. 15: in het kwartier dat een code geldt zijn dat 45
+ *                          gokken per IP-adres op een miljoen mogelijkheden.
+ */
+export const REM = {
+  rate_limit_email_sent: 100,
+  smtp_max_frequency: 60,
+  rate_limit_otp: 15,
+  rate_limit_verify: 15,
+};
+
+function htmlTekst(tekst) {
+  return String(tekst)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/**
+ * De inlogmail: de code én de link in dezelfde mail. Een link uit WhatsApp of Gmail opent
+ * vaak in een ingebouwde browser, waar de sessie daarna niet in de echte browser staat; de
+ * code werkt altijd. `{{ .Token }}` en `{{ .ConfirmationURL }}` vult Supabase Auth in. De
+ * naam komt uit toegang.json en mag geen HTML of sjabloonopdracht kunnen worden: het
+ * patroon van de afzender laat dat niet toe, en hier wordt hij nog eens als tekst gezet.
+ */
+export function inlogmail(naam) {
+  if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
+  const n = htmlTekst(naam);
+  const minuten = CODE_GELDIG_SECONDEN / 60;
+  return {
+    onderwerp: `Inloggen bij ${naam}`,
+    metCode: [
+      `<h2>Inloggen bij ${n}</h2>`,
+      "<p>Vul deze code in op het inlogscherm:</p>",
+      '<p style="font-size: 28px; letter-spacing: 4px;"><strong>{{ .Token }}</strong></p>',
+      "<p>Of klik op de link om meteen in te loggen:</p>",
+      `<p><a href="{{ .ConfirmationURL }}">Inloggen bij ${n}</a></p>`,
+      `<p>De code en de link zijn ${minuten} minuten geldig en werken één keer. Heb je dit niet aangevraagd, dan hoef je niets te doen.</p>`,
+    ].join("\n"),
+    // Voor de herstelmail (iemand roept /recover aan): alleen een link. De code uit zo'n
+    // mail is van een ander soort en werkt niet in het codevak van de app.
+    alleenLink: [
+      `<h2>Inloggen bij ${n}</h2>`,
+      `<p><a href="{{ .ConfirmationURL }}">Inloggen bij ${n}</a></p>`,
+      `<p>De link is ${minuten} minuten geldig en werkt één keer. Heb je dit niet aangevraagd, dan hoef je niets te doen.</p>`,
+    ].join("\n"),
+  };
+}
+
+/**
+ * De auth-instellingen van een klantportaal, alleen voor productie; ze komen bovenop
+ * authInstellingen. Veldnamen nagelopen tegen de Management API (UpdateAuthConfigBody in
+ * https://api.supabase.com/api/v1-json, 13-11-2026).
+ *
+ * `mailer_autoconfirm` gaat hier UIT. Bij een gewone app staat hij aan omdat Cloudflare geen
+ * email_verified meestuurt (zie authInstellingen), en dat is daar veilig omdat inloggen met
+ * e-mail uit staat. Hier staat e-mail aan. Met autoconfirm aan zou iedereen via /signup met
+ * een zelfgekozen wachtwoord een account op andermans adres kunnen maken en meteen een
+ * sessie krijgen, zonder ooit de mailbox te zien; logt de echte klant later in en keurt het
+ * bedrijf hem goed, dan zit de ander al binnen. Met autoconfirm uit moet elk adres eerst
+ * bewezen worden met de link of de code uit de mail.
+ *
+ * De prijs, uit de broncode van Supabase Auth (internal/api/external.go en
+ * internal/models/linking.go), niet tegen een echt project getest:
+ *   - een medewerker die al een account had (van vóór het klantportaal) merkt niets;
+ *   - een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer de melding
+ *     dat zijn adres nog bevestigd moet worden, met een mail; daarna werkt het;
+ *   - een medewerker die eerst per mail een klantaccount op zijn werkadres maakte, krijgt
+ *     via Cloudflare een tweede account zonder adres dat niet te bevestigen is. Toegang
+ *     bijwerken meldt zulke accounts (zie trekIn); de README zegt wat de owner dan doet.
+ *
+ * `mailer_allow_unverified_email_sign_ins` blijft uit: dat is de andere schakelaar waarmee
+ * een onbevestigd adres toch kan inloggen. `disable_signup` blijft onaangeroerd.
+ *
+ * `smtpWachtwoord` en `captchaGeheim` zijn geheimen. Ze staan alleen in de body van de PATCH
+ * en nooit in een melding of in het resultaat.
+ */
+export function klantportaalInstellingen({ afzender, smtpWachtwoord, captcha, captchaGeheim }) {
+  if (!afzender?.adres || !afzender?.naam)
+    throw new Error("de afzender van de inlogmail ontbreekt");
+  if (!smtpWachtwoord) throw new Error("SMTP_WACHTWOORD ontbreekt");
+  if (captcha && !captchaGeheim) throw new Error("TURNSTILE_GEHEIM ontbreekt");
+  const mail = inlogmail(afzender.naam);
+  return {
+    external_email_enabled: true,
+    mailer_autoconfirm: false,
+    mailer_allow_unverified_email_sign_ins: false,
+    smtp_host: SMTP_HOST,
+    smtp_port: SMTP_POORT,
+    smtp_user: SMTP_GEBRUIKER,
+    smtp_pass: smtpWachtwoord,
+    smtp_admin_email: afzender.adres,
+    smtp_sender_name: afzender.naam,
+    mailer_otp_length: CODE_LENGTE,
+    mailer_otp_exp: CODE_GELDIG_SECONDEN,
+    // Een nieuw adres krijgt het sjabloon "confirmation", een bekend adres "magic_link"
+    // (internal/api/magic_link.go). Allebei dezelfde mail, anders ziet een nieuwe klant
+    // de Engelse standaardtekst zonder code.
+    mailer_subjects_confirmation: mail.onderwerp,
+    mailer_templates_confirmation_content: mail.metCode,
+    mailer_subjects_magic_link: mail.onderwerp,
+    mailer_templates_magic_link_content: mail.metCode,
+    mailer_subjects_recovery: mail.onderwerp,
+    mailer_templates_recovery_content: mail.alleenLink,
+    ...REM,
+    security_captcha_enabled: Boolean(captcha),
+    ...(captcha
+      ? { security_captcha_provider: "turnstile", security_captcha_secret: captchaGeheim }
+      : {}),
+  };
+}
+
 /**
  * De before-user-created-hook van de testdatabase. Zet ook inloggen met e-mail aan;
  * schrijf de hookfunctie dus altijd eerst. NAGAAN (U7): de veldnamen

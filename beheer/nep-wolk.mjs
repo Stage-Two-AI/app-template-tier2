@@ -77,6 +77,9 @@ export function nepWolk({
     teller: 0,
     // Een HTTP-status: dan faalt de pooler-endpoint met die status (bijvoorbeeld 500).
     poolerFout,
+    // Zet een test dit, dan is dit het antwoord op de vraag naar de Cloudflare-inlogs
+    // (bijvoorbeeld iets wat geen lijst is), in plaats van de rijen uit `gebruikers`.
+    identiteitenAntwoord: undefined,
     sentry: {
       teams: structuredClone(sentry.teams ?? [{ slug: "klant" }]),
       projecten: structuredClone(sentry.projecten ?? []),
@@ -253,6 +256,25 @@ export function nepWolk({
       if (pas(/^\/projects\/([^/]+)\/database\/query$/) && methode === "POST") {
         staat.sql.push(body.query);
         staat.sqlOp.push({ ref: m[1], query: body.query });
+        // De vraag naar de Cloudflare-inlogs (klantportaal): de rijen uit auth.identities
+        // van dit project. De identiteiten staan in de nep-wolk op de gebruiker zelf.
+        if (/from auth\.identities where provider = 'custom:cloudflare'/.test(body.query)) {
+          if (staat.identiteitenAntwoord !== undefined) {
+            return antwoord(201, staat.identiteitenAntwoord);
+          }
+          const lijst = staat.gebruikersOp[`https://${m[1]}.supabase.co`] ?? staat.gebruikers;
+          return antwoord(
+            201,
+            lijst.flatMap((g) =>
+              (g.identities ?? [])
+                .filter((i) => i.provider === "custom:cloudflare")
+                .map((i) => ({
+                  user_id: g.id,
+                  email: String(i.identity_data?.email ?? "").toLowerCase(),
+                })),
+            ),
+          );
+        }
         return antwoord(201, []);
       }
       return antwoord(404, { message: `geen nep-route ${methode} ${rest}` });
@@ -331,7 +353,11 @@ export function nepWolk({
       },
       async listUsers({ page = 1, perPage = 50 } = {}) {
         log("listUsers");
-        const users = lijst().slice((page - 1) * perPage, page * perPage);
+        // Zoals de echte admin-lijst: zonder de identiteiten (Supabase Auth laadt ze daar
+        // niet mee). Wie ze nodig heeft, vraagt ze aan de database.
+        const users = lijst()
+          .slice((page - 1) * perPage, page * perPage)
+          .map(({ identities, ...g }) => ({ ...g, identities: null }));
         return { data: { users }, error: null };
       },
       async updateUserById(id, attrs) {
