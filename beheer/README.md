@@ -4,6 +4,9 @@ Deze map gaat niet mee naar afgeleide apps (`nietMeenemen` in
 `.claude/stack-manifest.json`). Een beheer-repo kan hem wel als zelfstandig pakket
 kopiëren (zie "Los van de template"); de nette plek is `beheer-template`.
 
+Nieuw sinds versie 43 is het klantportaal (zie "Klantportaal"). Gebruik je geen klantportaal,
+dan hoef je niets te doen en verandert er niets.
+
 Wat erin zit:
 
 | Bestand | Wat het doet |
@@ -16,9 +19,14 @@ Wat erin zit:
 | `KLANTPORTAAL.md` | het klantportaal voor de bouwer en voor Stage Two: hooks, mail, de rem, Toegang bijwerken, open punten. De stappen voor de owner staan hieronder, onder "Klantportaal" |
 | `toegang.json` | wie bij welke app mag |
 | `package.json` | maakt van `beheer/` een zelfstandig pakket (zie "Los van de template") |
+
+Alleen voor de tests in de template (zie "Lokaal testen"); een beheer-repo heeft ze niet nodig:
+
+| Bestand | Wat het doet |
+|---|---|
 | `*.test.mjs`, `nep-wolk.mjs` | tests tegen een nagebootste API (`pnpm beheer:test`) |
-| `regressie-42.*`, `regressie-scenarios.mjs`, `regressie-42-versie.test.mjs` | bewijs dat een app zonder `klantportaal` dezelfde aanroepen, dezelfde uitvoer en dezelfde exitcode krijgt als op versie 42 (zie "Lokaal testen") |
-| `klantportaal*.test.mjs`, `klantportaal-opzet.mjs` | het klantportaal, en per onderwerp (deur, intrekken, inlog, geheimen) de aanvallen die erop zijn geprobeerd, als tests die bewijzen dat ze mislukken |
+| `regressie-42.json`, `regressie-42.maak.mjs`, `regressie-scenarios.mjs` | bewijs dat een app zonder `klantportaal` dezelfde aanroepen, dezelfde uitvoer en dezelfde exitcode krijgt als op versie 42 |
+| `klantportaal-opzet.mjs` | gedeelde opzet voor de tests van het klantportaal |
 
 Alles wat het script aanmaakt heeft een naam die begint met het voorvoegsel. Dat is een
 verplichte instelling: `--voorvoegsel <vv->` of de omgevingsvariabele
@@ -161,7 +169,7 @@ Geeft Supabase geen pooler terug, dan waarschuwt de inrichting en zet je hem met
 
 ## De workflows draaien
 
-De workflows draaien alleen vanaf `main` en nooit op een pull request.
+Beide workflows draaien alleen vanaf `main` en nooit op een pull request.
 
 **Proef inrichten** (`proef-inrichten.yml`), onder Actions > Proef inrichten > Run
 workflow, of vanaf de terminal:
@@ -193,21 +201,8 @@ In de standaardstand komt daarnaast de deur op het eigen domein. Stap 4 zit ook 
 gewone run: voor een app die is ingericht voordat de placeholder bestond, zet die de
 ontbrekende Access op de Worker alsnog.
 
-Het resultaat staat bij de run in GitHub als leesbare samenvatting (wat er is gedaan, de
-waarschuwingen, en bij een klantportaal de volgende stap), en in het logboek als één regel die
-begint met `INRICHTING`. Geheimen staan in geen van beide.
-
-De workflow heeft ook het vinkje "Deur weghalen (klantportaal live zetten)"
-(`-f deur_weghalen=true`, in het script `--deur-weghalen`). Dat is alleen voor een
-klantportaal; zonder dat vinkje verandert geen enkele run iets aan de deur, en met dat vinkje
-verandert een run alleen de deur. Zie "Klantportaal".
-
-**Proef controle van buitenaf** (`proef-controle.yml`) kijkt zonder inlog of de adressen van
-een app dicht zijn (en bij een klantportaal: of alleen het domein open is, met inloggen per
-mail en de captcha aan). Je kiest alleen de app; de adressen zoekt hij zelf op. Hij wijzigt
-niets, krijgt alleen de sleutels waarmee hij die adressen kan opzoeken (zie "Controle van
-buitenaf" in `KLANTPORTAAL.md`) en draait in een eigen concurrency-groep, zodat hij nooit een
-wachtende Toegang bijwerken vervangt.
+Het resultaat staat in het logboek als één regel die begint met `INRICHTING`. Geheimen
+staan daar nooit leesbaar in.
 
 Inloggen in productie loopt altijd via Cloudflare; in productie staat inloggen met e-mail
 uit. Werkt de keten Cloudflare naar Supabase niet, dan herstellen we Cloudflare. Er is
@@ -217,10 +212,7 @@ staat: zie "Klantportaal" hieronder.
 **Proef toegang bijwerken** (`proef-toegang.yml`) draait vanzelf als `toegang.json` op
 `main` verandert. Hij zet de policies gelijk aan het bestand, hangt ze aan de
 Access-apps en trekt de toegang in van wie er niet meer in staat: een ban en afmelden
-van alle sessies in Supabase. Bij een klantportaal geldt dat alleen voor medewerkers;
-klanten staan niet in het bestand en blijven ongemoeid (zie "Klantportaal"). Een klantportaal
-komt vóór de gewone apps aan de beurt; lukt er daar iets niet, dan gaat hij door en eindigt de
-run rood. Een fout bij een gewone app stopt de run, zoals altijd. In de testdatabase schrijft hij ook de aanmeld-hook
+van alle sessies in Supabase. In de testdatabase schrijft hij ook de aanmeld-hook
 opnieuw, zodat die het nieuwe bestand volgt, en de testaccounts (met de testgebruiker)
 blijven daar ongemoeid; een eerder geband testaccount krijgt de ban opgeheven.
 
@@ -278,6 +270,8 @@ object zijn. De korte vorm blijft werken:
 
 ## Klantportaal
 
+Gebruik je geen klantportaal, dan hoef je niets te doen en verandert er niets.
+
 Een klantportaal is een app die open is voor klanten: een webshop of een portaal waar mensen
 van buiten het bedrijf zelf inloggen. Het eigen domein van de app staat dan open voor iedereen
 en klanten loggen in per mail, met een code van acht cijfers of een link. Wat dicht blijft: het
@@ -289,10 +283,25 @@ zijn bij een klantportaal alleen nog de medewerkers. Voor een gewone app verande
 staan. De deur gaat alleen weg in een run waarin jij het vinkje "Deur weghalen (klantportaal
 live zetten)" hebt gezet, en die run doet niets anders.
 
-Na elke run staat bovenaan de pagina van de run in GitHub **de samenvatting van de run**: wat er
-is gedaan, de waarschuwingen en onder "Wat nu" de volgende stap. Daar verwijzen de stappen
-hieronder naar. Alles voor de bouwer en voor Stage Two (de hooks, de rem, de sommen, de details
-van Toegang bijwerken) staat in `KLANTPORTAAL.md`.
+Bij een klantportaal (of een portaal dat weer dicht moet) staat na elke run bovenaan de pagina
+van de run in GitHub **de samenvatting van de run**: wat er is gedaan, de waarschuwingen en
+onder "Wat nu" de volgende stap. Daar verwijzen de stappen hieronder naar. Geheimen staan er
+niet in. Alles voor de bouwer en voor Stage Two (de hooks, de rem, de sommen, de details van
+Toegang bijwerken) staat in `KLANTPORTAAL.md`.
+
+Twee dingen in de workflows zijn er alleen voor een klantportaal:
+
+- Het vinkje **"Deur weghalen (klantportaal live zetten)"** bij App inrichten (in de proef:
+  Proef inrichten, `-f deur_weghalen=true`; in het script `--deur-weghalen`). Zonder dat
+  vinkje verandert geen enkele run iets aan de deur, en met dat vinkje verandert een run alleen
+  de deur (stap 5).
+- De knop **Controle van buitenaf** (in de proef: Proef controle van buitenaf,
+  `proef-controle.yml`). Die kijkt zonder inlog of het domein open is en het `workers.dev`-adres
+  en de previews dicht zijn, en of inloggen per mail en de captcha aan staan (stap 6). Je kiest
+  alleen de app; de adressen zoekt hij zelf op. Hij wijzigt niets, krijgt alleen de sleutels
+  waarmee hij die adressen kan opzoeken (zie "Controle van buitenaf" in `KLANTPORTAAL.md`) en
+  draait in een eigen concurrency-groep, zodat hij nooit een wachtende Toegang bijwerken
+  vervangt.
 
 ### De zeven stappen
 
@@ -323,8 +332,8 @@ werk in de DNS van het domein en kan uren duren voor het is doorgekomen.
 - Gaat het mis: verwissel je de twee sleutels van Turnstile, dan weigert stap 3 met "dezelfde
   waarde" of "Turnstile kent dit geheim niet". Er is dan niets gewijzigd.
 
-**Stap 2. Een pull request op `beheer/toegang.json`.** Maak van de regel van de app de lange
-vorm. Voor:
+**Stap 2. Een pull request op `toegang.json`.** Dat bestand staat bovenin de beheer-repo (in de
+template is het `beheer/toegang.json`). Maak van de regel van de app de lange vorm. Voor:
 
 ```json
 "apps": {
@@ -435,13 +444,17 @@ Is het probleem opgelost, dan begin je opnieuw bij stap 2. De klanten hebben hun
 - De captcha staat standaard aan. Uitzetten kan alleen met `"captcha": false` bij de app, en
   is bedoeld voor een storing bij Turnstile.
 - Toegang bijwerken trekt bij een klantportaal alleen medewerkers in, nooit klanten. Een
-  portaal sluiten bant niemand.
+  portaal sluiten bant niemand. Een klantportaal komt vóór de gewone apps aan de beurt; lukt
+  er daar iets niet, dan gaat hij door en eindigt de run rood. Een fout bij een gewone app
+  stopt de run, zoals altijd.
 - `SMTP_WACHTWOORD` en `TURNSTILE_GEHEIM` staan nooit in het logboek of de samenvatting.
 - Een klantportaal vraagt een eigen domein, en hoort een testdatabase te hebben (anders
   waarschuwt elke run).
 - Een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer een mail om zijn
   adres te bevestigen.
-- Een gewone app merkt hier niets van: die krijgt dezelfde aanroepen als op versie 42.
+- Een gewone app merkt hier niets van: die krijgt dezelfde aanroepen als op versie 42, en het
+  script schrijft voor haar geen eigen samenvatting. `"klantportaal": false` mag, en doet
+  hetzelfde als het veld weglaten.
 - De rest (hooks, mail, de rem, sessieduur, previews, open punten) staat in `KLANTPORTAAL.md`.
 
 ## Alleen IT mag toegang.json wijzigen (bij een klant)
@@ -535,11 +548,14 @@ moeten de aanroepen (in volgorde en inhoud), het resultaat, de regel op stdout e
 gelijk zijn. De scenario's: 2300 accounts, IdP-groepen, een fout halverwege, een deur die is
 hernoemd, weggehaald of er nooit was, inloggen per mail dat iemand met de hand aanzette, een
 Access op de Worker met een extra adres, en elke leesvraag die één keer hapert met 429 en met
-500. Het script draait er ook als proces (Toegang bijwerken), met stdout en de exitcode. Wat
-bewust verschilt, legt de laatste test vast: de tekst van de melding bij een ontbrekend
-voorvoegsel en bij een antwoord dat geen JSON is, en een app die `constructor` heet (die kwam
-op versie 42 door de controle heen en bestaat nu niet). In een losse kopie van `beheer/` zonder
-git slaat hij zichzelf over.
+500. Daarbij komt een storing op elke aanroep (elke methode, negen soorten fouten), handwerk
+van de klant (eigen hooks, sjablonen, policies), 63 varianten van `toegang.json`, en het script
+als proces in zes modi en negen omgevingen (stdout, stderr, exitcode, de maskers en de
+samenvatting). Wat bewust verschilt, legt hij apart vast: de tekst van de melding bij een
+ontbrekend voorvoegsel, bij een antwoord dat geen JSON is en bij een veld van een klantportaal
+in een gewone app, de optie `--deur-weghalen`, `"klantportaal": false` (op 42 geweigerd, nu
+geldig), en een app die `constructor` heet (die kwam op versie 42 door de controle heen en
+bestaat nu niet). In een losse kopie van `beheer/` zonder git slaat hij zichzelf over.
 
 `regressie-42.test.mjs` bewaakt de bestaande klanten: voor een `toegang.json` zonder
 `klantportaal` moet elke aanroep naar Cloudflare, Supabase en GitHub exact gelijk zijn aan

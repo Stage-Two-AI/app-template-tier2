@@ -295,10 +295,16 @@ is, als iemand inloggen per mail met de hand aanzette, of als de Access op de Wo
 hand is veranderd. Alles wat nieuw is (controles, de rem, leesvragen, waarschuwingen, een rode
 eindstatus) geldt alleen voor een app die klantportaal is, of die het aantoonbaar was: aan het
 merk, aan het kenmerk op de klantaccounts, of aan de sporen in de inloginstellingen die App
-inrichten op versie 42 ook al las. `regressie-42-versie.test.mjs` bewijst dat tegen de code van
-versie 42 zelf; wat bewust verschilt (alleen tekst, en een app die `constructor` heet) staat
-onder "Lokaal testen" in de README. De samenvatting van de run is een bestand erbij en bevat
-voor een gewone app alleen wat ook in het resultaat staat.
+inrichten op versie 42 ook al las. Merk en sporen tellen alleen als ze exact zijn wat de
+inrichting zelf zet: een hook die aan staat met precies `pg-functions://postgres/public/<functie>`,
+of de mail zonder controlecode met precies dat onderwerp en die tekst. Een eigen hook van de
+klant met een naam die erop lijkt (in een ander schema, of met iets ervoor of erachter) telt
+niet. `regressie-42-versie.test.mjs` bewijst dat tegen de code van versie 42 zelf; wat bewust
+verschilt (alleen tekst, `--deur-weghalen`, `"klantportaal": false`, en een app die
+`constructor` heet) staat onder "Lokaal testen" in de README. Het script schrijft zijn eigen
+samenvatting van de run alleen als er in `toegang.json` een klantportaal staat of als een
+portaal dicht moet, en maskeert `SMTP_WACHTWOORD` en `TURNSTILE_GEHEIM` alleen dan; voor een
+gewone app schrijft de workflow de samenvatting, zoals op 42.
 
 ## Controle van buitenaf
 
@@ -335,7 +341,21 @@ Loop ze na in de proef vóór de eerste klant live gaat.
   dit bij Supabase na, en kies anders voor een code van tien cijfers (`CODE_LENGTE`, samen met
   het codevak in de app).
 - **Het merk.** Dat Cloudflare `custom_deny_message` in de lijst Access-apps teruggeeft, en een
-  lege tekst accepteert om hem weg te halen.
+  lege tekst accepteert om hem weg te halen. De nep-wolk neemt beide aan; de openbare
+  documentatie noemt het veld wel, maar zegt niets over wissen met een lege tekst. Wat er
+  misgaat als de echte API anders is:
+  - Geeft de lijst het veld niet terug, dan ziet Toegang bijwerken niet meer dat een app
+    klantportaal is (geweest) zodra `klantportaal` uit `toegang.json` is gehaald. Draait Toegang
+    bijwerken dan vóór App inrichten, dan worden de klanten (accounts zonder inlog via
+    Cloudflare) geband en afgemeld, in plaats van de rode melding "wacht op App inrichten".
+  - Negeert Cloudflare een lege tekst, dan blijft het merk staan nadat App inrichten het
+    portaal heeft gesloten. Toegang bijwerken behandelt de app dan als een portaal dat nog
+    dicht moet: hij eindigt rood met "wacht op App inrichten", en een vreemde met alleen een
+    mailaccount wordt niet meer ingetrokken.
+
+  Een gewone app die nooit klantportaal was merkt van geen van beide iets (getest). Nagaan in
+  de proef: na stap 3 de lijst Access-apps lezen en kijken of het merk erin staat; na het
+  sluiten (terug achter de deur) opnieuw, en kijken of het weg is.
 - **Het vinkje.** De run met het vinkje vergelijkt de inloginstellingen die Supabase teruggeeft
   met wat de inrichting zet. Geeft de echte API een veld anders terug dan het is gezet
   (bijvoorbeeld een getal als tekst), dan weigert het vinkje en noemt het dat veld. Doe stap 3
