@@ -4,10 +4,15 @@ import { test } from "node:test";
 import { cloudflareClient } from "./lib/cloudflare.mjs";
 import {
   aanmeldHookSql,
+  afzenderVanApp,
+  captchaVanApp,
+  cloudflareIdentiteiten,
   gegevensNaarTest,
   groepenVanApp,
   hookFunctie,
+  isKlantportaal,
   koppelPolicies,
+  leesAfzender,
   magAanmelden,
   policyIdsVoorApp,
   policyVoorGroep,
@@ -585,4 +590,249 @@ test("aanmeld-hook van de testdatabase: e-mail alleen voor testaccounts, Cloudfl
   assert.match(sql, /not \(adres = any \(array\['jan@klant\.nl'\]::text\[\]\)\)/);
   assert.match(sql, /to supabase_auth_admin/);
   assert.match(sql, /from authenticated, anon, public/);
+});
+
+// ---------------------------------------------------------------- klantportaal
+
+const PORTAAL_APP = {
+  groepen: ["klant"],
+  klantportaal: true,
+  afzender: "Winco Direct <noreply@wincoapps.com>",
+};
+const metApp = (app) => ({ groepen: KLANT.groepen, apps: { direct: app } });
+
+test("klantportaal: de lange vorm met klantportaal, afzender en captcha is geldig; de korte vorm is nooit een klantportaal", () => {
+  const t = valideerToegang(metApp({ ...PORTAAL_APP, captcha: true, gegevens_naar_test: false }));
+  assert.equal(isKlantportaal(t, "direct"), true);
+  assert.equal(captchaVanApp(t, "direct"), true);
+  assert.deepEqual(afzenderVanApp(t, "direct"), {
+    adres: "noreply@wincoapps.com",
+    naam: "Winco Direct",
+  });
+  assert.deepEqual(groepenVanApp(t, "direct"), ["klant"]);
+  assert.deepEqual(publiekVanApp(t, "direct"), []);
+
+  assert.equal(isKlantportaal(KLANT, "cf-proef"), false);
+  assert.equal(isKlantportaal(KLANT, "bestaat-niet"), false);
+  const uit = valideerToegang(metApp({ groepen: ["klant"], klantportaal: false, publiek: ["/x"] }));
+  assert.equal(isKlantportaal(uit, "direct"), false);
+  assert.equal(captchaVanApp(uit, "direct"), false);
+  assert.throws(() => afzenderVanApp(uit, "direct"), /geen klantportaal/);
+});
+
+test("klantportaal: publiek naast klantportaal wordt geweigerd, ook een lege lijst, met een uitleg wat te doen", () => {
+  for (const publiek of [["/bekijk/*"], ["/a", "/b/*"], []]) {
+    assert.throws(
+      () => valideerToegang(metApp({ ...PORTAAL_APP, publiek })),
+      /app "direct": publiek en klantportaal kunnen niet samen\. Bij een klantportaal staat het hele domein al open; haal publiek weg/,
+    );
+  }
+  // De hele app als publiek pad blijft ook zonder klantportaal geweigerd.
+  assert.throws(
+    () => valideerToegang(metApp({ groepen: ["klant"], publiek: ["/*"] })),
+    /de hele app/,
+  );
+});
+
+test("klantportaal: alleen true of false; een tekst, een getal of een object is een fout en maakt de app nooit stil open", () => {
+  for (const fout of ["true", "ja", 1, null, {}, [], "false"]) {
+    assert.throws(
+      () => valideerToegang(metApp({ ...PORTAAL_APP, klantportaal: fout })),
+      /app "direct": klantportaal is true of false/,
+      JSON.stringify(fout),
+    );
+    assert.equal(isKlantportaal(metApp({ ...PORTAAL_APP, klantportaal: fout }), "direct"), false);
+  }
+  // Een typefout in de naam van het veld is een onbekend veld, geen stille gewone app.
+  assert.throws(
+    () => valideerToegang(metApp({ groepen: ["klant"], klantenportaal: true })),
+    /veld klantenportaal: onbekend veld/,
+  );
+  assert.throws(
+    () => valideerToegang(metApp({ ...PORTAAL_APP, captcha: "aan" })),
+    /captcha is true of false/,
+  );
+});
+
+test("klantportaal: zonder afzender, of met een afzender die geen adres is of HTML bevat, is een fout", () => {
+  const { afzender: _weg, ...zonder } = PORTAAL_APP;
+  assert.throws(
+    () => valideerToegang(metApp(zonder)),
+    /app "direct": een klantportaal heeft een afzender nodig/,
+  );
+  for (const fout of [
+    "",
+    "geen-adres",
+    "Winco <geen-adres>",
+    "<b>Winco</b> <a@b.nl>",
+    "Winco {{ .Token }} <a@b.nl>",
+    'Winco" <a@b.nl>',
+    "Winco <a@b.nl> <c@d.nl>",
+    "a@b.nl, c@d.nl",
+    " <a@b.nl>",
+    42,
+    null,
+    ["a@b.nl"],
+  ]) {
+    assert.throws(
+      () => valideerToegang(metApp({ ...PORTAAL_APP, afzender: fout })),
+      /afzender/,
+      JSON.stringify(fout),
+    );
+  }
+  assert.deepEqual(leesAfzender("  Noreply@Klant.NL "), { adres: "noreply@klant.nl", naam: null });
+  assert.deepEqual(leesAfzender("Jansen & Zn. (Direct) <a@b.nl>"), {
+    adres: "a@b.nl",
+    naam: "Jansen & Zn. (Direct)",
+  });
+  assert.equal(leesAfzender(`${"x".repeat(61)} <a@b.nl>`), null);
+});
+
+test("klantportaal: afzender of captcha zonder klantportaal is een fout, zodat niemand denkt dat het iets doet", () => {
+  assert.throws(
+    () => valideerToegang(metApp({ groepen: ["klant"], afzender: "a@b.nl" })),
+    /afzender hoort bij een klantportaal/,
+  );
+  assert.throws(
+    () => valideerToegang(metApp({ groepen: ["klant"], klantportaal: false, captcha: true })),
+    /captcha hoort bij een klantportaal/,
+  );
+});
+
+test("klantportaal: een klantportaal zonder groep blijft een fout (de medewerkers), en komt nooit in een policy", () => {
+  assert.throws(
+    () => valideerToegang(metApp({ klantportaal: true, afzender: "a@b.nl" })),
+    /geen groepen gekozen/,
+  );
+  const w = JSON.stringify(policyVoorGroep("klant", KLANT.groepen.klant, { voorvoegsel: VV }));
+  assert.ok(!/everyone|bypass/.test(w));
+});
+
+const UUID = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+function intrekker() {
+  const log = [];
+  return {
+    log,
+    ban: async (id) => log.push(`ban ${id}`),
+    afmelden: async (id) => log.push(`afmelden ${id}`),
+    ontban: async (id) => log.push(`ontban ${id}`),
+  };
+}
+
+test("intrekken bij een klantportaal: alleen een account met een Cloudflare-inlog wordt beoordeeld", async () => {
+  const i = intrekker();
+  const r = await trekIn({
+    gebruikers: [
+      { id: UUID(1), email: "klant@elders.nl" },
+      { id: UUID(2), email: "klant2@elders.nl", app_metadata: { providers: ["email"] } },
+      { id: UUID(3), email: "geband@elders.nl", banned_until: "2126-01-01T00:00:00Z" },
+      { id: UUID(4), email: "weg@elders.nl", app_metadata: { providers: ["custom:cloudflare"] } },
+      { id: UUID(5), email: "piet@klant.nl", app_metadata: { provider: "custom:cloudflare" } },
+      { id: UUID(6), email: "jan@klant.nl", identities: [{ provider: "custom:cloudflare" }] },
+      { id: UUID(7), email: "kees@elders.nl" },
+      { id: UUID(8) },
+    ],
+    toegang: KLANT,
+    app: "cf-proef",
+    klantportaal: true,
+    cloudflare: cloudflareIdentiteiten([{ user_id: UUID(7), email: "Kees@Elders.nl" }]),
+    ...i,
+  });
+  assert.deepEqual(i.log, [
+    `ban ${UUID(4)}`,
+    `afmelden ${UUID(4)}`,
+    `ban ${UUID(6)}`,
+    `afmelden ${UUID(6)}`,
+    `ban ${UUID(7)}`,
+    `afmelden ${UUID(7)}`,
+  ]);
+  assert.deepEqual(r.ingetrokken, ["weg@elders.nl", "jan@klant.nl", "kees@elders.nl"]);
+  assert.equal(r.klanten, 4);
+  assert.equal(r.onaangeroerd, 1);
+  assert.deepEqual(r.zonderAdres, []);
+});
+
+test("intrekken bij een klantportaal: zonder de vlag verandert er niets aan het oude gedrag, ook niet met de nieuwe gegevens erbij", async () => {
+  const gebruikers = [
+    { id: UUID(1), email: "klant@elders.nl", app_metadata: { providers: ["email"] } },
+    { id: UUID(2), email: "piet@klant.nl", app_metadata: { providers: ["custom:cloudflare"] } },
+    { id: UUID(3) },
+  ];
+  const i = intrekker();
+  const r = await trekIn({ gebruikers, toegang: KLANT, app: "cf-proef", ...i });
+  assert.deepEqual(i.log, [`ban ${UUID(1)}`, `afmelden ${UUID(1)}`]);
+  assert.deepEqual(r, {
+    ingetrokken: ["klant@elders.nl"],
+    toegelaten: [],
+    onaangeroerd: 1,
+    alIngetrokken: [],
+    onbekend: [],
+  });
+  // `cloudflare` zonder de vlag doet niets: de vlag komt uit toegang.json, niet uit de data.
+  const j = intrekker();
+  await trekIn({
+    gebruikers,
+    toegang: KLANT,
+    app: "cf-proef",
+    cloudflare: new Map(),
+    klantportaal: false,
+    ...j,
+  });
+  assert.deepEqual(j.log, i.log);
+});
+
+test("intrekken bij een klantportaal: een testaccount geeft geen vrijstelling aan een medewerker, en een IdP-groep wordt gemeld", async () => {
+  const idp = {
+    groepen: { it: { idp_groepen: ["groep-1"] } },
+    apps: { direct: { groepen: ["it"], klantportaal: true, afzender: "a@b.nl" } },
+  };
+  const i = intrekker();
+  const r = await trekIn({
+    gebruikers: [
+      { id: UUID(1), email: "iemand@klant.nl", app_metadata: { providers: ["custom:cloudflare"] } },
+      { id: UUID(2), app_metadata: { providers: ["custom:cloudflare"] } },
+      { id: UUID(3), email: "klant@elders.nl" },
+    ],
+    toegang: idp,
+    app: "direct",
+    klantportaal: true,
+    testaccounts: ["iemand@klant.nl"],
+    cloudflare: new Map(),
+    ...i,
+  });
+  assert.deepEqual(i.log, []);
+  assert.deepEqual(r.onbekend, ["iemand@klant.nl", `id:${UUID(2)}`]);
+  assert.equal(r.klanten, 1);
+});
+
+test("intrekken bij een klantportaal: de rijen uit auth.identities worden streng gelezen", () => {
+  const m = cloudflareIdentiteiten([
+    { user_id: UUID(1), email: "A@B.nl" },
+    { user_id: UUID(1), email: "c@d.nl" },
+    { user_id: UUID(2), email: "" },
+  ]);
+  assert.deepEqual(m.get(UUID(1)), ["a@b.nl", "c@d.nl"]);
+  assert.deepEqual(m.get(UUID(2)), []);
+  assert.equal(cloudflareIdentiteiten([]).size, 0);
+  for (const raar of [undefined, null, {}, "x", [null], [{ email: "a@b.nl" }], [{ user_id: 7 }]]) {
+    assert.throws(() => cloudflareIdentiteiten(raar), /er is niets ingetrokken/);
+  }
+});
+
+test("intrekken bij een klantportaal: twee Cloudflare-adressen op één account, één ervan weg, is weg", async () => {
+  const i = intrekker();
+  const r = await trekIn({
+    gebruikers: [{ id: UUID(1), email: "piet@klant.nl" }],
+    toegang: KLANT,
+    app: "cf-proef",
+    klantportaal: true,
+    cloudflare: cloudflareIdentiteiten([
+      { user_id: UUID(1), email: "piet@klant.nl" },
+      { user_id: UUID(1), email: "jan@klant.nl" },
+    ]),
+    ...i,
+  });
+  assert.deepEqual(i.log, [`ban ${UUID(1)}`, `afmelden ${UUID(1)}`]);
+  assert.deepEqual(r.ingetrokken, ["piet@klant.nl"]);
 });
