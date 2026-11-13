@@ -12,7 +12,7 @@ const anonKey = process.env.SUPABASE_ANON_KEY ?? "";
 const aanvaller = `e2e-aanvaller-${Date.now()}@voorbeeld.nl`;
 const klant = `e2e-aanval-klant-${Date.now()}@voorbeeld.nl`;
 
-test.describe.configure({ mode: "serial", retries: 0 });
+test.describe.configure({ mode: "default", retries: 0 });
 
 function client() {
   return createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
