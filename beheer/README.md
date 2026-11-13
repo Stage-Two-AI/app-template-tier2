@@ -308,17 +308,21 @@ Twee dingen in de workflows zijn er alleen voor een klantportaal:
 Alles gaat via GitHub in de browser; je hebt geen eigen computer met commando's nodig.
 
 **Stap 0. De bouwer bevestigt dat de app er klaar voor is.** Vraag de bouwer van de app deze
-drie punten te bevestigen:
+vier punten te bevestigen:
 
 1. De app staat op versie 43 of later: de pull request van `/stagetwo-tier2:updaten` is gemerged.
-2. Een nieuw account ziet en kan niets tot een medewerker het goedkeurt, en medewerkerrechten
+2. De bouwer heeft in de app de route `docs/routes/klantportaal.md` gevolgd en die pull requests
+   zijn gemerged. Daarmee staat in `stack.config.json` van de app `"klantportaal": true`: de
+   schakelaar waarmee de app zelf controleert dat elke regel in de database de poort heeft.
+3. Een nieuw account ziet en kan niets tot een medewerker het goedkeurt, en medewerkerrechten
    gelden alleen voor wie via Cloudflare is ingelogd (de migratie `klantportaal` in de app; zie
    "De regels in de database" in `KLANTPORTAAL.md`).
-3. De app heeft in Supabase geen eigen hooks voor aanmelden, het token of het versturen van mail.
+4. De app heeft in Supabase geen eigen hooks voor aanmelden, het token of het versturen van mail.
 
-- Goed als: de bouwer alle drie bevestigt.
+- Goed als: de bouwer alle vier bevestigt.
 - Gaat het mis: sla je dit over, dan weigert stap 3 met "de app begrijpt de inlog van een
-  klantportaal nog niet" of "de app heeft een eigen ... hook". Er is dan niets gewijzigd.
+  klantportaal nog niet", "de app ... is zelf nog geen klantportaal" of "de app heeft een eigen
+  ... hook". Er is dan niets gewijzigd, ook niet aan de deur.
 
 **Stap 1. Twee sleutels klaarzetten.** Begin hier op tijd: het domein verifiëren bij Resend is
 werk in de DNS van het domein en kan uren duren voor het is doorgekomen.

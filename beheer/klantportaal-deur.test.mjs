@@ -453,6 +453,61 @@ test("een app van vóór versie 43: de inrichting leest eerst of de app de inlog
   assert.ok(!gewoon.aanroepen.some((a) => a.soort === "gh" && /env\.ts/.test(a.args.join(" "))));
 });
 
+test('de schakelaar van de app: zonder "klantportaal": true in stack.config.json stopt elke run van een klantportaal vóór de eerste wijziging, met en zonder vinkje', async () => {
+  const ENV = "leesInlogdiensten(waarden.VITE_INLOGDIENST)";
+  const zonder = [
+    { "src/lib/env.ts": ENV },
+    { "src/lib/env.ts": ENV, "stack.config.json": '{ "database": true }' },
+    { "src/lib/env.ts": ENV, "stack.config.json": '{ "database": true, "klantportaal": false }' },
+    // Tekst is geen schakelaar: alleen de echte sleutel met de waarde true telt.
+    {
+      "src/lib/env.ts": ENV,
+      "stack.config.json":
+        '{ "uitleg": "\\"klantportaal\\": true komt later", "klantportaal": "ja" }',
+    },
+    { "src/lib/env.ts": ENV, "stack.config.json": '{ "klantportaal": true, ' },
+  ];
+  for (const ghBestanden of zonder) {
+    const w = nepWolk({ workerBestaat: true, ghBestanden });
+    await richtIn(ARG, opzet(w, DEUR));
+    const voor = structuredClone(w.staat);
+    w.aanroepen.length = 0;
+    for (const arg of [ARG, MET_VINKJE]) {
+      await assert.rejects(
+        () => richtIn(arg, opzet(w, PORTAAL)),
+        /gestopt zonder wijzigingen.*is zelf nog geen klantportaal.*stack\.config\.json.*"klantportaal": true.*docs\/routes\/klantportaal\.md/,
+      );
+    }
+    assert.deepEqual(w.schrijfacties(), []);
+    assert.deepEqual(w.staat.apps, voor.apps);
+    assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "cloudflare");
+    assert.ok(app(w, NAMEN.deur), "de deur staat er nog");
+    const droog = await richtIn({ ...ARG, droogloop: true }, opzet(w, PORTAAL));
+    assert.match(
+      droog.waarschuwingen.join(" "),
+      /de echte run stopt hierop.*is zelf nog geen klantportaal/,
+    );
+  }
+
+  // Met de schakelaar leest de inrichting het bestand één keer en gaat door.
+  const w = nepWolk({ workerBestaat: true });
+  await richtIn(ARG, opzet(w, DEUR));
+  w.aanroepen.length = 0;
+  const r = await richtIn(ARG, opzet(w, PORTAAL));
+  assert.doesNotMatch(r.waarschuwingen.join(" "), /zelf nog geen klantportaal/);
+  const gelezen = w.aanroepen.filter(
+    (a) => a.soort === "gh" && /contents\/stack\.config\.json$/.test(a.args[1]),
+  );
+  assert.equal(gelezen.length, 1);
+
+  // Een gewone app: geen leesvraag naar stack.config.json, ook niet als hij de schakelaar mist.
+  const gewoon = nepWolk({ workerBestaat: true, ghBestanden: {} });
+  await richtIn(ARG, opzet(gewoon, DEUR));
+  assert.ok(
+    !gewoon.aanroepen.some((a) => a.soort === "gh" && /stack\.config/.test(a.args.join(" "))),
+  );
+});
+
 test("previews: bij een klantportaal met een testdatabase staan de previews niet op de lijst van terugkeeradressen van productie; zonder testdatabase waarschuwt elke run", async () => {
   const domein = "https://direct.voorbeeldapps.nl/**";
   const metPreviews = `${domein},https://pr-*-vb-direct.stagetwo-acc.workers.dev/**,https://actueel-vb-direct.stagetwo-acc.workers.dev/**`;
