@@ -503,6 +503,12 @@ Zonder `wrangler.jsonc` (bijvoorbeeld opruimen zonder uitgecheckte app-repo) bli
 elk Worker-script staan; verwijder het dan in het Cloudflare-dashboard (Workers & Pages
 > cf-proef > Settings > Delete).
 
+Is er wel een `wrangler.jsonc` maar is hij niet te lezen (opruimen probeert de controle van
+beide templates), dan weet het script de naam van het Worker-script niet. Het laat dan ook de
+Access op de Worker staan, met een waarschuwing in het resultaat: zonder die Access zou een
+Worker die nog draait open op workers.dev staan. Herstel het bestand en draai opruimen
+opnieuw, of verwijder eerst het script en daarna die Access-app met de hand.
+
 ## Los van de template (beheer-repo)
 
 `beheer/` draait ook zonder de rest van de template, bijvoorbeeld in de beheer-repo van
@@ -512,6 +518,18 @@ een klant die een app-repo in een andere repo of organisatie inricht. Kopieer da
 - het bestand `scripts/lib/cloudflare-config.mjs`, **op hetzelfde relatieve pad**
   (`../scripts/lib/cloudflare-config.mjs` vanuit `beheer/`). Het script importeert daar
   de controle van `wrangler.jsonc` vandaan.
+
+### Een app van de openbare template
+
+Tier 2 heeft twee templates. Een app uit `app-template-tier2-openbaar` (de server maakt de
+pagina's) heeft een andere `wrangler.jsonc`: met `main`, de servercode. De gewone controle
+weigert `main`; daarom krijgt het script bij zo'n app `--variant cloudflare-openbaar` mee en
+gebruikt het de controle van die template (`beheer/lib/cloudflare-config-openbaar.mjs`, een
+letterlijke kopie van `scripts/lib/cloudflare-config.mjs` daar; wijzig de kopie nooit met de
+hand, zie `beheer/lib/variant.mjs`). De workflows App inrichten en Controle van buitenaf lezen
+de variant zelf uit `.claude/stack-manifest.json` van de app-repo. Zonder `--variant` geldt de
+gewone controle. De rest van de inrichting is voor beide templates gelijk: de placeholder en
+de Access op de Worker, de inlogdienst, de database, het klantportaal en de variabelen.
 
 Daarna:
 

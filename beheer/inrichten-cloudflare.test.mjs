@@ -72,6 +72,7 @@ test("argumenten: app verplicht, modi sluiten elkaar uit", () => {
     hostname: null,
     repo: null,
     wrangler: null,
+    variant: null,
     voorvoegsel: "cf-proef-",
     droogloop: true,
     opruimen: false,
