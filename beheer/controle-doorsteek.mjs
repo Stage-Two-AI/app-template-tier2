@@ -46,6 +46,7 @@
  *
  * Gebruik:
  *   node beheer/controle-doorsteek.mjs --voorvoegsel <vv-> --app <naam> [--wrangler <pad>]
+ *        [--variant cloudflare-openbaar]   (een app van de openbare template, zie lib/variant.mjs)
  *   of met de hand:
  *   node beheer/controle-doorsteek.mjs --hostname cf-proef.stagetwo.nl \
  *     --project-ref <ref> --workers-dev https://cf-proef.<sub>.workers.dev/ \
@@ -56,10 +57,10 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { cloudflareConfig } from "../scripts/lib/cloudflare-config.mjs";
 import { appNamen, cloudflareClient, valideerVoorvoegsel } from "./lib/cloudflare.mjs";
 import { supabaseBeheer } from "./lib/supabase.mjs";
 import { captchaVanApp, isKlantportaal, valideerToegang } from "./lib/toegang.mjs";
+import { wranglerConfig } from "./lib/variant.mjs";
 
 const ACCESS = /\.cloudflareaccess\.com\//;
 
@@ -433,6 +434,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       app: { type: "string" },
       voorvoegsel: { type: "string" },
       wrangler: { type: "string" },
+      variant: { type: "string" },
       hostname: { type: "string" },
       "project-ref": { type: "string" },
       "workers-dev": { type: "string" },
@@ -452,7 +454,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       return process.env[naam];
     };
-    const config = cloudflareConfig(values.wrangler ?? "wrangler.jsonc");
+    const config = wranglerConfig(values.variant, values.wrangler ?? "wrangler.jsonc");
     try {
       invoer = await adressenVoor(
         {

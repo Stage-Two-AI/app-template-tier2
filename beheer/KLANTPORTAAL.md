@@ -33,7 +33,8 @@ bepalen alleen de regels in de database (RLS). Dit is wat de bouwer in stap 0 be
 - De app staat op versie 43 of later en heeft het inlogscherm met beide manieren, met een
   codevak van tien cijfers en de Turnstile-widget. De inrichting leest dat vóór de eerste
   wijziging uit de app-repo: `src/lib/env.ts` op `main` moet `VITE_INLOGDIENST` lezen met
-  `leesInlogdiensten`. Een oudere app (of een app van de openbare template) start met
+  `leesInlogdiensten`. Dat geldt ook voor een app van de openbare template
+  (`app-template-tier2-openbaar`, vanaf versie 43). Een oudere app start met
   `cloudflare,mailcode` niet meer op; dan stopt de inrichting.
 - De app is zelf een klantportaal: `stack.config.json` op `main` heeft `"klantportaal": true`
   (de route `docs/routes/klantportaal.md` in de app zet hem). Met die schakelaar eist de

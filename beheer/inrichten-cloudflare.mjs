@@ -6,7 +6,7 @@
  * `stack-beheer/klant/scripts/inrichten.mjs`.
  *
  *   node beheer/inrichten-cloudflare.mjs --voorvoegsel <vv-> --app <naam>
- *        [--repo <org/naam>] [--wrangler <pad>] [--hostname <host>]
+ *        [--repo <org/naam>] [--wrangler <pad>] [--variant <variant>] [--hostname <host>]
  *        [--testdatabase] [--droogloop | --opruimen | --tweede-doorgang | --toegang]
  *        [--deur-weghalen]   (alleen bij een klantportaal: captcha aan en de deur weg)
  *
@@ -14,7 +14,11 @@
  * bij een klant bijvoorbeeld `kl-`. Buiten de proef zijn ook `--repo` (de app-repo die de
  * variabelen en secrets krijgt) en `--wrangler` (de wrangler.jsonc van die app, bij
  * een uitgecheckte app-repo) verplicht. Alleen de proef valt terug op de eigen repo
- * (GITHUB_REPOSITORY) en op wrangler.jsonc in de werkmap.
+ * (GITHUB_REPOSITORY) en op wrangler.jsonc in de werkmap. `--variant cloudflare-openbaar`
+ * hoort bij een app van de openbare template (app-template-tier2-openbaar): dan geldt de
+ * controle van wrangler.jsonc van die template (met `main`, de servercode). De workflow leest
+ * de variant uit .claude/stack-manifest.json van de app; zonder de vlag geldt de gewone
+ * controle (zie lib/variant.mjs).
  *
  * Volgorde (plan U5, stap 3 en 4):
  *   3.1 Supabase-project (eu-central-1), wachten tot gezond, sleutels ophalen
@@ -70,7 +74,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
-import { cloudflareConfig } from "../scripts/lib/cloudflare-config.mjs";
 import {
   adresStand,
   afwijkingen,
@@ -152,6 +155,7 @@ import {
   valideerToegang,
   verwijderOverbodig,
 } from "./lib/toegang.mjs";
+import { valideerVariant, wranglerConfig } from "./lib/variant.mjs";
 
 export const OMGEVINGEN = ["production", "preview"];
 /**
@@ -214,6 +218,7 @@ export function leesArgumenten(argv, env = {}) {
     hostname: null,
     repo: null,
     wrangler: null,
+    variant: null,
     voorvoegsel: null,
     droogloop: false,
     opruimen: false,
@@ -233,7 +238,9 @@ export function leesArgumenten(argv, env = {}) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (vlaggen[a]) uit[vlaggen[a]] = true;
-    else if (["--app", "--hostname", "--repo", "--wrangler", "--voorvoegsel"].includes(a)) {
+    else if (
+      ["--app", "--hostname", "--repo", "--wrangler", "--variant", "--voorvoegsel"].includes(a)
+    ) {
       const waarde = argv[i + 1];
       if (waarde === undefined || waarde.startsWith("--"))
         throw new Error(`${a} vraagt een waarde`);
@@ -257,6 +264,7 @@ export function leesArgumenten(argv, env = {}) {
   }
   if (uit.hostname !== null && !/^[a-z0-9.-]+$/.test(uit.hostname))
     throw new Error("--hostname is ongeldig");
+  uit.variant = valideerVariant(uit.variant);
   uit.voorvoegsel = valideerVoorvoegsel(uit.voorvoegsel ?? env.BEHEER_VOORVOEGSEL ?? null);
   if (uit.repo !== null && !REPO.test(uit.repo)) {
     throw new Error("--repo heeft de vorm <organisatie>/<naam>");
@@ -451,10 +459,9 @@ export const KLANTPORTAAL_INLOGDIENST = "cloudflare,mailcode";
 
 /**
  * Waaraan de inrichting ziet dat de app de lijst `cloudflare,mailcode` begrijpt: `src/lib/env.ts`
- * leest VITE_INLOGDIENST met leesInlogdiensten (vanaf versie 43 van de template). Een app tot
- * en met versie 42, en een app van de openbare template, keurt alleen één waarde uit een vaste
- * lijst goed en start met `cloudflare,mailcode` niet meer op. Het versienummer in
- * `.claude/stack-version` zegt dit niet: de openbare template telt anders.
+ * leest VITE_INLOGDIENST met leesInlogdiensten (vanaf versie 43 van beide templates van tier 2,
+ * ook de openbare). Een app tot en met versie 42 keurt alleen één waarde uit een vaste lijst
+ * goed en start met `cloudflare,mailcode` niet meer op.
  */
 export const APP_KENMERK = { bestand: "src/lib/env.ts", tekst: "leesInlogdiensten" };
 
@@ -2439,6 +2446,21 @@ function leesGroepenIdp(waarde) {
   return { type, id };
 }
 
+/**
+ * Leest wrangler.jsonc van de app met de controle van zijn variant (lib/variant.mjs). Buiten
+ * de proef dwingt leesArgumenten --wrangler af; de proef leest zijn eigen. Opruimen en Toegang
+ * bijwerken gaan door zonder een leesbare config (null): opruimen laat dan het Worker-script
+ * staan, want zonder de naam uit wrangler.jsonc weet het niet welk script van de app is.
+ */
+export function configVoor(arg, modus) {
+  try {
+    return wranglerConfig(arg.variant, arg.wrangler ?? "wrangler.jsonc");
+  } catch (fout) {
+    if (!["opruimen", "toegang"].includes(modus)) throw fout;
+    return null;
+  }
+}
+
 if (
   process.argv[1] &&
   new URL(`file://${process.argv[1]}`).pathname === new URL(import.meta.url).pathname
@@ -2454,13 +2476,7 @@ if (
   try {
     const arg = leesArgumenten(process.argv.slice(2), process.env);
     modus = ["opruimen", "tweedeDoorgang", "toegang"].find((m) => arg[m]) ?? "inrichten";
-    let config = null;
-    try {
-      // Buiten de proef dwingt leesArgumenten --wrangler af; de proef leest zijn eigen.
-      config = cloudflareConfig(arg.wrangler ?? "wrangler.jsonc");
-    } catch (fout) {
-      if (!["opruimen", "toegang"].includes(modus)) throw fout;
-    }
+    const config = configVoor(arg, modus);
     arg.hostname ??= config?.hostname ?? null;
     arg.worker = config?.worker ?? null;
     arg.stand = config?.stand ?? null;

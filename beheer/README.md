@@ -513,6 +513,18 @@ een klant die een app-repo in een andere repo of organisatie inricht. Kopieer da
   (`../scripts/lib/cloudflare-config.mjs` vanuit `beheer/`). Het script importeert daar
   de controle van `wrangler.jsonc` vandaan.
 
+### Een app van de openbare template
+
+Tier 2 heeft twee templates. Een app uit `app-template-tier2-openbaar` (de server maakt de
+pagina's) heeft een andere `wrangler.jsonc`: met `main`, de servercode. De gewone controle
+weigert `main`; daarom krijgt het script bij zo'n app `--variant cloudflare-openbaar` mee en
+gebruikt het de controle van die template (`beheer/lib/cloudflare-config-openbaar.mjs`, een
+letterlijke kopie van `scripts/lib/cloudflare-config.mjs` daar; wijzig de kopie nooit met de
+hand, zie `beheer/lib/variant.mjs`). De workflows App inrichten en Controle van buitenaf lezen
+de variant zelf uit `.claude/stack-manifest.json` van de app-repo. Zonder `--variant` geldt de
+gewone controle. De rest van de inrichting is voor beide templates gelijk: de placeholder en
+de Access op de Worker, de inlogdienst, de database, het klantportaal en de variabelen.
+
 Daarna:
 
 ```sh
