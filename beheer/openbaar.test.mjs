@@ -15,8 +15,10 @@ import { fileURLToPath } from "node:url";
 import {
   APP_KENMERK,
   configVoor,
+  HINT_VARIANT,
   KLANTPORTAAL_INLOGDIENST,
   leesArgumenten,
+  metConfig,
   richtIn,
   ruimOp,
   schakelaarAan,
@@ -81,8 +83,7 @@ function argumenten(wrangler, extra = []) {
     OPENBAAR,
     ...extra,
   ]);
-  const config = configVoor(arg, "inrichten");
-  return { ...arg, hostname: config.hostname, worker: config.worker, stand: config.stand };
+  return metConfig(arg, "inrichten");
 }
 
 // ---------------------------------------------------------------- de controle van wrangler.jsonc
@@ -140,27 +141,133 @@ test("variant: alleen de twee bekende waarden; --variant vraagt een waarde", () 
   assert.throws(() => leesArgumenten([...basis, "--variant", "--droogloop"]), /vraagt een waarde/);
 });
 
-test("variant: opruimen leest de Worker-naam van een openbare app alleen met de variant", () => {
-  const met = leesArgumenten([
+test("opruimen: zonder gelezen variant vindt het de Worker-naam met de controle van de andere template", () => {
+  const opruimen = (wrangler, variant) =>
+    leesArgumenten([
+      "--voorvoegsel",
+      "vb-",
+      "--opruimen",
+      "--app",
+      "direct",
+      "--repo",
+      ARG.repo,
+      "--wrangler",
+      wrangler,
+      ...(variant ? ["--variant", variant] : []),
+    ]);
+  assert.equal(configVoor(opruimen(MET_DOMEIN, OPENBAAR), "opruimen").worker, "cf-proef");
+  // Het manifest was niet te lezen (geen variant): toch de naam, dus ook het script gaat weg.
+  assert.equal(configVoor(opruimen(MET_DOMEIN), "opruimen").worker, "cf-proef");
+  assert.equal(metConfig(opruimen(MET_DOMEIN), "opruimen").workerOnbekend, undefined);
+  // En andersom: de variant van de openbare template bij een gewone wrangler.jsonc.
+  assert.ok(configVoor(opruimen(join(HIER, "..", "wrangler.jsonc"), OPENBAAR), "opruimen").worker);
+  // Inrichten probeert nooit de andere controle: daar blijft `main` zonder variant geweigerd.
+  assert.throws(() => configVoor(opruimen(MET_DOMEIN), "inrichten"), /`main` hoort er niet in/);
+});
+
+test("opruimen: is wrangler.jsonc met geen van beide controles te lezen, dan blijft de Access op de Worker staan", async () => {
+  const kapot = schrijf("kapot.jsonc", '{ "name": "cf-proef", "d1_databases": [] }');
+  const w = nepWolk({ ghBestanden: GH_BESTANDEN });
+  await richtIn(argumenten(MET_DOMEIN), opzet(w, DEUR));
+  assert.ok(w.staat.apps.some((a) => a.name === "vb-direct-worker"));
+  const arg = metConfig(
+    leesArgumenten([
+      "--voorvoegsel",
+      "vb-",
+      "--opruimen",
+      "--app",
+      "direct",
+      "--repo",
+      ARG.repo,
+      "--wrangler",
+      kapot,
+    ]),
+    "opruimen",
+  );
+  assert.equal(arg.worker, null);
+  assert.equal(arg.workerOnbekend, true);
+  const r = await ruimOp(arg, opzet(w, DEUR));
+  assert.deepEqual(
+    w.staat.apps.map((a) => a.name),
+    ["vb-direct-worker"],
+    "alleen de Access op de Worker staat er nog",
+  );
+  assert.equal(
+    r.verwijderd.some((v) => v.soort === "Access op de Worker" || v.soort === "Worker-script"),
+    false,
+  );
+  assert.ok(
+    r.waarschuwingen.some((x) =>
+      /Access-app vb-direct-worker en het Worker-script blijven staan/.test(x),
+    ),
+    JSON.stringify(r.waarschuwingen),
+  );
+  // Zonder --wrangler (de app-repo heeft het bestand niet meer) blijft opruimen zoals het was.
+  const zonder = metConfig(
+    leesArgumenten(["--voorvoegsel", "vb-", "--opruimen", "--app", "direct", "--repo", ARG.repo]),
+    "opruimen",
+  );
+  assert.equal(zonder.workerOnbekend, undefined);
+});
+
+test("de fout over `main` zonder variant zegt dat het manifest mogelijk niet gelezen is", () => {
+  const arg = leesArgumenten([
     "--voorvoegsel",
     "vb-",
-    "--opruimen",
     "--app",
     "direct",
     "--repo",
     ARG.repo,
     "--wrangler",
     MET_DOMEIN,
-    "--variant",
-    OPENBAAR,
   ]);
-  assert.equal(configVoor(met, "opruimen").worker, "cf-proef");
-  // Zonder de variant is de config onleesbaar; opruimen gaat door en laat het Worker-script staan.
-  assert.equal(configVoor({ ...met, variant: null }, "opruimen"), null);
   assert.throws(
-    () => configVoor({ ...met, variant: null }, "inrichten"),
-    /`main` hoort er niet in/,
+    () => configVoor(arg, "inrichten"),
+    (fout) => fout.message.endsWith(HINT_VARIANT),
   );
+  assert.match(HINT_VARIANT, /--variant cloudflare-openbaar/);
+  // Met een variant erbij (dan is het manifest wel gelezen) geen hint.
+  assert.throws(
+    () => configVoor({ ...arg, variant: GEWOON }, "inrichten"),
+    (fout) => /`main` hoort er niet in/.test(fout.message) && !fout.message.includes(HINT_VARIANT),
+  );
+});
+
+test("controle van buitenaf: --variant kiest dezelfde controle", () => {
+  const draai = (extra) =>
+    spawnSync(
+      process.execPath,
+      [
+        join(HIER, "controle-doorsteek.mjs"),
+        "--voorvoegsel",
+        "vb-",
+        "--app",
+        "direct",
+        "--wrangler",
+        MET_DOMEIN,
+        ...extra,
+      ],
+      {
+        encoding: "utf8",
+        // Een token dat nergens geldig is en een adres dat niet bestaat: het script komt niet
+        // verder dan de eerste aanroep, en daar gaat het hier om.
+        env: {
+          PATH: process.env.PATH,
+          CLOUDFLARE_PROEF_TOKEN: "x",
+          CLOUDFLARE_ACCOUNT_ID: "x",
+          SUPABASE_ACCESS_TOKEN: "x",
+          SUPABASE_ORG_SLUG: "x",
+          HTTPS_PROXY: "http://127.0.0.1:9",
+          https_proxy: "http://127.0.0.1:9",
+        },
+        timeout: 20000,
+      },
+    );
+  const zonder = draai([]);
+  assert.notEqual(zonder.status, 0);
+  assert.match(zonder.stderr + zonder.stdout, /`main` hoort er niet in/);
+  const fout = draai(["--variant", "iets"]);
+  assert.match(fout.stderr + fout.stdout, /--variant kent "iets" niet/);
 });
 
 // ---------------------------------------------------------------- het script zelf, van buitenaf
@@ -235,24 +342,33 @@ test("openbare app met klantportaal: de droogloop plant alles en wijzigt niets",
   assert.deepEqual(w.staat.apps, []);
 });
 
-test("openbare app met klantportaal: de echte inrichting, eerst met de deur, dan het vinkje", async () => {
+test("openbare app naar klantportaal: eerst achter de deur, dan omzetten, dan het vinkje", async () => {
   const w = nepWolk({ ghBestanden: GH_BESTANDEN });
   const arg = argumenten(MET_DOMEIN, ["--testdatabase"]);
-  const r1 = await richtIn(arg, opzet(w, PORTAAL));
+  const heeftDeur = () => w.staat.apps.some((a) => a.name === "vb-direct");
+  // Run 1: de app staat als gewone app in toegang.json (zo zet de plugin elke nieuwe app neer).
   // De placeholder en de Access op de Worker staan er vóór de eerste uitrol; de Worker-naam
   // komt uit de wrangler.jsonc van de openbare template.
+  const r1 = await richtIn(arg, opzet(w, DEUR));
   assert.equal(stap(r1, "4 Access op de Worker"), "placeholder neergezet, Access aangemaakt");
   assert.ok(w.staat.apps.some((a) => a.name === "vb-direct-worker"));
-  const r2 = await richtIn({ ...arg, deurWeghalen: true }, opzet(w, PORTAAL));
-  assert.match(stap(r2, "3.5 Access-app op de hostname"), /^geen deur\. klantportaal/);
-  assert.equal(
-    w.staat.apps.some((a) => a.name === "vb-direct"),
-    false,
-    "geen deur op het domein",
+  assert.equal(heeftDeur(), true, "na de eerste run staat de deur op het domein");
+  assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, "cloudflare");
+  // Run 2: toegang.json zegt nu klantportaal. Alles wordt klaargezet, de deur blijft staan.
+  const r2 = await richtIn(arg, opzet(w, PORTAAL));
+  assert.equal(heeftDeur(), true, "zonder vinkje blijft de deur staan");
+  assert.match(
+    stap(r2, "3.5 Access-app op de hostname"),
+    /^blijft staan .*alleen een run met het vinkje/,
   );
+  assert.ok(r2.waarschuwingen.some((x) => /de deur vb-direct staat er nog/.test(x)));
+  assert.equal(w.staat.ghVariabelen.production.VITE_INLOGDIENST, KLANTPORTAAL_INLOGDIENST);
+  // Run 3: met het vinkje gaat de deur weg.
+  const r3 = await richtIn({ ...arg, deurWeghalen: true }, opzet(w, PORTAAL));
+  assert.equal(heeftDeur(), false, "met het vinkje is het domein open");
+  assert.ok(r3.stappen.length > 0);
   // Wat de uitrol van de openbare template leest (uitrollen.yml daar): dezelfde namen.
   const productie = w.staat.ghVariabelen.production;
-  assert.equal(productie.VITE_INLOGDIENST, KLANTPORTAAL_INLOGDIENST);
   assert.match(productie.VITE_SUPABASE_URL, /^https:\/\/ref\d+\.supabase\.co$/);
   assert.ok(
     productie.VITE_SUPABASE_ANON_KEY &&
@@ -266,19 +382,32 @@ test("openbare app met klantportaal: de echte inrichting, eerst met de deur, dan
   assert.equal(config.site_url, `https://${DOMEIN}`);
   assert.ok(config.uri_allow_list.split(",").includes(`https://${DOMEIN}/**`));
   assert.equal(config.external_email_enabled, true);
-  // Een derde run verandert niets meer.
+  // Nog een run verandert niets meer aan Access of de Worker.
   const voor = w.aanroepen.length;
-  const r3 = await richtIn(arg, opzet(w, PORTAAL));
+  const r4 = await richtIn(arg, opzet(w, PORTAAL));
   const schrijvend = w.aanroepen
     .slice(voor)
     .filter(
       (a) =>
-        a.soort === "fetch" &&
-        !["GET"].includes(a.methode) &&
-        /access\/apps|workers\/scripts/.test(a.url),
+        a.soort === "fetch" && a.methode !== "GET" && /access\/apps|workers\/scripts/.test(a.url),
     );
   assert.deepEqual(schrijvend, [], "geen wijziging aan Access of de Worker bij een herhaling");
-  assert.equal(stap(r3, "4 Access op de Worker"), "ongewijzigd");
+  assert.equal(stap(r4, "4 Access op de Worker"), "ongewijzigd");
+  assert.equal(heeftDeur(), false);
+});
+
+test("bekend sinds 43, vastgelegd: een verse app die meteen klantportaal is, krijgt geen deur", async () => {
+  // Het script maakt bij een klantportaal nooit een deur aan; het haalt alleen een bestaande
+  // weg met het vinkje. Daarom zet de plugin een nieuwe app altijd eerst als gewone app neer
+  // (nieuwe-app weigert --klantportaal bij een app die nog niet is ingericht). Verandert dit
+  // gedrag (melding in de werkplaats), dan hoort deze test mee te veranderen.
+  const w = nepWolk({ ghBestanden: GH_BESTANDEN });
+  const r = await richtIn(argumenten(MET_DOMEIN), opzet(w, PORTAAL));
+  assert.equal(
+    w.staat.apps.some((a) => a.name === "vb-direct"),
+    false,
+  );
+  assert.match(stap(r, "3.5 Access-app op de hostname"), /^geen deur\. klantportaal/);
 });
 
 test("openbare app zonder klantportaal in toegang.json: gewoon achter de deur, zoals elke app", async () => {

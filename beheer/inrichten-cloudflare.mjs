@@ -155,7 +155,7 @@ import {
   valideerToegang,
   verwijderOverbodig,
 } from "./lib/toegang.mjs";
-import { valideerVariant, wranglerConfig } from "./lib/variant.mjs";
+import { GEWOON, OPENBAAR, valideerVariant, wranglerConfig } from "./lib/variant.mjs";
 
 export const OMGEVINGEN = ["production", "preview"];
 /**
@@ -1893,7 +1893,13 @@ export async function ruimOp(arg, d) {
   const alleApps = await cf.apps();
   const allePolicies = await cf.policies();
   const alleProjecten = await supabase.projecten();
-  const apps = alleApps.filter((a) => appNamenSet.has(a.name));
+  // Is de naam van het Worker-script onbekend (wrangler.jsonc was niet te lezen), dan blijft de
+  // Access op de Worker staan: het script draait mogelijk nog, en zonder die Access staat het
+  // open op workers.dev. Die Access-app telt dan als "blijft": ook zijn policies blijven.
+  const workerBlijft = arg.workerOnbekend
+    ? alleApps.filter((a) => namen.some((n) => n.worker === a.name))
+    : [];
+  const apps = alleApps.filter((a) => appNamenSet.has(a.name) && !workerBlijft.includes(a));
   // Hangt een policy nog aan een Access-app die blijft staan, dan blijft hij ook staan.
   const hangtAan = (policy) =>
     alleApps
@@ -1917,7 +1923,9 @@ export async function ruimOp(arg, d) {
   const droog = Boolean(arg.droogloop);
 
   const blijft = [
-    ...alleApps.filter((a) => a.name?.startsWith(vv) && !apps.includes(a)),
+    ...alleApps.filter(
+      (a) => a.name?.startsWith(vv) && !apps.includes(a) && !workerBlijft.includes(a),
+    ),
     ...allePolicies.filter(
       (p) =>
         p.name?.startsWith(vv) &&
@@ -1943,6 +1951,11 @@ export async function ruimOp(arg, d) {
   if (arg.worker) {
     const weg = droog ? await cf.workerBestaat(arg.worker) : await cf.verwijderWorker(arg.worker);
     if (weg) verwijderd.push({ soort: "Worker-script", naam: arg.worker });
+  }
+  for (const a of workerBlijft) {
+    waarschuwingen.push(
+      `Access-app ${a.name} en het Worker-script blijven staan: wrangler.jsonc van de app was niet te lezen, dus de naam van het Worker-script is onbekend. Zonder die Access zou een Worker die nog draait open op workers.dev staan. Herstel wrangler.jsonc op de standaardtak van de app en draai opruimen opnieuw, of verwijder eerst het Worker-script en daarna deze Access-app met de hand in Cloudflare`,
+    );
   }
   for (const a of workerApps) {
     if (!droog) await cf.verwijderApp(a.id);
@@ -2447,18 +2460,57 @@ function leesGroepenIdp(waarde) {
 }
 
 /**
+ * De hint bij de fout over `main` als er geen variant is meegegeven: dan is het manifest van de
+ * app mogelijk niet gelezen. Alleen in de melding van dit script; de controle zelf blijft gelijk.
+ */
+export const HINT_VARIANT =
+  " Is dit een app van de openbare template (app-template-tier2-openbaar)? Dan is de variant niet meegegeven: de workflow leest hem uit .claude/stack-manifest.json van de app (veld variant), en met de hand is het --variant cloudflare-openbaar.";
+
+/**
  * Leest wrangler.jsonc van de app met de controle van zijn variant (lib/variant.mjs). Buiten
- * de proef dwingt leesArgumenten --wrangler af; de proef leest zijn eigen. Opruimen en Toegang
- * bijwerken gaan door zonder een leesbare config (null): opruimen laat dan het Worker-script
- * staan, want zonder de naam uit wrangler.jsonc weet het niet welk script van de app is.
+ * de proef dwingt leesArgumenten --wrangler af; de proef leest zijn eigen.
+ *
+ * Opruimen heeft alleen de naam van de Worker nodig. Keurt de controle van de eigen variant het
+ * bestand af, dan probeert opruimen de controle van de andere template: een app van de openbare
+ * template waarvan de variant niet is meegegeven, wordt zo toch helemaal opgeruimd. Lukt geen
+ * van beide, dan is het antwoord null (zie `metConfig`). Toegang bijwerken raakt geen app-repo
+ * en gaat altijd door zonder config.
  */
 export function configVoor(arg, modus) {
+  const pad = arg.wrangler ?? "wrangler.jsonc";
   try {
-    return wranglerConfig(arg.variant, arg.wrangler ?? "wrangler.jsonc");
+    return wranglerConfig(arg.variant, pad);
   } catch (fout) {
-    if (!["opruimen", "toegang"].includes(modus)) throw fout;
-    return null;
+    if (modus === "opruimen") {
+      try {
+        return wranglerConfig((arg.variant ?? GEWOON) === GEWOON ? OPENBAAR : GEWOON, pad);
+      } catch {
+        return null;
+      }
+    }
+    if (modus === "toegang") return null;
+    if (!arg.variant && /`main` hoort er niet in/.test(fout.message)) {
+      throw new Error(fout.message + HINT_VARIANT);
+    }
+    throw fout;
   }
+}
+
+/**
+ * De argumenten aangevuld met wat in wrangler.jsonc staat: het domein, de Worker-naam en de
+ * stand. `workerOnbekend` is waar als opruimen een wrangler.jsonc kreeg die met geen van beide
+ * controles te lezen is: dan is de naam van het Worker-script onbekend, en laat opruimen de
+ * Access op de Worker staan (anders zou een Worker die nog draait open op workers.dev komen).
+ * Zonder --wrangler (de app-repo heeft het bestand niet meer) is er niets te beschermen dat
+ * dit script kan vinden; dat blijft zoals het was.
+ */
+export function metConfig(arg, modus) {
+  const config = configVoor(arg, modus);
+  arg.hostname ??= config?.hostname ?? null;
+  arg.worker = config?.worker ?? null;
+  arg.stand = config?.stand ?? null;
+  if (modus === "opruimen" && config === null && arg.wrangler) arg.workerOnbekend = true;
+  return arg;
 }
 
 if (
@@ -2476,10 +2528,7 @@ if (
   try {
     const arg = leesArgumenten(process.argv.slice(2), process.env);
     modus = ["opruimen", "tweedeDoorgang", "toegang"].find((m) => arg[m]) ?? "inrichten";
-    const config = configVoor(arg, modus);
-    arg.hostname ??= config?.hostname ?? null;
-    arg.worker = config?.worker ?? null;
-    arg.stand = config?.stand ?? null;
+    metConfig(arg, modus);
     for (const naam of [
       "CLOUDFLARE_PROEF_TOKEN",
       "SUPABASE_ACCESS_TOKEN",
