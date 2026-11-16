@@ -196,6 +196,9 @@ je begint en loop de stappen in volgorde af, in plaats van te improviseren:
 - `docs/routes/lokaal-kijken.md`: de app op je eigen computer zien terwijl je bouwt. In
   de Claude-app gaat dat vanzelf via de preview; deze route is voor andere assistenten
   en voor wie het met de hand doet.
+- `docs/routes/klantportaal.md`: een bestaande app open maken voor klanten (geen deur van
+  Cloudflare, klanten loggen in met een code per mail). Alleen op verzoek van de bouwer; de
+  regels in de database zijn dan de enige grens.
 
 Een compleet nieuwe applicatie begin je niet vanuit deze map: die krijgt een eigen repo,
 via `/stagetwo-tier2:nieuwe-app` in een lege map.

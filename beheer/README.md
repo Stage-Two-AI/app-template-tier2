@@ -4,23 +4,35 @@ Deze map gaat niet mee naar afgeleide apps (`nietMeenemen` in
 `.claude/stack-manifest.json`). Een beheer-repo kan hem wel als zelfstandig pakket
 kopiëren (zie "Los van de template"); de nette plek is `beheer-template`.
 
+Nieuw sinds versie 43 is het klantportaal (zie "Klantportaal"). Gebruik je geen klantportaal,
+dan hoef je niets te doen en verandert er niets.
+
 Wat erin zit:
 
 | Bestand | Wat het doet |
 |---|---|
 | `inrichten-cloudflare.mjs` | het script: inrichten, tweede doorgang, toegang bijwerken, opruimen |
 | `lib/cloudflare.mjs` | Access-policies, Access-apps, workers.dev-subdomein, placeholder-Worker |
-| `lib/supabase.mjs` | project, sleutels, auth-config, custom provider `custom:cloudflare` |
-| `lib/toegang.mjs` | `toegang.json` controleren, vertalen naar policies, intrekken, de aanmeld-hook van de testdatabase |
+| `lib/supabase.mjs` | project, sleutels, auth-config, custom provider `custom:cloudflare`, de mails, de rem en de sessieduur van een klantportaal |
+| `lib/toegang.mjs` | `toegang.json` controleren, vertalen naar policies, intrekken, de aanmeld-hook van de testdatabase, de twee hooks van een klantportaal |
+| `controle-doorsteek.mjs` | kijkt van buitenaf of de deur dicht zit (en bij een klantportaal: of alleen het domein open is en inloggen per mail en de captcha aan staan); met `--app` zoekt het de adressen zelf op (de knop Controle van buitenaf) |
+| `KLANTPORTAAL.md` | het klantportaal voor de bouwer en voor Stage Two: hooks, mail, de rem, Toegang bijwerken, open punten. De stappen voor de owner staan hieronder, onder "Klantportaal" |
 | `toegang.json` | wie bij welke app mag |
 | `package.json` | maakt van `beheer/` een zelfstandig pakket (zie "Los van de template") |
+
+Alleen voor de tests in de template (zie "Lokaal testen"); een beheer-repo heeft ze niet nodig:
+
+| Bestand | Wat het doet |
+|---|---|
 | `*.test.mjs`, `nep-wolk.mjs` | tests tegen een nagebootste API (`pnpm beheer:test`) |
+| `regressie-42.json`, `regressie-42.maak.mjs`, `regressie-scenarios.mjs` | bewijs dat een app zonder `klantportaal` dezelfde aanroepen, dezelfde uitvoer en dezelfde exitcode krijgt als op versie 42 |
+| `klantportaal-opzet.mjs` | gedeelde opzet voor de tests van het klantportaal |
 
 Alles wat het script aanmaakt heeft een naam die begint met het voorvoegsel. Dat is een
 verplichte instelling: `--voorvoegsel <vv->` of de omgevingsvariabele
-`BEHEER_VOORVOEGSEL` (de vlag gaat voor). De proef gebruikt `cf-proef-`, Richplant `rp-`.
+`BEHEER_VOORVOEGSEL` (de vlag gaat voor). De proef gebruikt `cf-proef-`, een klant bijvoorbeeld `kl-`.
 Het patroon is streng: een kleine letter, hoogstens vijftien kleine letters of cijfers,
-en precies één streepje, aan het eind (`rp-`, niet `rp-x-`). `cf-proef-` is de enige
+en precies één streepje, aan het eind (`kl-`, niet `kl-x-`). `cf-proef-` is de enige
 uitzondering; `cf-` zelf wordt geweigerd. Zo kan geen voorvoegsel met een ander
 voorvoegsel beginnen, en neemt opruimen met het ene nooit iets van het andere mee.
 Zonder voorvoegsel start het script niet.
@@ -30,7 +42,7 @@ namen die het script voor de app en de groepen in `toegang.json` maakt; een ande
 met het voorvoegsel blijft staan, met een waarschuwing. Bestaat er iets met dezelfde
 naam zónder voorvoegsel, of staat er al een andere Access-app op de hostname, dan stopt
 het script voordat het iets wijzigt. De aanmeld-hookfunctie van de testdatabase heet ook
-naar het voorvoegsel (`cf_proef_voor_aanmelden`, `rp_voor_aanmelden`).
+naar het voorvoegsel (`cf_proef_voor_aanmelden`, `kl_voor_aanmelden`).
 
 ## Voorwaarden (door Christijn)
 
@@ -78,6 +90,7 @@ Wat de inrichting in de app-repo zet:
 
 | Waar | Wat |
 |---|---|
+| omgeving `production`, variabele | alleen bij een klantportaal met captcha: `VITE_TURNSTILE_SITEKEY`, de openbare sleutel van de Turnstile-widget (uit `toegang.json`). De previews krijgen hem niet |
 | omgevingen `production` en `preview`, variabelen | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_INLOGDIENST`, `CLOUDFLARE_ACCOUNT_ID`, `SUPABASE_POOLER_HOST` en `SUPABASE_TEST_POOLER_HOST` (de session pooler van productie en van de testdatabase, voor `deploy-db.yml` en de droogloop van migraties), en `VITE_SENTRY_DSN` (de DSN van het eigen Sentry-project, als die nog ontbrak) |
 | omgeving `production`, variabele | `SUPABASE_PROJECT_REF`: de database waar `deploy-db.yml` op migreert. Geen geheim (hij staat ook in `VITE_SUPABASE_URL`), dus zichtbaar in de instellingen van de app |
 | repo-variabelen | `PREVIEW_VITE_SUPABASE_URL`, `PREVIEW_VITE_SUPABASE_ANON_KEY`, `PREVIEW_VITE_SUPABASE_SCHEMA` (`public`), `PREVIEW_VITE_INLOGDIENST`, en `PREVIEW_VITE_SENTRY_DSN` (dezelfde DSN als hierboven) |
@@ -193,7 +206,8 @@ staan daar nooit leesbaar in.
 
 Inloggen in productie loopt altijd via Cloudflare; in productie staat inloggen met e-mail
 uit. Werkt de keten Cloudflare naar Supabase niet, dan herstellen we Cloudflare. Er is
-geen tweede deur.
+geen tweede deur. De enige uitzondering is een app die in `toegang.json` als klantportaal
+staat: zie "Klantportaal" hieronder.
 
 **Proef toegang bijwerken** (`proef-toegang.yml`) draait vanzelf als `toegang.json` op
 `main` verandert. Hij zet de policies gelijk aan het bestand, hangt ze aan de
@@ -244,12 +258,208 @@ object zijn. De korte vorm blijft werken:
   tot je die weghaalt. Een groep mag niet `publiek` heten (zo heet die policy). Wat een
   publieke pagina mag tonen, staat in `docs/WERKWIJZE.md` (hoofdstuk 2). Het veld heet en
   werkt hetzelfde als `publiek` in tier 1. Eén verschil: tier 1 kent ook een site die bijna
-  helemaal publiek is (`["/*"]` met `dicht`); tier 2 niet, want zonder de deur kan niemand
-  inloggen bij de database van de app.
+  helemaal publiek is (`["/*"]` met `dicht`); tier 2 niet. Moet de hele app open voor
+  klanten, dan is dat een klantportaal (hieronder), geen publiek pad. `publiek` en
+  `klantportaal` kunnen niet samen bij één app.
 - `gegevens_naar_test` (standaard `true`): met `false` zet Testdatabase verversen in de
   beheer-repo voor deze app geen gegevens en bestanden van productie meer in de
   testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een
   gebruiker hangen en er toch niets te kopiëren valt.
+
+- `klantportaal`, met `afzender`, `turnstile_sitekey` en `captcha`: zie het volgende hoofdstuk.
+
+## Klantportaal
+
+Gebruik je geen klantportaal, dan hoef je niets te doen en verandert er niets.
+
+Een klantportaal is een app die open is voor klanten: een webshop of een portaal waar mensen
+van buiten het bedrijf zelf inloggen. Het eigen domein van de app staat dan open voor iedereen
+en klanten loggen in per mail, met een code van tien cijfers of een link. Wat dicht blijft: het
+`workers.dev`-adres en de previews (achter Cloudflare, zoals altijd), en medewerkers loggen in
+via Cloudflare, zoals altijd. Voor klanten staat er niets in `toegang.json`: de groepen daar
+zijn bij een klantportaal alleen nog de medewerkers. Voor een gewone app verandert er niets.
+
+**Een mens haalt de deur weg, niet de code.** App inrichten zet alles klaar en laat de deur
+staan. De deur gaat alleen weg in een run waarin jij het vinkje "Deur weghalen (klantportaal
+live zetten)" hebt gezet, en die run doet niets anders.
+
+Bij een klantportaal (of een portaal dat weer dicht moet) staat na elke run bovenaan de pagina
+van de run in GitHub **de samenvatting van de run**: wat er is gedaan, de waarschuwingen en
+onder "Wat nu" de volgende stap. Daar verwijzen de stappen hieronder naar. Geheimen staan er
+niet in. Alles voor de bouwer en voor Stage Two (de hooks, de rem, de sommen, de details van
+Toegang bijwerken) staat in `KLANTPORTAAL.md`.
+
+Twee dingen in de workflows zijn er alleen voor een klantportaal:
+
+- Het vinkje **"Deur weghalen (klantportaal live zetten)"** bij App inrichten (in de proef:
+  Proef inrichten, `-f deur_weghalen=true`; in het script `--deur-weghalen`). Zonder dat
+  vinkje verandert geen enkele run iets aan de deur, en met dat vinkje verandert een run alleen
+  de deur (stap 5).
+- De knop **Controle van buitenaf** (in de proef: Proef controle van buitenaf,
+  `proef-controle.yml`). Die kijkt zonder inlog of het domein open is en het `workers.dev`-adres
+  en de previews dicht zijn, en of inloggen per mail en de captcha aan staan (stap 6). Je kiest
+  alleen de app; de adressen zoekt hij zelf op. Hij wijzigt niets, krijgt alleen de sleutels
+  waarmee hij die adressen kan opzoeken (zie "Controle van buitenaf" in `KLANTPORTAAL.md`) en
+  draait in een eigen concurrency-groep, zodat hij nooit een wachtende Toegang bijwerken
+  vervangt.
+
+### De zeven stappen
+
+Alles gaat via GitHub in de browser; je hebt geen eigen computer met commando's nodig.
+
+**Stap 0. De bouwer bevestigt dat de app er klaar voor is.** Vraag de bouwer van de app deze
+vier punten te bevestigen:
+
+1. De app staat op versie 43 of later: de pull request van `/stagetwo-tier2:updaten` is gemerged.
+2. De bouwer heeft in de app de route `docs/routes/klantportaal.md` gevolgd en die pull requests
+   zijn gemerged. Daarmee staat in `stack.config.json` van de app `"klantportaal": true`: de
+   schakelaar waarmee de app zelf controleert dat elke regel in de database de poort heeft.
+3. Een nieuw account ziet en kan niets tot een medewerker het goedkeurt, en medewerkerrechten
+   gelden alleen voor wie via Cloudflare is ingelogd (de migratie `klantportaal` in de app; zie
+   "De regels in de database" in `KLANTPORTAAL.md`).
+4. De app heeft in Supabase geen eigen hooks voor aanmelden, het token of het versturen van mail.
+
+- Goed als: de bouwer alle vier bevestigt.
+- Gaat het mis: sla je dit over, dan weigert stap 3 met "de app begrijpt de inlog van een
+  klantportaal nog niet", "de app ... is zelf nog geen klantportaal" of "de app heeft een eigen
+  ... hook". Er is dan niets gewijzigd, ook niet aan de deur.
+
+**Stap 1. Twee sleutels klaarzetten.** Begin hier op tijd: het domein verifiëren bij Resend is
+werk in de DNS van het domein en kan uren duren voor het is doorgekomen.
+
+| Waar | Wat je doet | Waar het heen gaat |
+|---|---|---|
+| Resend, Domains | het domein van de afzender toevoegen (bijvoorbeeld `klant.nl`) en de DNS-regels die Resend toont bij de beheerder van dat domein laten zetten. Wacht tot Resend "Verified" toont. Maak daarna onder API Keys een sleutel met alleen "Sending access" | secret `SMTP_WACHTWOORD` in de beheer-repo: Settings, Environments, de omgeving `beheer` (waar ook `SUPABASE_ACCESS_TOKEN` staat) |
+| Cloudflare, Turnstile, Add widget | een widget maken, stand Managed. Bij "Hostname" vul je het domein van de app in, precies zoals klanten het typen (bijvoorbeeld `shop.klant.nl`). Je krijgt twee sleutels | de geheime (Secret Key) als secret `TURNSTILE_GEHEIM` in dezelfde omgeving `beheer`. De openbare (Site Key) bewaar je voor stap 2 |
+
+- Goed als: beide secrets in de lijst van de omgeving `beheer` staan.
+- Gaat het mis: verwissel je de twee sleutels van Turnstile, dan weigert stap 3 met "dezelfde
+  waarde" of "Turnstile kent dit geheim niet". Er is dan niets gewijzigd.
+
+**Stap 2. Een pull request op `toegang.json`.** Dat bestand staat bovenin de beheer-repo (in de
+template is het `beheer/toegang.json`). Maak van de regel van de app de lange vorm. Voor:
+
+```json
+"apps": {
+  "shop": ["kantoor"]
+}
+```
+
+Na:
+
+```json
+"apps": {
+  "shop": {
+    "groepen": ["kantoor"],
+    "klantportaal": true,
+    "afzender": "Voorbeeld BV <noreply@klant.nl>",
+    "turnstile_sitekey": "0x4AAAAAAA..."
+  }
+}
+```
+
+`afzender` is een adres op het domein uit stap 1 (de naam ervoor staat in de mail);
+`turnstile_sitekey` is de openbare sleutel uit stap 1. Laat de pull request goedkeuren en merge
+hem.
+
+- Goed als: de workflow Toegang bijwerken daarna groen is. De samenvatting zegt: "de deur staat
+  er nog".
+- Gaat het mis: een rode check op de pull request noemt het veld dat niet klopt.
+
+**Stap 3. App inrichten draaien, zonder het vinkje.** Actions, App inrichten, Run workflow:
+kies de app, **zet "droogloop" uit** (dat vakje staat standaard aan) en laat "Deur weghalen"
+uit. Deze run toetst de geheimen, zet inloggen per mail, de captcha, de hooks en de variabelen
+voor de app klaar, en laat de deur staan. Je mag hem zo vaak herhalen als je wilt.
+
+- Goed als: de run groen is en de samenvatting zegt "de deur ... staat er nog ... Alles staat
+  klaar", met onder "Wat nu" stap 4.
+- Gaat het mis: de run is rood en de samenvatting begint met "gestopt zonder wijzigingen",
+  gevolgd door wat er ontbreekt en wat je doet. Er is dan niets gewijzigd. Los het op en draai
+  stap 3 opnieuw.
+
+**Stap 4. De app uitrollen en achter de deur testen.**
+
+1. Ga naar de app-repo: Actions, Uitrollen, de laatste run, Re-run all jobs. Wacht tot die
+   groen is.
+2. Open het domein van de app en ga door de deur van Cloudflare, zoals altijd.
+3. Ga naar `https://<domein>/login`. Staat daar "Je bent al ingelogd", klik dan op Uitloggen.
+   Je ziet nu de inlogpagina voor klanten: het vak E-mailadres met de knop Doorgaan, en
+   daaronder de knop Inloggen voor medewerkers.
+4. Vul een privéadres in (niet je werkadres: dat weigert het portaal, want het is van een
+   medewerker), klik Doorgaan en vul de code van tien cijfers uit de mail in.
+5. Test daarna de link. Daarvoor heb je een tweede mail nodig, want een code en een link uit
+   dezelfde mail werken samen maar één keer: ga weer naar `/login`, klik Uitloggen, wacht een
+   minuut (een adres krijgt hoogstens één mail per minuut), vraag opnieuw een mail aan en klik
+   nu op de link in de mail en daarna op de knop Inloggen.
+6. Ga nog een keer naar `/login`, klik Uitloggen en daarna Inloggen voor medewerkers.
+
+- Goed als: je de widget van de captcha zag, beide mails binnen een minuut kwamen, de code
+  werkte, de link werkte en Inloggen voor medewerkers nog werkt.
+- Gaat het mis: geen mail, kijk dan bij Resend (Emails) of het domein en de sleutel kloppen.
+  Zie je geen vak E-mailadres of geen widget, dan is de app nog niet opnieuw uitgerold. De deur
+  staat er nog, dus er is geen haast: los het op en test opnieuw.
+
+**Stap 5. App inrichten draaien, met het vinkje.** Dezelfde workflow: kies de app, **zet
+"droogloop" uit** en zet "Deur weghalen (klantportaal live zetten)" aan. De run loopt na dat
+alles nog staat zoals stap 3 het zette en haalt dan de deur weg. Verder wijzigt hij niets: wat
+je in stap 4 hebt getest, is wat live gaat.
+
+- Goed als: de run groen is en de samenvatting zegt "weggehaald". Het domein is nu open.
+- Gaat het mis: de run is rood met "de deur gaat niet weg, want er staat nog iets anders te
+  wijzigen", en wat. De deur staat er dan nog en er is niets gewijzigd. Dat gebeurt als er
+  sinds stap 3 iets is veranderd (in `toegang.json` of in Supabase): doe stap 3 en stap 4
+  opnieuw, en dan pas stap 5.
+
+**Stap 6. De knop Controle van buitenaf.** Actions, Controle van buitenaf, Run workflow, kies
+de app. Je hoeft geen adressen te typen.
+
+- Goed als: de run groen is. De samenvatting toont per regel een vinkje: het domein is open,
+  het `workers.dev`-adres, de preview en de inlog voor medewerkers eindigen bij de loginpagina
+  van Cloudflare, en inloggen per mail en de captcha staan aan. Log daarna zelf nog een keer in
+  per mail, in een privévenster.
+- Gaat het mis: de samenvatting zegt onder "Wat nu" wat je doet. Staat er een kruis bij
+  `workers.dev` of de preview en blijft dat na App inrichten (zonder vinkje) staan, zet dan de
+  deur terug (hieronder).
+
+### Als het misgaat: terug achter de deur
+
+Werkt inloggen niet na stap 5, of wil je het portaal om een andere reden dicht:
+
+1. Zet met een pull request de regel van de app in `toegang.json` terug naar de korte vorm
+   (de "Voor" van stap 2): haal `klantportaal`, `afzender`, `turnstile_sitekey` en `captcha`
+   weg. Merge hem.
+2. Toegang bijwerken start vanzelf en eindigt met precies één melding, die begint met
+   "`<app>`: wacht op App inrichten". Die melding hoort hierbij: het portaal is nog niet dicht.
+   Staat er iets anders, lees dat dan en los het eerst op.
+3. Draai App inrichten voor de app: droogloop uit, zonder vinkje. Die zet eerst de deur terug,
+   zet daarna inloggen per mail uit en meldt de klanten af. Geen klant wordt geband.
+4. Start Toegang bijwerken opnieuw (Actions, Toegang bijwerken, Run workflow). Die is nu groen.
+
+Is het probleem opgelost, dan begin je opnieuw bij stap 2. De klanten hebben hun account nog.
+
+### Wat je moet weten
+
+- De regels in de database zijn bij een klantportaal de enige grens: iedereen ter wereld kan
+  een account maken. Daarom stap 0.
+- Zonder het vinkje verandert geen run iets aan de deur. Met het vinkje verandert een run
+  alleen de deur.
+- Klanten hebben geen wachtwoord en kunnen hun adres niet zelf wijzigen; dat loopt via de
+  eigenaar van de app.
+- De captcha staat standaard aan. Uitzetten kan alleen met `"captcha": false` bij de app, en
+  is bedoeld voor een storing bij Turnstile.
+- Toegang bijwerken trekt bij een klantportaal alleen medewerkers in, nooit klanten. Een
+  portaal sluiten bant niemand. Een klantportaal komt vóór de gewone apps aan de beurt; lukt
+  er daar iets niet, dan gaat hij door en eindigt de run rood. Een fout bij een gewone app
+  stopt de run, zoals altijd.
+- `SMTP_WACHTWOORD` en `TURNSTILE_GEHEIM` staan nooit in het logboek of de samenvatting.
+- Een klantportaal vraagt een eigen domein, en hoort een testdatabase te hebben (anders
+  waarschuwt elke run).
+- Een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer een mail om zijn
+  adres te bevestigen.
+- Een gewone app merkt hier niets van: die krijgt dezelfde aanroepen als op versie 42, en het
+  script schrijft voor haar geen eigen samenvatting. `"klantportaal": false` mag, en doet
+  hetzelfde als het veld weglaten.
+- De rest (hooks, mail, de rem, sessieduur, previews, open punten) staat in `KLANTPORTAAL.md`.
 
 ## Alleen IT mag toegang.json wijzigen (bij een klant)
 
@@ -317,8 +527,8 @@ proef mag terugvallen op `GITHUB_REPOSITORY`. `--wrangler` wijst naar de
 `wrangler.jsonc` van de uitgecheckte app-repo. Bijvoorbeeld:
 
 ```sh
-node beheer/inrichten-cloudflare.mjs --voorvoegsel rp- --app richplant \
-  --repo Richplant-BV/richplant-start --wrangler app/wrangler.jsonc --droogloop
+node beheer/inrichten-cloudflare.mjs --voorvoegsel kl- --app shop \
+  --repo klant-org/shop-start --wrangler app/wrangler.jsonc --droogloop
 ```
 
 `gh` gebruikt `GH_TOKEN`. In een beheer-repo is dat het kortlevende token van de GitHub
@@ -334,3 +544,26 @@ pnpm beheer:test
 
 De tests praten met een nagebootste Cloudflare, Supabase en GitHub; er gaat niets
 over het netwerk.
+
+`regressie-42-versie.test.mjs` bewijst hetzelfde zonder vastgelegde verwachting: hij haalt de
+code van versie 42 uit git naar een tijdelijke map (die hij weer weghaalt), draait daar en hier
+dezelfde scenario's en legt ze naast elkaar. Voor een gewone app die nooit klantportaal was
+moeten de aanroepen (in volgorde en inhoud), het resultaat, de regel op stdout en de exitcode
+gelijk zijn. De scenario's: 2300 accounts, IdP-groepen, een fout halverwege, een deur die is
+hernoemd, weggehaald of er nooit was, inloggen per mail dat iemand met de hand aanzette, een
+Access op de Worker met een extra adres, en elke leesvraag die één keer hapert met 429 en met
+500. Daarbij komt een storing op elke aanroep (elke methode, negen soorten fouten), handwerk
+van de klant (eigen hooks, sjablonen, policies), 63 varianten van `toegang.json`, en het script
+als proces in zes modi en negen omgevingen (stdout, stderr, exitcode, de maskers en de
+samenvatting). Wat bewust verschilt, legt hij apart vast: de tekst van de melding bij een
+ontbrekend voorvoegsel, bij een antwoord dat geen JSON is en bij een veld van een klantportaal
+in een gewone app, de optie `--deur-weghalen`, `"klantportaal": false` (op 42 geweigerd, nu
+geldig), en een app die `constructor` heet (die kwam op versie 42 door de controle heen en
+bestaat nu niet). In een losse kopie van `beheer/` zonder git slaat hij zichzelf over.
+
+`regressie-42.test.mjs` bewaakt de bestaande klanten: voor een `toegang.json` zonder
+`klantportaal` moet elke aanroep naar Cloudflare, Supabase en GitHub exact gelijk zijn aan
+die van versie 42, in volgorde en inhoud, ook de leesvragen. De verwachting
+(`regressie-42.json`) is gemaakt met de code van versie 42 zelf; `regressie-42.maak.mjs`
+zegt hoe. Wordt deze test rood, dan verandert er iets voor een gewone app: los dat op in de
+code, en leg de verwachting alleen opnieuw vast als die verandering de bedoeling is.

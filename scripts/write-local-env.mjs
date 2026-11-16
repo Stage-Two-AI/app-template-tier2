@@ -56,6 +56,10 @@ const serviceRoleKey = values.get("SERVICE_ROLE_KEY");
 // tests die de policies en rechten in de database zelf lezen (tests/rls/open-policies.test.ts)
 // en voor supabase/testrol.sql in de browsertest.
 const dbUrl = values.get("DB_URL") ?? "";
+// De lokale mailvanger (Mailpit; in oudere versies van de CLI heette hij Inbucket). Supabase
+// stuurt lokaal geen mail naar buiten: alles komt hier terecht. De tests die met een code per
+// mail inloggen (tests/rls/klantportaal.test.ts, e2e/klantportaal.spec.ts) lezen de code hier.
+const mailUrl = values.get("MAILPIT_URL") ?? values.get("INBUCKET_URL") ?? "http://127.0.0.1:54324";
 
 if (!apiUrl || !anonKey || !serviceRoleKey) {
   console.error("✗ De statusuitvoer bevatte niet alle verwachte waarden.");
@@ -75,6 +79,7 @@ const testEnv = [
   `SUPABASE_ANON_KEY=${anonKey}`,
   `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`, // guard-secrets:allow
   `SUPABASE_DB_URL=${dbUrl}`,
+  `SUPABASE_MAIL_URL=${mailUrl}`,
   "",
 ].join("\n");
 

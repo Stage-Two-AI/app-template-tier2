@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { INLOGDIENSTEN } from "@/features/auth/inlogdienst";
+import { leesInlogdiensten } from "@/features/auth/inlogdienst";
+import { Omgevingsfout } from "@/lib/startfout";
 
 /**
  * Omgevingsvariabelen worden hier één keer gevalideerd, bij het opstarten van de app.
@@ -45,15 +46,26 @@ const velden = z
     /**
      * Hoe gebruikers inloggen; zie src/features/auth/inlogdienst.ts. Standaard
      * `wachtwoord`, zodat lokaal en in CI alles werkt zoals altijd. In productie zet de
-     * uitrol hem op `cloudflare`.
+     * uitrol hem op `cloudflare`. Een klantportaal noemt er twee, met een komma ertussen:
+     * `cloudflare,mailcode` (medewerkers via Cloudflare, klanten met een code per mail).
+     * De waarde blijft hier de tekst zoals hij is opgegeven; `inlogdiensten` hieronder is
+     * de lijst die de app gebruikt.
      */
-    VITE_INLOGDIENST: z.enum(INLOGDIENSTEN).default("wachtwoord"),
+    VITE_INLOGDIENST: z.string().default("wachtwoord"),
     /**
      * Waar fouten uit de app naartoe gaan (Sentry). Leeg of afwezig: Sentry staat uit.
      * Een DSN is publiek, hij staat toch in de bundel. Bewust geen URL-controle: een
      * verkeerde DSN mag de app niet laten crashen; src/lib/fouten.ts vangt die af.
      */
     VITE_SENTRY_DSN: z.string().optional(),
+    /**
+     * De openbare sleutel (sitekey) van Cloudflare Turnstile: de controle tegen robots op het
+     * inlogformulier voor klanten (src/features/auth/robotcontrole.ts). Leeg of afwezig: de
+     * controle staat uit en er verandert niets. Hoort bij de schakelaar `captcha` van de
+     * inrichting: staat de controle bij Supabase aan, dan moet deze sleutel er zijn, anders
+     * kan geen klant meer een code aanvragen.
+     */
+    VITE_TURNSTILE_SITEKEY: z.string().optional(),
     /**
      * De testlogin: e-mail en wachtwoord van de vaste testgebruiker in de testdatabase.
      * `pnpm testlogin` zet ze in .env.development.local (het wachtwoord wordt elke nacht
@@ -66,12 +78,18 @@ const velden = z
     VITE_TESTLOGIN_WACHTWOORD: z.string().optional(),
   })
   .superRefine((waarden, ctx) => {
+    const diensten = leesInlogdiensten(waarden.VITE_INLOGDIENST);
+    if (!diensten.ok) {
+      ctx.addIssue({ code: "custom", message: diensten.fout, path: ["VITE_INLOGDIENST"] });
+    }
+
     const url = Boolean(waarden.VITE_SUPABASE_URL);
     const sleutel = Boolean(waarden.VITE_SUPABASE_ANON_KEY);
     if (url !== sleutel) {
       ctx.addIssue({
         code: "custom",
         message: url ? "VITE_SUPABASE_ANON_KEY ontbreekt" : "VITE_SUPABASE_URL ontbreekt",
+        path: [url ? "VITE_SUPABASE_ANON_KEY" : "VITE_SUPABASE_URL"],
       });
     }
   });
@@ -80,14 +98,39 @@ export const envSchema = z.preprocess(leegIsAfwezig, velden);
 
 const parsed = envSchema.safeParse(import.meta.env);
 
-if (!parsed.success) {
-  const details = parsed.error.issues.map((issue) => `- ${issue.message}`).join("\n");
-  throw new Error(
+/**
+ * De fout bij omgevingsvariabelen die niet kloppen. De melding (met de waarden en wat een
+ * ontwikkelaar moet doen) gaat naar de console; op het scherm komen alleen de namen
+ * (lib/startfout.ts), want dat scherm ziet bij een klantportaal iedereen op internet.
+ */
+export function omgevingsfout(issues: { message: string; path: readonly PropertyKey[] }[]) {
+  const details = issues.map((issue) => `- ${issue.message}`).join("\n");
+  const namen = [
+    ...new Set(
+      issues.map((issue) =>
+        typeof issue.path[0] === "string"
+          ? issue.path[0]
+          : (/^VITE_\w+/.exec(issue.message)?.[0] ?? "onbekend"),
+      ),
+    ),
+  ];
+  return new Omgevingsfout(
     `De omgevingsvariabelen kloppen niet:\n${details}\n\nKopieer .env.example naar .env.local en vul de waarden in, of draai \`pnpm env:local\` als je lokaal met Supabase werkt.`,
+    namen,
   );
 }
 
+if (!parsed.success) throw omgevingsfout(parsed.error.issues);
+
 export const env = parsed.data;
+
+/**
+ * De inlogdiensten van deze build, in de volgorde van `VITE_INLOGDIENST`. Meestal één; bij
+ * een klantportaal meer. De controle hierboven heeft de waarde al goedgekeurd, dus een fout
+ * kan hier niet meer voorkomen; de terugval is er alleen voor de typecontrole.
+ */
+const gelezen = leesInlogdiensten(env.VITE_INLOGDIENST);
+export const inlogdiensten = gelezen.ok ? gelezen.diensten : ["wachtwoord" as const];
 
 /**
  * Heeft deze build een database? Zonder de Supabase-waarden niet, en dan toont de app

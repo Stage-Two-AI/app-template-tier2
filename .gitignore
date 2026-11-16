@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-klantportaal/
 coverage/
 
 # Omgevingsvariabelen: nooit in git. .env.example wel, die staat er expres in.

@@ -1,23 +1,7 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import { App } from "@/App";
 import "@/index.css";
-import { env } from "@/lib/env";
-import { startFoutmelding } from "@/lib/fouten";
+import { toonStartfout } from "@/lib/startfout";
 
-// Vóór het renderen, zodat ook een fout bij het opstarten in Sentry komt.
-startFoutmelding({ dsn: env.VITE_SENTRY_DSN, omgeving: env.VITE_OMGEVING });
-
-const container = document.getElementById("root");
-if (!container) {
-  throw new Error("Het element #root ontbreekt in index.html.");
-}
-
-createRoot(container).render(
-  <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+// De app zelf staat in start.tsx. Zo vangt dit bestand een fout bij het opstarten op (een
+// omgevingsvariabele die niet klopt, bijvoorbeeld een onbekende dienst in VITE_INLOGDIENST)
+// en staat die op het scherm, in plaats van een witte pagina.
+import("@/start").catch((fout: unknown) => toonStartfout(fout, document.getElementById("root")));
