@@ -133,7 +133,11 @@ script geeft `testdatabase: { project_ref, anon_key }` terug; de workflow App in
 in de beheer-repo opent daarmee een pull request die het blok `testdatabase` in
 `stack.config.json` zet. Na die merge zet `deploy-db.yml` de migraties eerst op de
 testdatabase (canary) en dan op productie. Let op: het gratis plan van Supabase staat
-twee actieve projecten per organisatie toe, dus één app met testdatabase. Toegang
+twee actieve projecten per persoon toe, geteld over alle organisaties waar die persoon
+owner of administrator is (gepauzeerde projecten tellen niet mee). Eén app met
+testdatabase vult die twee al. Heeft de owner ook ergens anders gratis projecten, dan
+lukt het aanmaken van de testdatabase niet. De regel staat op
+supabase.com/docs/guides/platform/billing-on-supabase. Toegang
 bijwerken trekt ook in de testdatabase in; opruimen haalt hem mee weg.
 
 In de testdatabase staat inloggen met e-mail aan, zodat de testgebruiker van Claude
