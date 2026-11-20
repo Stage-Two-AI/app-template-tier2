@@ -501,6 +501,26 @@ metKlantportaal("de databasecontrole van het klantportaal keurt elke bekende omw
     });
   }
 
+  // pg_cron zet zelf policies op cron.job en cron.job_run_details ("username = current_user").
+  // Bezoekers komen niet in schema cron, dus die tellen niet mee; een app met geplande taken
+  // kan een klantportaal zijn (uitgave 46). Krijgt authenticated wel usage op cron, dan telt
+  // de policy weer mee.
+  it.runIf(heeftKlantportaal)(
+    "pg_cron: de policies van de extensie zelf houden niets tegen",
+    () => {
+      const sql = "create extension if not exists pg_cron with schema pg_catalog;";
+      const zonder = beoordeel(leesModel(BASIS, sql)).filter((p) => !vooraf.includes(p));
+      expect(zonder.filter((p) => /\bcron\./.test(p))).toEqual([]);
+      const metUsage = beoordeel(
+        leesModel(BASIS, `${sql}\ngrant usage on schema cron to authenticated;`),
+      ).filter((p) => !vooraf.includes(p));
+      expect(
+        metUsage.some((p) => /cron\.job/.test(p)),
+        `met usage op cron telt de policy weer mee; nu:\n${metUsage.join("\n")}`,
+      ).toBe(true);
+    },
+  );
+
   it.runIf(heeftKlantportaal)(
     "wat bewust vrij is, blijft vrij: een functie of bucket met een reden in stack.config.json",
     () => {

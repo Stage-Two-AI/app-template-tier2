@@ -26,7 +26,9 @@
  * en `turnstile_sitekey` (de openbare sleutel van de Turnstile-widget). De captcha staat bij
  * een klantportaal standaard aan; alleen met een uitdrukkelijke `"captcha": false` gaat hij
  * uit, en dan waarschuwt het resultaat. `publiek` kan er niet naast: het hele domein is dan
- * al open. Zie "Klantportaal" in beheer/README.md.
+ * al open. `klantportaal_inloggen` (standaard "code"): met "account" loggen klanten in met
+ * e-mail en wachtwoord; een account komt er alleen op uitnodiging van een medewerker (zie
+ * portaalAanmeldHookSql). Zie "Klantportaal" in beheer/README.md.
  *
  * `testaccounts` is optioneel en geldt alleen voor de testdatabase van die app
  * (`<vv><app>-test`): accounts met e-mail en wachtwoord, zodat iemand (of Claude) de
@@ -64,7 +66,14 @@ const APP_VELDEN = [
   "afzender",
   "captcha",
   "turnstile_sitekey",
+  "klantportaal_inloggen",
 ];
+/**
+ * Hoe klanten van een klantportaal inloggen: `code` (standaard, een code per mail) of `account`
+ * (e-mail en wachtwoord, alleen op uitnodiging, met een tweede stap naar keuze). `account`
+ * vraagt een app van de openbare template, versie 46 of later (zie verkenPortaal).
+ */
+export const INLOGGEN = ["code", "account"];
 /** De openbare sleutel van een Turnstile-widget (begint bij Cloudflare met 0x4). */
 const SITEKEY = /^[A-Za-z0-9_-]{10,100}$/;
 /**
@@ -150,6 +159,12 @@ export function afzenderVanApp(t, app) {
  */
 export function captchaVanApp(t, app) {
   return isKlantportaal(t, app) && t.apps[app].captcha !== false;
+}
+
+/** Hoe klanten van dit klantportaal inloggen: "code" (standaard) of "account". */
+export function inloggenVanApp(t, app) {
+  if (!isKlantportaal(t, app)) throw new Error(`app "${app}" is geen klantportaal`);
+  return t.apps[app].klantportaal_inloggen ?? "code";
 }
 
 /** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
@@ -267,6 +282,14 @@ export function valideerToegang(t) {
         fouten.push(`app "${app}": captcha is true of false`);
       }
       if (
+        waarde.klantportaal_inloggen !== undefined &&
+        !INLOGGEN.includes(waarde.klantportaal_inloggen)
+      ) {
+        fouten.push(
+          `app "${app}": klantportaal_inloggen is "code" (een code per mail) of "account" (e-mail en wachtwoord, op uitnodiging); nu staat er ${JSON.stringify(waarde.klantportaal_inloggen)}`,
+        );
+      }
+      if (
         waarde.turnstile_sitekey !== undefined &&
         (typeof waarde.turnstile_sitekey !== "string" || !SITEKEY.test(waarde.turnstile_sitekey))
       ) {
@@ -290,6 +313,12 @@ export function valideerToegang(t) {
             `app "${app}": een klantportaal heeft standaard een captcha (Turnstile) op het inlogformulier. Zet "turnstile_sitekey" (de openbare sleutel van de widget; de geheime staat als secret TURNSTILE_GEHEIM in de beheeromgeving), of zet uitdrukkelijk "captcha": false als het portaal zonder captcha moet`,
           );
         }
+        // Met wachtwoorden is de captcha de enige rem op raden rechtstreeks bij Supabase.
+        if (waarde.klantportaal_inloggen === "account" && waarde.captcha === false) {
+          fouten.push(
+            `app "${app}": een klantportaal met accounts kan niet zonder captcha. Bij een inlog met een wachtwoord rechtstreeks bij Supabase is de captcha de enige rem op raden; haal "captcha": false weg`,
+          );
+        }
         // Ook een lege lijst: wie later een pad toevoegt, moet eerst deze keuze zien.
         if (waarde.publiek !== undefined) {
           fouten.push(
@@ -306,7 +335,7 @@ export function valideerToegang(t) {
           );
         }
       } else {
-        for (const veld of ["afzender", "captcha", "turnstile_sitekey"]) {
+        for (const veld of ["afzender", "captcha", "turnstile_sitekey", "klantportaal_inloggen"]) {
           if (waarde[veld] !== undefined) {
             fouten.push(
               `app "${app}": ${veld} hoort bij een klantportaal; zet "klantportaal": true erbij of haal ${veld} weg`,
@@ -939,6 +968,15 @@ export const MELDING_MEDEWERKER =
   "Dit adres hoort bij een medewerker. Log in via Inloggen voor medewerkers.";
 export const MELDING_GEEN_WACHTWOORD =
   "Inloggen met een wachtwoord kan hier niet. Vraag een inlogcode aan.";
+export const MELDING_ALLEEN_UITNODIGING =
+  "Een account maken kan hier niet zelf. Vraag je contactpersoon om een uitnodiging.";
+
+/**
+ * De functie in de app die bij een klantportaal met accounts zegt of een nieuw account per
+ * mail mag: alleen met de sleutel van een open uitnodiging (migratie klantaccounts van de
+ * openbare template, vanaf versie 46).
+ */
+export const UITNODIGING_FUNCTIE = "public.klantaccount_toestaan";
 
 /**
  * De before-user-created-hook van de productiedatabase van een klantportaal. Daar mag
@@ -959,6 +997,11 @@ export const MELDING_GEEN_WACHTWOORD =
  * via Cloudflare kwam. Een groep met alleen `idp_groepen` heeft geen adressen om te weigeren;
  * daarvoor waarschuwt de inrichting.
  *
+ * Bij `"klantportaal_inloggen": "account"` maakt niemand zelf een account: een aanmelding per
+ * mail gaat alleen door als de functie van de app (UITNODIGING_FUNCTIE) een open uitnodiging
+ * vindt. Zonder die functie in de database faalt de hook en komt er geen account; de
+ * inrichting stopt daarom eerder al als de app hem niet heeft (verkenPortaal).
+ *
  * Toegang bijwerken schrijft de functie bij elke run opnieuw, zodat hij de groepen volgt.
  *
  * De rechten volgen de documentatie van Supabase voor een hook in Postgres: de rol van Supabase
@@ -976,6 +1019,7 @@ export function portaalAanmeldHookSql(toegang, app, functie) {
   const groepen = groepenVanApp(t, app).map((g) => t.groepen[g]);
   const domeinen = [...new Set(groepen.flatMap((g) => klein(g.domeinen)))];
   const adressen = [...new Set(groepen.flatMap((g) => klein(g.adressen)))];
+  const accounts = inloggenVanApp(t, app) === "account";
   const naam = `public.${functie}`;
   return `create or replace function ${naam}(event jsonb)
 returns jsonb
@@ -997,7 +1041,15 @@ begin
   -- per mail: iedereen, behalve de adressen van medewerkers (de groepen uit toegang.json)
   if domein = any (${sqlLijst(domeinen)}) or adres = any (${sqlLijst(adressen)}) then
     ${weiger(MELDING_MEDEWERKER)}
-  end if;
+  end if;${
+    accounts
+      ? `
+  -- klantaccounts: alleen op uitnodiging van een medewerker
+  if not coalesce(${UITNODIGING_FUNCTIE}(event), false) then
+    ${weiger(MELDING_ALLEEN_UITNODIGING)}
+  end if;`
+      : ""
+  }
   return '{}'::jsonb;
 end;
 $hook$;
@@ -1034,11 +1086,34 @@ export function groepenZonderAdressen(t, app) {
  *
  * Een project heeft maar één zo'n hook. Heeft de app er zelf een (extra claims), dan stopt de
  * inrichting vóór de eerste wijziging. Nooit stil vervangen.
+ *
+ * Bij `"klantportaal_inloggen": "account"` (`wachtwoord: true`) laat de hook elk token door:
+ * daar is het wachtwoord de inlog, en het gat hierboven bestaat niet, want niemand maakt zelf
+ * een account (de aanmeld-hook eist een uitnodiging). De hook blijft wel staan, zodat de
+ * inrichting het project als klantportaal blijft herkennen (wasKlantportaal).
  */
-export function portaalTokenHookSql(functie) {
+export function portaalTokenHookSql(functie, { wachtwoord = false } = {}) {
   if (!/^[a-z_][a-z0-9_]{0,62}$/.test(functie))
     throw new Error(`ongeldige functienaam "${functie}"`);
   const naam = `public.${functie}`;
+  if (wachtwoord) {
+    return `create or replace function ${naam}(event jsonb)
+returns jsonb
+language plpgsql
+stable
+set search_path = ''
+as $hook$
+begin
+  -- klantaccounts: een wachtwoord is hier de inlog; de aanmeld-hook eist een uitnodiging
+  return jsonb_build_object('claims', event->'claims');
+end;
+$hook$;
+
+grant usage on schema public to supabase_auth_admin;
+grant execute on function ${naam}(jsonb) to supabase_auth_admin;
+revoke execute on function ${naam}(jsonb) from authenticated, anon, public;
+`;
+  }
   return `create or replace function ${naam}(event jsonb)
 returns jsonb
 language plpgsql

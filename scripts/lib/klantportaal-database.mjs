@@ -24,7 +24,8 @@ import { problemenMetNamenMetReden } from "./stack-config.mjs";
  * graphql_public), en dat is de veilige kant: een view in public kan een tabel in elk schema
  * met `usage` laten zien. Objecten van Supabase zelf (eigenaar een van SUPABASE_ROLLEN) en van
  * extensies tellen niet mee als object; policies tellen wel altijd mee, ook op tabellen van
- * Supabase (storage.objects, realtime.messages).
+ * Supabase (storage.objects, realtime.messages). De enige uitzondering: de policies van een
+ * extensie op haar eigen tabellen in een schema waar bezoekers niet bij kunnen (pg_cron).
  *
  * Dit bestand is van de template en komt met elke versie mee.
  */
@@ -131,6 +132,18 @@ select json_build_object(
       from pg_policy p
       join pg_class c on c.oid = p.polrelid
       join pg_namespace n on n.oid = c.relnamespace
+     -- Niet: de eigen policies van een extensie op haar eigen tabellen, in een schema waar
+     -- anon en authenticated geen usage op hebben (pg_cron: cron.job en cron.job_run_details,
+     -- "username = current_user"). Een bezoeker komt niet bij die tabel, dus de policy geeft
+     -- hem niets. Krijgt anon of authenticated ooit usage op zo'n schema, dan telt hij weer mee.
+     where not (
+       exists (
+         select 1 from pg_depend d
+          where d.classid = 'pg_catalog.pg_class'::regclass and d.objid = c.oid and d.deptype = 'e'
+       )
+       and not has_schema_privilege('anon', n.oid, 'usage')
+       and not has_schema_privilege('authenticated', n.oid, 'usage')
+     )
   ),
   'functies', (
     select coalesce(json_agg(json_build_object(
@@ -503,9 +516,11 @@ export function vergelijkBasis(gevonden, verwacht) {
       problemen.push(`de basisfunctie public.${naam}() ontbreekt. ${herstel}`);
       continue;
     }
-    const anders = Object.keys(VELDEN).filter(
-      (veld) => JSON.stringify(f[veld] ?? null) !== JSON.stringify(eis[veld] ?? null),
-    );
+    // Een tekst uit een eerdere versie van de template die nog goed is (`eerder`), telt als gelijk.
+    const gelijk = (veld) =>
+      JSON.stringify(f[veld] ?? null) === JSON.stringify(eis[veld] ?? null) ||
+      (veld === "hash" && (eis.eerder ?? []).includes(f.hash));
+    const anders = Object.keys(VELDEN).filter((veld) => !gelijk(veld));
     if (anders.length > 0) {
       problemen.push(
         `de basisfunctie public.${naam}() is gewijzigd (${anders.map((v) => VELDEN[v]).join(", ")}). ${herstel}`,
