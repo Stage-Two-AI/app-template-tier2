@@ -270,7 +270,7 @@ object zijn. De korte vorm blijft werken:
   testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een
   gebruiker hangen en er toch niets te kopiëren valt.
 
-- `klantportaal`, met `afzender`, `turnstile_sitekey` en `captcha`: zie het volgende hoofdstuk.
+- `klantportaal`, met `afzender`, `turnstile_sitekey`, `captcha` en `klantportaal_inloggen`: zie het volgende hoofdstuk.
 
 ## Klantportaal
 
@@ -441,14 +441,35 @@ Werkt inloggen niet na stap 5, of wil je het portaal om een andere reden dicht:
 
 Is het probleem opgelost, dan begin je opnieuw bij stap 2. De klanten hebben hun account nog.
 
+### Klantportaal met accounts (wachtwoord en tweede stap)
+
+Alleen voor een app van de openbare template, vanaf versie 46. Klanten loggen dan in met e-mail
+en wachtwoord in plaats van een code per mail. Niemand maakt zelf een account: een medewerker
+nodigt een klant uit vanuit de app. De klant kan zelf een tweede stap met een authenticator-app
+aanzetten op Mijn account. Zet bij de app in `toegang.json`:
+
+```json
+"klantportaal_inloggen": "account"
+```
+
+Verder gaat het als bij een gewoon klantportaal (de zeven stappen hierboven), met drie
+verschillen:
+
+- de captcha kan hier niet uit: bij een wachtwoord is hij de enige rem op raden rechtstreeks
+  bij Supabase;
+- na de merge van de app rol je de Edge Function `klant-uitnodigen` uit (Functies uitrollen,
+  met de naam van de app); zonder die functie kan geen medewerker een klant uitnodigen;
+- de regel bij Cloudflare tegen raden zet je met de hand (elke run noemt hem, zie
+  "Klantaccounts" in `KLANTPORTAAL.md`).
+
 ### Wat je moet weten
 
 - De regels in de database zijn bij een klantportaal de enige grens: iedereen ter wereld kan
   een account maken. Daarom stap 0.
 - Zonder het vinkje verandert geen run iets aan de deur. Met het vinkje verandert een run
   alleen de deur.
-- Klanten hebben geen wachtwoord en kunnen hun adres niet zelf wijzigen; dat loopt via de
-  eigenaar van de app.
+- Klanten hebben geen wachtwoord (behalve met accounts, hierboven) en kunnen hun adres niet
+  zelf wijzigen; dat loopt via de eigenaar van de app.
 - De captcha staat standaard aan. Uitzetten kan alleen met `"captcha": false` bij de app, en
   is bedoeld voor een storing bij Turnstile.
 - Toegang bijwerken trekt bij een klantportaal alleen medewerkers in, nooit klanten. Een

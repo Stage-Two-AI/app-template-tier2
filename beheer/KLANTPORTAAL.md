@@ -296,6 +296,54 @@ sessieduur blijven staan (zonder inloggen per mail doen ze niets), de mail voor 
 krijgt een vaste tekst zonder code, en zelf een inlog loskoppelen en anoniem aanmelden blijven
 uit. App inrichten herhaalt het markeren bij elke run van zo'n app.
 
+## Klantaccounts (`"klantportaal_inloggen": "account"`)
+
+Sinds uitgave 46, alleen voor de openbare template (de server maakt de pagina's). Klanten
+loggen in met e-mail en wachtwoord; een account komt er alleen op uitnodiging. De inrichting
+stopt vóór de eerste wijziging als de app van de gewone template is, of als
+`supabase/functions/klant-uitnodigen/index.ts` niet op main staat (de app is dan ouder dan 46).
+
+Wat anders is dan bij de code per mail:
+
+| Onderdeel | Code per mail | Accounts |
+|---|---|---|
+| `VITE_INLOGDIENST` in production | `cloudflare,mailcode` | `cloudflare,wachtwoord` |
+| Aanmeld-hook | iedereen per mail, behalve medewerkers | alleen met een open uitnodiging (`public.klantaccount_toestaan` uit de migratie van de app), en nooit op een adres van een medewerker |
+| Token-hook | weigert elk token met een wachtwoord | laat elk token door |
+| Mail `invite` en `recovery` | zonder link | link naar `/wachtwoord-instellen`, die pas na een klik omwisselt |
+| Mail `magic_link` en `confirmation` | de inlogcode | geen code: "log in met je wachtwoord" |
+| Een link werkt (`mailer_otp_exp`) | 15 minuten | een dag (ook wachtwoord vergeten: Supabase kent één duur) |
+| `password_min_length` | niet gezet | 10 |
+| Tweede stap (TOTP) | niet gezet | aan; sms niet (kost geld) |
+| Captcha | standaard aan, `false` mag | altijd aan |
+
+**Waarom de token-hook hier niets weigert.** Bij de code per mail kon een vreemde het adres van
+een klant aanmelden met een eigen wachtwoord. Hier maakt niemand zelf een account; de aanmeld-hook
+eist de sleutel van een uitnodiging die alleen de Edge Function kent. Nagespeeld tegen Postgres
+(20-11-2026): met de sleutel door, zonder of met een andere sleutel geweigerd, een adres van een
+medewerker geweigerd, Cloudflare door.
+
+**De tweede stap zit in de database.** Heeft een klant een bevestigde factor, dan telt hij in
+`is_goedgekeurde_klant()` alleen als klant in een sessie die de tweede stap deed (`aal2`). Een
+script dat alleen het wachtwoord kent, ziet dus niets. Telefoon kwijt: de owner haalt de factor
+weg in Supabase (Authentication, Users, de klant, MFA).
+
+**Wat de inrichting niet zet** (elke run waarschuwt):
+
+- de regel bij Cloudflare, Security, WAF, Rate limiting rules, op het eigen domein:
+
+  | Veld | Waarde |
+  |---|---|
+  | Wanneer | `http.request.method eq "POST" and http.request.uri.path in {"/login" "/login.data" "/wachtwoord-vergeten" "/wachtwoord-vergeten.data" "/wachtwoord-instellen" "/wachtwoord-instellen.data" "/tweede-stap" "/tweede-stap.data"}` |
+  | Tellen per | IP-adres |
+  | Grens | 6 verzoeken per minuut (gratis plan: 3 per 10 seconden) |
+  | Daarna | 10 minuten blokkeren (gratis plan: 10 seconden) |
+
+  Rechtstreeks bij Supabase gaat langs die regel; daar zijn de captcha en de grenzen van
+  Supabase (`REM`) de rem;
+- de controle op gelekte wachtwoorden (alleen op het Pro-plan van Supabase);
+- het uitrollen van de Edge Function `klant-uitnodigen`.
+
 ## Een gewone app merkt hier niets van
 
 Een app die niet als klantportaal in `toegang.json` staat en het ook nooit was, krijgt dezelfde

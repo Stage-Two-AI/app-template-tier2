@@ -31,6 +31,14 @@ grep -rnE 'references auth\.users|owner_id|user_id|klant_id|account_id' supabase
 | 5 | niets | stop: de app heeft eigen hooks in Supabase Auth; overleg met de bouwer en de owner |
 | 6 | een tabel met een kolom die naar de gebruiker of klant verwijst | zonder zo'n tabel is niets "van een klant" en ziet hij na goedkeuring een lege app. Zeg dat de bouwer en vraag welke gegevens een klant moet zien, vóór je bouwt (vaak eerst een kolom erbij, met `docs/routes/databasewijziging.md`) |
 
+**Let op bij het hernoemen van een eigen tabel `klanten`.** `alter table ... rename` past
+policies, views, sleutels en triggers vanzelf aan, maar niet de tekst van een functie. Een functie
+met `klanten%rowtype`, `from klanten` of `public.klanten` in haar body wijst na het hernoemen nog
+steeds naar de naam `klanten`, en dus straks naar de tabel van de template: zonder foutmelding,
+met de verkeerde gegevens. Zoek ze op (`grep -rn "klanten" supabase/migrations`, en in de
+database `select proname from pg_proc where prosrc ~ '\mklanten\M'`) en schrijf elke gevonden
+functie in dezelfde migratie opnieuw met `create or replace`, met de nieuwe naam.
+
 Staan `src/features/auth/inlog-met-code.tsx` en `supabase/migrations/*_klantportaal.sql` er al
 (de app is op versie 43 of later gemaakt), doe dan van stap 2 alleen `supabase/testrol.sql` en
 van stap 3 alleen "Daarna, met de hand".

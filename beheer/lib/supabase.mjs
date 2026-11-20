@@ -417,6 +417,70 @@ export const GESLOTEN_PORTAAL = {
  * `smtpWachtwoord` en `captchaGeheim` zijn geheimen. Ze staan alleen in de body van de PATCH
  * en nooit in een melding of in het resultaat.
  */
+/**
+ * Een klantportaal met accounts (`"klantportaal_inloggen": "account"`): klanten loggen in met
+ * e-mail en wachtwoord, een account komt er alleen op uitnodiging, en een klant kan zelf een
+ * tweede stap (een code uit een authenticator-app, TOTP) aanzetten. De mails gaan naar pagina's
+ * van de openbare template (vanaf versie 46): `/wachtwoord-instellen` wisselt de link pas om na
+ * een klik op een knop, net als de inloglink bij de code.
+ *
+ *   invite        de uitnodiging (Edge Function klant-uitnodigen): kies je wachtwoord;
+ *   recovery      wachtwoord vergeten: kies een nieuw wachtwoord;
+ *   magic_link en confirmation  hier geen inlogcode: de mail verwijst naar inloggen met het
+ *                 wachtwoord. Een nieuw account per mail weigert de aanmeld-hook toch al.
+ *
+ * Een link werkt een dag (`mailer_otp_exp`): een uitnodiging wordt niet altijd binnen een
+ * kwartier geopend. Dat geldt in Supabase voor alle mails samen, dus ook voor wachtwoord
+ * vergeten. Een wachtwoord is minstens 10 tekens (zoals MINIMAAL in de app). TOTP staat aan;
+ * sms niet (dat kost geld per bericht). De controle op gelekte wachtwoorden
+ * (`password_hibp_enabled`) bestaat alleen op het Pro-plan; daarvoor waarschuwt de inrichting.
+ */
+export const LINK_GELDIG_SECONDEN = 24 * 60 * 60;
+export const WACHTWOORD_MINIMAAL = 10;
+
+export const WACHTWOORD_LINK = (soort) =>
+  `{{ .SiteURL }}/wachtwoord-instellen?token_hash={{ .TokenHash }}&type=${soort}`;
+
+export function accountMails(naam) {
+  if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
+  const n = htmlTekst(naam);
+  const geenCode = {
+    onderwerp: `Inloggen bij ${naam}`,
+    inhoud: `<p>Je logt bij ${n} in met je e-mailadres en wachtwoord op {{ .SiteURL }}/login.</p>\n<p>Wachtwoord kwijt? Vraag op {{ .SiteURL }}/wachtwoord-vergeten een nieuw aan. Heb je niets aangevraagd? Dan hoef je niets te doen.</p>`,
+  };
+  return {
+    mailer_subjects_invite: `Je account bij ${naam} staat klaar`,
+    mailer_templates_invite_content: [
+      `<h2>Je account bij ${n} staat klaar</h2>`,
+      `<p><a id="link" href="${WACHTWOORD_LINK("invite")}">Kies je wachtwoord</a></p>`,
+      "<p>Daarna log je in met je e-mailadres en dat wachtwoord. De link werkt een dag.</p>",
+      "<p>Verwachtte je deze mail niet? Dan hoef je niets te doen.</p>",
+    ].join("\n"),
+    mailer_subjects_recovery: `Een nieuw wachtwoord voor ${naam}`,
+    mailer_templates_recovery_content: [
+      "<h2>Een nieuw wachtwoord</h2>",
+      `<p>Je hebt gevraagd om een nieuw wachtwoord voor ${n}.</p>`,
+      `<p><a id="link" href="${WACHTWOORD_LINK("recovery")}">Kies een nieuw wachtwoord</a></p>`,
+      "<p>Heb je dit niet zelf gevraagd? Dan hoef je niets te doen: je wachtwoord blijft zoals het is.</p>",
+    ].join("\n"),
+    mailer_subjects_magic_link: geenCode.onderwerp,
+    mailer_templates_magic_link_content: geenCode.inhoud,
+    mailer_subjects_confirmation: geenCode.onderwerp,
+    mailer_templates_confirmation_content: geenCode.inhoud,
+  };
+}
+
+/** Wat een klantportaal met accounts bovenop de gewone instellingen zet. */
+export function accountInstellingen(naam) {
+  return {
+    ...accountMails(naam),
+    mailer_otp_exp: LINK_GELDIG_SECONDEN,
+    password_min_length: WACHTWOORD_MINIMAAL,
+    mfa_totp_enroll_enabled: true,
+    mfa_totp_verify_enabled: true,
+  };
+}
+
 /** De captcha-instellingen blijven in deze run zoals ze zijn (zie klantportaalInstellingen). */
 export const CAPTCHA_LATER = "later";
 
@@ -426,11 +490,16 @@ export function klantportaalInstellingen({
   captcha = true,
   captchaGeheim,
   hooks,
+  inloggen = "code",
 }) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
   if (!smtpWachtwoord) throw new Error("SMTP_WACHTWOORD ontbreekt");
   if (captcha !== false && !captchaGeheim) throw new Error("TURNSTILE_GEHEIM ontbreekt");
+  if (inloggen !== "code" && inloggen !== "account")
+    throw new Error(`onbekende manier van inloggen "${inloggen}"`);
+  if (inloggen === "account" && captcha === false)
+    throw new Error("een klantportaal met accounts kan niet zonder captcha");
   const mail = inlogmail(afzender.naam);
   return {
     external_email_enabled: true,
@@ -465,6 +534,7 @@ export function klantportaalInstellingen({
     ...MELDINGSMAILS_UIT,
     mailer_secure_email_change_enabled: true,
     ...REM,
+    ...(inloggen === "account" ? accountInstellingen(afzender.naam) : {}),
     ...(captcha === CAPTCHA_LATER
       ? {}
       : captcha !== false

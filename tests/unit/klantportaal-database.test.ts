@@ -24,9 +24,12 @@ const MODULE = pathToFileURL(
 const MIGRATIES = resolve(__dirname, "../../supabase/migrations");
 
 function roep<T>(code: string, invoer: unknown): T {
-  const script = `import(${JSON.stringify(MODULE)}).then((m) => { const a = JSON.parse(process.argv.at(-1)); process.stdout.write(JSON.stringify(${code})); })`;
+  // De invoer gaat via stdin, niet als argument: Linux staat per argument hooguit 128 kB toe
+  // (spawnSync E2BIG), en de migraties van een echte app zijn groter.
+  const script = `import(${JSON.stringify(MODULE)}).then(async (m) => { let t = ""; for await (const d of process.stdin) t += d; const a = JSON.parse(t); process.stdout.write(JSON.stringify(${code})); })`;
   return JSON.parse(
-    execFileSync("node", ["--input-type=module", "-e", script, "--", JSON.stringify(invoer)], {
+    execFileSync("node", ["--input-type=module", "-e", script], {
+      input: JSON.stringify(invoer),
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     }),
@@ -387,6 +390,19 @@ describe("de databasecontrole: de beoordeling", () => {
     expect(met((b) => b.klanten.kolommen.pop())[0]).toMatch(/de kolommen/);
     expect(beoordeel({ basis: { ...basis, klanten: null } })[0]).toMatch(/klanten ontbreekt/);
   });
+
+  // Alleen waar de basis een eerdere tekst kent (de openbare template, sinds versie 46).
+  const eerder = BASIS.functies.is_goedgekeurde_klant?.eerder;
+  it.runIf(Array.isArray(eerder))(
+    "de basis: een tekst uit een eerdere versie van de template die nog goed is (eerder), telt als gelijk",
+    () => {
+      const basis = goedeBasis();
+      const kopie = structuredClone(basis);
+      const f = kopie.functies.find((g) => g.naam === "is_goedgekeurde_klant");
+      if (f && Array.isArray(eerder)) (f as Record<string, unknown>).hash = eerder[0];
+      expect(beoordeel({ basis: kopie })).toEqual([]);
+    },
+  );
 });
 
 describe("tests/rls/open-policies.test.ts draait de databasecontrole van de app", () => {
@@ -401,6 +417,15 @@ describe("tests/rls/open-policies.test.ts draait de databasecontrole van de app"
     expect(poort).toContain("m.klantportaalStreng()");
     const afscherming = readFileSync(resolve(__dirname, "../rls/lib/afscherming.ts"), "utf8");
     expect(afscherming).toContain("const schakelaar = leesSchakelaar();");
+  });
+});
+
+describe("grote apps", () => {
+  it("meer dan 128 kB aan migraties gaat goed (Linux: per argument hooguit 128 kB, spawnSync E2BIG)", () => {
+    const sql = `-- ${"x".repeat(300 * 1024)}\n`;
+    expect(roep<Record<string, unknown>>("m.basisUitMigraties(a.sql, (t) => t)", { sql })).toEqual(
+      {},
+    );
   });
 });
 
@@ -431,7 +456,11 @@ describe.runIf(metMigratie)("klantportaal-basis.json klopt met de migratie", () 
       const hash = createHash("sha256")
         .update(String(uitMigratie[naam]?.hash ?? ""), "utf8")
         .digest("hex");
-      expect(hash, `de basisfunctie ${naam}: werk klantportaal-basis.json bij`).toBe(eis.hash);
+      // Een app op een eerdere versie van de migratie mag de tekst van toen hebben (`eerder`).
+      expect(
+        [eis.hash, ...(Array.isArray(eis.eerder) ? eis.eerder : [])],
+        `de basisfunctie ${naam}: werk klantportaal-basis.json bij`,
+      ).toContain(hash);
       const kop = uitMigratie[naam] ?? {};
       expect(kop.definer).toBe(eis.definer);
       expect(kop.zoekpad).toEqual(eis.zoekpad);

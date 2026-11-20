@@ -133,6 +133,7 @@ import {
   groepenVanApp,
   groepenZonderAdressen,
   hookFunctie,
+  inloggenVanApp,
   isKlantportaal,
   isTurnstileTestsleutel,
   KLANT_OP_MEDEWERKERADRES,
@@ -456,6 +457,30 @@ async function verken(arg, d, { schrijven }) {
 // ---------------------------------------------------------------- klantportaal
 
 export const KLANTPORTAAL_INLOGDIENST = "cloudflare,mailcode";
+/** Een klantportaal met accounts (`"klantportaal_inloggen": "account"`): e-mail en wachtwoord. */
+export const KLANTACCOUNTS_INLOGDIENST = "cloudflare,wachtwoord";
+
+/** De VITE_INLOGDIENST van een klantportaal, naar de manier van inloggen uit toegang.json. */
+export function portaalInlogdienst(t, app) {
+  return inloggenVanApp(t, app) === "account"
+    ? KLANTACCOUNTS_INLOGDIENST
+    : KLANTPORTAAL_INLOGDIENST;
+}
+
+/**
+ * Waaraan de inrichting ziet dat de app klantaccounts kan: de Edge Function die een klant
+ * uitnodigt (openbare template, vanaf versie 46). Die hoort bij de migratie met de uitnodigingen
+ * en de functie die de aanmeld-hook aanroept (UITNODIGING_FUNCTIE in lib/toegang.mjs). Zonder
+ * die functie in de database weigert de hook elk nieuw account.
+ */
+export const APP_ACCOUNTS = { bestand: "supabase/functions/klant-uitnodigen/index.ts" };
+
+/**
+ * De rem per bezoeker op het eigen domein, voor een klantportaal met accounts: een regel bij
+ * Cloudflare (Security, WAF, Rate limiting rules) die de inrichting nog niet zelf zet.
+ */
+export const CLOUDFLARE_REM_ACCOUNTS =
+  'zet bij Cloudflare op het eigen domein een rate-limitregel (Security, WAF, Rate limiting rules): wanneer http.request.method eq "POST" and http.request.uri.path in {"/login" "/login.data" "/wachtwoord-vergeten" "/wachtwoord-vergeten.data" "/wachtwoord-instellen" "/wachtwoord-instellen.data" "/tweede-stap" "/tweede-stap.data"}, tellen per IP-adres, 6 verzoeken per minuut, daarna 10 minuten blokkeren (op het gratis plan: 3 per 10 seconden, 10 seconden blokkeren). De inrichting zet die regel nog niet zelf';
 
 /**
  * Waaraan de inrichting ziet dat de app de lijst `cloudflare,mailcode` begrijpt: `src/lib/env.ts`
@@ -502,6 +527,13 @@ async function verkenPortaal(arg, d, o) {
   const functies = portaalHookFuncties(arg.voorvoegsel);
   const captcha = captchaVanApp(t, arg.app);
   const sitekey = sitekeyVanApp(t, arg.app);
+  const inloggen = inloggenVanApp(t, arg.app);
+  const inlogdienst = portaalInlogdienst(t, arg.app);
+  if (inloggen === "account" && arg.variant !== OPENBAAR) {
+    gemis.push(
+      `${kp}: klantaccounts ("klantportaal_inloggen": "account" in toegang.json) bestaan alleen in de openbare template (app-template-tier2-openbaar), waar de server de pagina's maakt. Deze app is een app van de gewone template. Zet de app eerst over (docs/routes/omzetten-naar-openbaar.md in de app), of haal "klantportaal_inloggen" weg voor een code per mail`,
+    );
+  }
   if (tijdelijk) {
     gemis.push(
       `${kp}: een klantportaal vraagt een eigen domein. In de tijdelijke stand is het workers.dev-adres het enige adres, en dat blijft altijd dicht; zet eerst het domein in wrangler.jsonc`,
@@ -540,11 +572,14 @@ async function verkenPortaal(arg, d, o) {
   let variabelen = null;
   let appBegrijpt = null;
   let appSchakelaar = null;
+  let appAccounts = null;
   try {
     if (!arg.repo) throw new Error("geen repo bekend");
     const env = await leesGhBestand(d, arg.repo, APP_KENMERK.bestand);
     appBegrijpt = Boolean(env?.includes(APP_KENMERK.tekst));
     appSchakelaar = schakelaarAan(await leesGhBestand(d, arg.repo, APP_SCHAKELAAR.bestand));
+    if (inloggen === "account")
+      appAccounts = (await leesGhBestand(d, arg.repo, APP_ACCOUNTS.bestand)) !== null;
     variabelen = Object.fromEntries(
       (await leesGhVariabelen(d, SECRET_OMGEVING, arg.repo)).map((x) => [x.name, x.value]),
     );
@@ -553,7 +588,12 @@ async function verkenPortaal(arg, d, o) {
   }
   if (appBegrijpt === false) {
     gemis.push(
-      `${kp}: de app in ${arg.repo} begrijpt de inlog van een klantportaal nog niet (${APP_KENMERK.bestand} op main leest VITE_INLOGDIENST niet met ${APP_KENMERK.tekst}). Met ${KLANTPORTAAL_INLOGDIENST} zou de app in de browser niet meer opstarten. Werk de app eerst bij naar versie 43 of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
+      `${kp}: de app in ${arg.repo} begrijpt de inlog van een klantportaal nog niet (${APP_KENMERK.bestand} op main leest VITE_INLOGDIENST niet met ${APP_KENMERK.tekst}). Met ${inlogdienst} zou de app in de browser niet meer opstarten. Werk de app eerst bij naar versie 43 of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
+    );
+  }
+  if (appAccounts === false) {
+    gemis.push(
+      `${kp}: de app in ${arg.repo} kan nog geen klantaccounts (${APP_ACCOUNTS.bestand} staat niet op main). Zonder de migratie met de uitnodigingen weigert de aanmeld-hook elk nieuw account. Werk de app eerst bij naar versie 46 of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
     );
   }
   if (appSchakelaar === false) {
@@ -584,7 +624,15 @@ async function verkenPortaal(arg, d, o) {
   // dan is wat achter de deur is getest niet wat live zou gaan: stoppen, vóór de eerste
   // wijziging.
   if (arg.deurWeghalen && deur) {
-    const nog = nogTeWijzigen(arg, d, { ...o, auth, variabelen, functies, captcha, sitekey });
+    const nog = nogTeWijzigen(arg, d, {
+      ...o,
+      auth,
+      variabelen,
+      functies,
+      captcha,
+      sitekey,
+      inlogdienst,
+    });
     if (nog.length) {
       gemis.push(
         `${kp}: de deur gaat niet weg, want er staat nog iets anders te wijzigen: ${nog.join("; ")}. Een run met het vinkje wijzigt alleen de deur. Draai eerst App inrichten zonder vinkje en test opnieuw (stap 3 en 4 in beheer/README.md); zet daarna pas het vinkje`,
@@ -593,14 +641,27 @@ async function verkenPortaal(arg, d, o) {
   } else if (arg.deurWeghalen && live) {
     // Een portaal dat al live is: het vinkje zet daar het geheim van de captcha opnieuw (zie
     // captchaStand). Dat mag pas als de app de bijbehorende openbare sleutel al heeft.
-    const nog = variabelenNog(variabelen, sitekey);
+    const nog = variabelenNog(variabelen, sitekey, inlogdienst);
     if (nog.length) {
       gemis.push(
         `${kp}: het portaal is live, en het vinkje zet dan het geheim van de captcha opnieuw. Dat gebeurt niet, want ${nog.join("; ")}. Draai App inrichten eerst zonder vinkje (die zet de openbare sleutel klaar), rol de app uit, en zet dan het vinkje`,
       );
     }
   }
-  return { gemis, auth, variabelen, appBegrijpt, appSchakelaar, live, functies, captcha, sitekey };
+  return {
+    gemis,
+    auth,
+    variabelen,
+    appBegrijpt,
+    appSchakelaar,
+    appAccounts,
+    live,
+    functies,
+    captcha,
+    sitekey,
+    inloggen,
+    inlogdienst,
+  };
 }
 
 /** De twee adressen die de Access op de Worker hoort te bewaken: workers.dev en de previews. */
@@ -610,13 +671,11 @@ function workerAdressen(arg, subdomein) {
 }
 
 /** Wat er in omgeving production van de app-repo nog niet staat zoals een klantportaal het wil. */
-function variabelenNog(variabelen, sitekey) {
+function variabelenNog(variabelen, sitekey, inlogdienst = KLANTPORTAAL_INLOGDIENST) {
   if (variabelen === null) return ["de variabelen van de app-repo zijn niet te lezen"];
   const nog = [];
-  if (variabelen.VITE_INLOGDIENST !== KLANTPORTAAL_INLOGDIENST)
-    nog.push(
-      `VITE_INLOGDIENST staat in omgeving production nog niet op ${KLANTPORTAAL_INLOGDIENST}`,
-    );
+  if (variabelen.VITE_INLOGDIENST !== inlogdienst)
+    nog.push(`VITE_INLOGDIENST staat in omgeving production nog niet op ${inlogdienst}`);
   if ((variabelen.VITE_TURNSTILE_SITEKEY ?? null) !== sitekey)
     nog.push("VITE_TURNSTILE_SITEKEY in omgeving production is niet de sleutel uit toegang.json");
   return nog;
@@ -630,7 +689,7 @@ function variabelenNog(variabelen, sitekey) {
  */
 function nogTeWijzigen(arg, d, o) {
   const nog = [];
-  nog.push(...variabelenNog(o.variabelen, o.sitekey));
+  nog.push(...variabelenNog(o.variabelen, o.sitekey, o.inlogdienst));
   if (!o.auth) nog.push("het Supabase-project bestaat nog niet");
   else if (d.smtpWachtwoord && (!o.captcha || d.captchaGeheim)) {
     const gewenst = portaalAuth(arg, d, { ...o, captcha: o.captcha });
@@ -692,6 +751,7 @@ function portaalAuth(arg, d, { t, hostname, subdomein, testProject, functies, ca
       captcha,
       captchaGeheim: d.captchaGeheim,
       hooks: functies,
+      inloggen: inloggenVanApp(t, arg.app),
     }),
   };
 }
@@ -722,7 +782,10 @@ function productieAuth(arg, d, v, basis) {
 async function schrijfPortaalHooks(d, t, app, ref, voorvoegsel, { alleenAanmelden = false } = {}) {
   const functies = portaalHookFuncties(voorvoegsel);
   await d.supabase.voerSqlUit(ref, portaalAanmeldHookSql(t, app, functies.aanmelden));
-  if (!alleenAanmelden) await d.supabase.voerSqlUit(ref, portaalTokenHookSql(functies.token));
+  if (!alleenAanmelden) {
+    const wachtwoord = inloggenVanApp(t, app) === "account";
+    await d.supabase.voerSqlUit(ref, portaalTokenHookSql(functies.token, { wachtwoord }));
+  }
   return functies;
 }
 
@@ -733,6 +796,13 @@ export const CAPTCHA_UIT =
 function portaalWaarschuwingen(arg, v) {
   const uit = [];
   if (!captchaVanApp(v.t, arg.app)) uit.push(`klantportaal ${arg.app}: ${CAPTCHA_UIT}`);
+  if (inloggenVanApp(v.t, arg.app) === "account") {
+    uit.push(
+      `klantportaal ${arg.app} (accounts): ${CLOUDFLARE_REM_ACCOUNTS}`,
+      `klantportaal ${arg.app} (accounts): rol na de merge de Edge Function klant-uitnodigen uit (workflow Functies uitrollen in deze beheer-repo, app ${arg.app}); zonder die functie kan geen medewerker een klant uitnodigen`,
+      `klantportaal ${arg.app} (accounts): de controle op gelekte wachtwoorden van Supabase (Authentication, Attack Protection, Prevent use of leaked passwords) bestaat alleen op het Pro-plan en zet de inrichting niet; zet hem aan als het plan dat heeft`,
+    );
+  }
   const zonder = groepenZonderAdressen(v.t, arg.app);
   if (zonder.length) {
     uit.push(
@@ -1188,6 +1258,8 @@ function geplandeMail(arg, v) {
       : stand === CAPTCHA_LATER
         ? "blijft zoals hij is (het portaal is live; alleen een run met het vinkje Deur weghalen zet een nieuw geheim)"
         : "aan (Turnstile)";
+  if (v.portaal.inloggen === "account")
+    return `klantportaal met accounts: inloggen met e-mail en wachtwoord (minstens 10 tekens), alleen op uitnodiging (de link werkt een dag), wachtwoord vergeten per mail, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
   return `klantportaal: inloggen per mail aan (code van ${CODE_LENGTE} cijfers en link, 15 minuten geldig), mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
 }
 
@@ -1546,7 +1618,9 @@ export async function richtIn(arg, d) {
     const f = await schrijfPortaalHooks(d, v.t, arg.app, project.ref, arg.voorvoegsel);
     stap(
       "3.4 hooks van het klantportaal",
-      `public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord) geschreven`,
+      v.portaal.inloggen === "account"
+        ? `public.${f.aanmelden} (een nieuw account alleen op uitnodiging, nooit op een adres van een medewerker) en public.${f.token} (laat elk token door) geschreven`
+        : `public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord) geschreven`,
     );
   }
   const productie = productieAuth(arg, d, v, gewenstAuth);
@@ -1740,7 +1814,7 @@ export async function richtIn(arg, d) {
     // e-mail alleen voor testaccounts is, en houden alleen Cloudflare.
     productieVariabelen: {
       SUPABASE_PROJECT_REF: project.ref,
-      ...(v.klantportaal ? { VITE_INLOGDIENST: KLANTPORTAAL_INLOGDIENST } : {}),
+      ...(v.klantportaal ? { VITE_INLOGDIENST: v.portaal.inlogdienst } : {}),
       // De openbare sleutel van de Turnstile-widget, alleen waar de captcha aan staat.
       ...(sitekey ? { VITE_TURNSTILE_SITEKEY: sitekey } : {}),
     },
