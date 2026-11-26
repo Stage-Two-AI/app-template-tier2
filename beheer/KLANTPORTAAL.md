@@ -60,11 +60,11 @@ bepalen alleen de regels in de database (RLS). Dit is wat de bouwer in stap 0 be
 - De run met het vinkje wijzigt alleen de deur. Vóór hij iets doet, loopt hij na wat een run
   zonder vinkje nu nog zou wijzigen: de variabelen `VITE_INLOGDIENST` en
   `VITE_TURNSTILE_SITEKEY` in omgeving `production` van de app-repo, elke inloginstelling in
-  Supabase behalve de twee geheimen en de sessieduur, en de Access op de Worker (hij bestaat,
+  Supabase behalve de geheimen en de sessieduur, en de Access op de Worker (hij bestaat,
   bewaakt `workers.dev` en de previews, en heeft het merk). Is er iets, dan stopt hij met
   "draai eerst App inrichten zonder vinkje en test opnieuw" en de namen van wat afwijkt. Zo is
   wat de owner achter de deur testte, wat live gaat. Geheimen schrijft die run niet: een
-  vervangen `SMTP_WACHTWOORD` of `TURNSTILE_GEHEIM` gaat pas in met een run zonder vinkje, en
+  vervangen `SMTP_WACHTWOORD`, `TURNSTILE_GEHEIM` of `GOOGLE_GEHEIM` gaat pas in met een run zonder vinkje, en
   wordt dan opnieuw getest.
 - Of de app sinds stap 3 echt is uitgerold en of inloggen per mail werkt, kan de inrichting
   niet zien. Daarom is dat een stap voor een mens (stap 4).
@@ -344,6 +344,94 @@ weg in Supabase (Authentication, Users, de klant, MFA).
 - de controle op gelekte wachtwoorden (alleen op het Pro-plan van Supabase);
 - het uitrollen van de Edge Function `klant-uitnodigen`.
 
+## Accounts vooraf (`vooraf`)
+
+`"klantportaal_inloggen": "vooraf"`, sinds uitgave 47, alleen voor de openbare template. Een
+account komt er alleen op uitnodiging, zoals bij `account`: een medewerker maakt het, niemand
+meldt zich zelf aan. Een klant logt in met een inloglink die een medewerker hem laat sturen, of
+vraagt zelf een code per mail. Wie geen codes meer wil, stelt op `/account` een wachtwoord in of
+logt in met Google (als de owner dat aanzet). De inrichting stopt vóór de eerste wijziging als
+de app van de gewone template is, als `supabase/functions/klant-uitnodigen/index.ts` niet op
+main staat, of als `.claude/stack-version` op main lager is dan 47 (een oudere app start niet
+op met de lijst hieronder).
+
+Wat anders is dan bij accounts:
+
+| Onderdeel | Accounts | Accounts vooraf |
+|---|---|---|
+| `VITE_INLOGDIENST` in production | `cloudflare,wachtwoord` | `cloudflare,mailcode,wachtwoord`; met Google `cloudflare,mailcode,google,wachtwoord` |
+| Aanmeld-hook | alleen met een open uitnodiging, nooit op een adres van een medewerker | hetzelfde; een nieuw account via Google weigert hij ook (alleen de aanbieder `email` mag een account maken) |
+| Token-hook | laat elk token door | hetzelfde |
+| Mail `magic_link` en `confirmation` | geen code: "log in met je wachtwoord" | de inlogmail "Inloggen bij <naam>": de code (`id="code"`) en de knop (`id="link"`) naar `/login?token_hash=...&type=email` |
+| Mail `invite` | link naar `/wachtwoord-instellen` | dezelfde inlogmail, met `type=invite` |
+| Mail `recovery` | link naar `/wachtwoord-instellen` | dezelfde inlogmail, met `type=recovery` (er is geen route "wachtwoord vergeten"; de mail werkt als iemand `/recover` aanroept) |
+| Een link en een code werken (`mailer_otp_exp`) | een dag | 24 uur: een link van een medewerker moet de volgende ochtend nog werken |
+| `password_min_length` en tweede stap (TOTP) | 10, aan | hetzelfde |
+| Google | uit | aan met een `google_client_id`, anders uitdrukkelijk uit |
+| Captcha | altijd aan | altijd aan |
+
+Elke inlogmail zegt wat je doet als je er niet om vroeg: niets, niet klikken, de code aan
+niemand geven. De pagina `/login` logt pas in als een scriptje in de browser het formulier
+verstuurt; een linkscanner die de link opent, verbruikt hem dan niet.
+
+**Google.** Met `"google_client_id"` bij de app in `toegang.json` (openbaar; eindigt op
+`.apps.googleusercontent.com`) en het secret `GOOGLE_GEHEIM` in de omgeving `beheer` zet de
+inrichting in Supabase `external_google_enabled` aan, met `external_google_client_id` en
+`external_google_secret`. Zonder client-id zet ze `external_google_enabled` uitdrukkelijk uit.
+Staat er een client-id en ontbreekt het secret, dan stopt de inrichting vóór de eerste wijziging.
+Het geheim staat alleen in de PATCH naar Supabase, wordt in GitHub gemaskeerd en staat nooit in
+een melding of de samenvatting. De run met het vinkje vergelijkt de velden van Google behalve het
+geheim, zoals de andere geheimen. Een `google_client_id` mag alleen bij `vooraf`; bij `code` en
+`account` en bij een gesloten portaal zet de inrichting Google uit (in Supabase staat hij
+standaard al uit, dus daar verandert niets). Google koppelt Supabase vanzelf aan het account
+met hetzelfde adres; een nieuw account via Google weigert de aanmeld-hook. Hoe de owner de
+koppeling bij Google maakt, staat in de README onder "Klantportaal met accounts vooraf".
+
+**Wat de inrichting niet zet** (elke run waarschuwt): de regel bij Cloudflare, zoals bij
+accounts, maar alleen op `{"/login" "/login.data" "/tweede-stap" "/tweede-stap.data"}`; de
+controle op gelekte wachtwoorden; het uitrollen van `klant-uitnodigen`.
+
+### Bekende grens: een medewerker die Google gebruikt op de klantpagina
+
+`sessie_via_cloudflare()` eist dat een medewerker in `auth.identities` geen andere inlogdienst
+heeft dan `custom:cloudflare` en `email` (het token zegt alleen `oauth`, niet welke dienst).
+Klikt een medewerker op de klantpagina op "Doorgaan met Google" met zijn werkadres, dan koppelt
+Supabase Google aan zijn account en heeft hij daarna geen medewerkerrechten meer, ook niet via
+Cloudflare. Hij komt niets meer te weten dan voorheen en er is geen gat; alleen zijn rechten zijn
+weg tot de owner de identiteit `google` van dat account weghaalt. De klantpagina zegt bij de
+knop: "Medewerker? Log in via /medewerkers."
+
+De owner vindt zulke accounts in Supabase (het project van productie, SQL Editor):
+
+```sql
+select u.id, u.email, array_agg(i.provider order by i.provider) as inlogmanieren
+  from auth.users u join auth.identities i on i.user_id = u.id
+ group by u.id, u.email
+having bool_or(i.provider = 'custom:cloudflare') and bool_or(i.provider = 'google')
+ order by u.email;
+```
+
+Herstel per account, met de id uit die leesvraag. Eerst kijken wat er weggaat:
+
+```sql
+select id, user_id, provider, identity_data ->> 'email' as adres
+  from auth.identities
+ where provider = 'google'
+   and user_id = '<id van het account>';
+```
+
+Staat daar precies de ene rij van Google, haal hem dan weg met hetzelfde filter:
+
+```sql
+delete from auth.identities
+ where provider = 'google'
+   and user_id = '<id van het account>';
+```
+
+Het account blijft bestaan, met zijn inlog via Cloudflare. De medewerker klikt daarna één keer op
+"Log opnieuw in als medewerker". Toegang bijwerken meldt zulke accounts al als afwijking (zie
+"Een klantaccount op het adres van een medewerker").
+
 ## Een gewone app merkt hier niets van
 
 Een app die niet als klantportaal in `toegang.json` staat en het ook nooit was, krijgt dezelfde
@@ -361,7 +449,7 @@ niet. `regressie-42-versie.test.mjs` bewijst dat tegen de code van versie 42 zel
 verschilt (alleen tekst, `--deur-weghalen`, `"klantportaal": false`, en een app die
 `constructor` heet) staat onder "Lokaal testen" in de README. Het script schrijft zijn eigen
 samenvatting van de run alleen als er in `toegang.json` een klantportaal staat of als een
-portaal dicht moet, en maskeert `SMTP_WACHTWOORD` en `TURNSTILE_GEHEIM` alleen dan; voor een
+portaal dicht moet, en maskeert `SMTP_WACHTWOORD`, `TURNSTILE_GEHEIM` en `GOOGLE_GEHEIM` alleen dan; voor een
 gewone app schrijft de workflow de samenvatting, zoals op 42.
 
 ## Controle van buitenaf
@@ -376,7 +464,7 @@ klantportaal is. Het wijzigt niets.
   account te lezen (daaruit volgen het `workers.dev`-adres en de preview). Het access token en
   de organisatie van Supabase, om het project van de app te vinden en zijn openbare sleutel te
   lezen. De service-role-sleutel haalt het script niet op, en het krijgt geen sleutel voor
-  GitHub, geen `SMTP_WACHTWOORD` en geen `TURNSTILE_GEHEIM`.
+  GitHub, geen `SMTP_WACHTWOORD`, geen `TURNSTILE_GEHEIM` en geen `GOOGLE_GEHEIM`.
 - **Wat hij bekijkt.** Van elk adres dat dicht hoort te zijn de voorpagina en een willekeurig
   diep pad. Bij een klantportaal is "dicht" streng: alleen een doorverwijzing naar de
   loginpagina van Cloudflare Access (van het eigen team) telt; een adres dat niet bestaat of

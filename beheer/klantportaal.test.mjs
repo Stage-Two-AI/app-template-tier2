@@ -481,6 +481,8 @@ const BEKENDE_VELDEN = [
   "mailer_allow_unverified_email_sign_ins",
   "security_manual_linking_enabled",
   "external_anonymous_users_enabled",
+  // Sinds 47: Google uitdrukkelijk uit (in Supabase staat hij al standaard uit).
+  "external_google_enabled",
   ...Object.keys(MELDINGSMAILS_UIT),
   "smtp_host",
   "smtp_port",

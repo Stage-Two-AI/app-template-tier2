@@ -61,7 +61,9 @@
  *   het kortlevende token van de GitHub App), optioneel BEHEER_VOORVOEGSEL,
  *   CLOUDFLARE_IDP_IDS (komma's) en CLOUDFLARE_GROEPEN_IDP (<type>:<id>). Alleen voor een
  *   klantportaal: SMTP_WACHTWOORD (de sleutel van Resend) en TURNSTILE_GEHEIM (de geheime
- *   sleutel van de Turnstile-widget; alleen niet nodig met `"captcha": false`).
+ *   sleutel van de Turnstile-widget; alleen niet nodig met `"captcha": false`). Alleen voor een
+ *   klantportaal met `"klantportaal_inloggen": "vooraf"` en een `google_client_id`:
+ *   GOOGLE_GEHEIM (het geheim van de inlogkoppeling bij Google).
  *
  * Eindigt Toegang bijwerken met `fouten` in het resultaat (alleen bij een klantportaal: er is
  * niet of maar deels ingetrokken, of het portaal wacht op App inrichten), dan is de status
@@ -130,6 +132,7 @@ import {
   cloudflareIdentiteiten,
   GEEN_BAN,
   gewenstePolicies,
+  googleClientIdVanApp,
   groepenVanApp,
   groepenZonderAdressen,
   hookFunctie,
@@ -142,6 +145,7 @@ import {
   kaleNaamConflicten,
   klantenOpMedewerkeradres,
   koppelPolicies,
+  metKlantaccounts,
   PUBLIEK_GROEP,
   policyIdsVoorApp,
   policyNaam,
@@ -460,11 +464,32 @@ export const KLANTPORTAAL_INLOGDIENST = "cloudflare,mailcode";
 /** Een klantportaal met accounts (`"klantportaal_inloggen": "account"`): e-mail en wachtwoord. */
 export const KLANTACCOUNTS_INLOGDIENST = "cloudflare,wachtwoord";
 
+/**
+ * Een klantportaal met accounts vooraf (`"klantportaal_inloggen": "vooraf"`): een link of code
+ * per mail, en een wachtwoord als de klant dat wil; met een google_client_id ook Google.
+ */
+export const VOORAF_INLOGDIENST = "cloudflare,mailcode,wachtwoord";
+export const VOORAF_GOOGLE_INLOGDIENST = "cloudflare,mailcode,google,wachtwoord";
+
 /** De VITE_INLOGDIENST van een klantportaal, naar de manier van inloggen uit toegang.json. */
 export function portaalInlogdienst(t, app) {
-  return inloggenVanApp(t, app) === "account"
-    ? KLANTACCOUNTS_INLOGDIENST
-    : KLANTPORTAAL_INLOGDIENST;
+  const inloggen = inloggenVanApp(t, app);
+  if (inloggen === "vooraf")
+    return googleClientIdVanApp(t, app) ? VOORAF_GOOGLE_INLOGDIENST : VOORAF_INLOGDIENST;
+  return inloggen === "account" ? KLANTACCOUNTS_INLOGDIENST : KLANTPORTAAL_INLOGDIENST;
+}
+
+/**
+ * Waaraan de inrichting ziet dat de app accounts vooraf kan: de versie van de stack in de app
+ * (`.claude/stack-version` op main), 47 of later. Een app van versie 46 keurt de lijst
+ * `cloudflare,mailcode,wachtwoord` af (leesInlogdiensten) en start daarmee niet meer op.
+ */
+export const APP_VOORAF = { bestand: ".claude/stack-version", vanaf: 47 };
+
+/** Het versienummer uit de tekst van .claude/stack-version; null als het er niet (goed) staat. */
+export function stackVersie(tekst) {
+  const m = typeof tekst === "string" ? tekst.trim().match(/^[1-9][0-9]*$/) : null;
+  return m ? Number(m[0]) : null;
 }
 
 /**
@@ -481,6 +506,14 @@ export const APP_ACCOUNTS = { bestand: "supabase/functions/klant-uitnodigen/inde
  */
 export const CLOUDFLARE_REM_ACCOUNTS =
   'zet bij Cloudflare op het eigen domein een rate-limitregel (Security, WAF, Rate limiting rules): wanneer http.request.method eq "POST" and http.request.uri.path in {"/login" "/login.data" "/wachtwoord-vergeten" "/wachtwoord-vergeten.data" "/wachtwoord-instellen" "/wachtwoord-instellen.data" "/tweede-stap" "/tweede-stap.data"}, tellen per IP-adres, 6 verzoeken per minuut, daarna 10 minuten blokkeren (op het gratis plan: 3 per 10 seconden, 10 seconden blokkeren). De inrichting zet die regel nog niet zelf';
+
+/**
+ * Dezelfde regel voor een klantportaal met accounts vooraf. Daar is er geen route om een
+ * wachtwoord te vergeten of via een link in te stellen: de code, de link en het wachtwoord
+ * gaan alle drie via /login.
+ */
+export const CLOUDFLARE_REM_VOORAF =
+  'zet bij Cloudflare op het eigen domein een rate-limitregel (Security, WAF, Rate limiting rules): wanneer http.request.method eq "POST" and http.request.uri.path in {"/login" "/login.data" "/tweede-stap" "/tweede-stap.data"}, tellen per IP-adres, 6 verzoeken per minuut, daarna 10 minuten blokkeren (op het gratis plan: 3 per 10 seconden, 10 seconden blokkeren). De inrichting zet die regel nog niet zelf';
 
 /**
  * Waaraan de inrichting ziet dat de app de lijst `cloudflare,mailcode` begrijpt: `src/lib/env.ts`
@@ -528,10 +561,17 @@ async function verkenPortaal(arg, d, o) {
   const captcha = captchaVanApp(t, arg.app);
   const sitekey = sitekeyVanApp(t, arg.app);
   const inloggen = inloggenVanApp(t, arg.app);
+  const accounts = metKlantaccounts(t, arg.app);
   const inlogdienst = portaalInlogdienst(t, arg.app);
-  if (inloggen === "account" && arg.variant !== OPENBAAR) {
+  const googleClientId = googleClientIdVanApp(t, arg.app);
+  if (accounts && arg.variant !== OPENBAAR) {
     gemis.push(
-      `${kp}: klantaccounts ("klantportaal_inloggen": "account" in toegang.json) bestaan alleen in de openbare template (app-template-tier2-openbaar), waar de server de pagina's maakt. Deze app is een app van de gewone template. Zet de app eerst over (docs/routes/omzetten-naar-openbaar.md in de app), of haal "klantportaal_inloggen" weg voor een code per mail`,
+      `${kp}: klantaccounts ("klantportaal_inloggen": "${inloggen}" in toegang.json) bestaan alleen in de openbare template (app-template-tier2-openbaar), waar de server de pagina's maakt. Deze app is een app van de gewone template. Zet de app eerst over (docs/routes/omzetten-naar-openbaar.md in de app), of haal "klantportaal_inloggen" weg voor een code per mail`,
+    );
+  }
+  if (googleClientId && !d.googleGeheim) {
+    gemis.push(
+      `${kp}: in toegang.json staat een google_client_id, maar het secret GOOGLE_GEHEIM ontbreekt in de beheeromgeving (het geheim van de inlogkoppeling bij Google, Google Cloud, Clients, de koppeling). Zet het secret, of haal google_client_id weg als klanten niet met Google inloggen`,
     );
   }
   if (tijdelijk) {
@@ -573,13 +613,15 @@ async function verkenPortaal(arg, d, o) {
   let appBegrijpt = null;
   let appSchakelaar = null;
   let appAccounts = null;
+  let appVersie = null;
   try {
     if (!arg.repo) throw new Error("geen repo bekend");
     const env = await leesGhBestand(d, arg.repo, APP_KENMERK.bestand);
     appBegrijpt = Boolean(env?.includes(APP_KENMERK.tekst));
     appSchakelaar = schakelaarAan(await leesGhBestand(d, arg.repo, APP_SCHAKELAAR.bestand));
-    if (inloggen === "account")
-      appAccounts = (await leesGhBestand(d, arg.repo, APP_ACCOUNTS.bestand)) !== null;
+    if (accounts) appAccounts = (await leesGhBestand(d, arg.repo, APP_ACCOUNTS.bestand)) !== null;
+    if (inloggen === "vooraf")
+      appVersie = stackVersie(await leesGhBestand(d, arg.repo, APP_VOORAF.bestand)) ?? 0;
     variabelen = Object.fromEntries(
       (await leesGhVariabelen(d, SECRET_OMGEVING, arg.repo)).map((x) => [x.name, x.value]),
     );
@@ -594,6 +636,11 @@ async function verkenPortaal(arg, d, o) {
   if (appAccounts === false) {
     gemis.push(
       `${kp}: de app in ${arg.repo} kan nog geen klantaccounts (${APP_ACCOUNTS.bestand} staat niet op main). Zonder de migratie met de uitnodigingen weigert de aanmeld-hook elk nieuw account. Werk de app eerst bij naar versie 46 of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
+    );
+  }
+  if (appVersie !== null && appVersie < APP_VOORAF.vanaf) {
+    gemis.push(
+      `${kp}: de app in ${arg.repo} kan nog geen accounts vooraf (${APP_VOORAF.bestand} op main zegt ${appVersie || "niets"}; nodig is ${APP_VOORAF.vanaf} of later). Met ${inlogdienst} zou de app in de browser niet meer opstarten. Werk de app eerst bij naar versie ${APP_VOORAF.vanaf} of later (/stagetwo-tier2:updaten), merge dat, en draai App inrichten daarna opnieuw`,
     );
   }
   if (appSchakelaar === false) {
@@ -655,12 +702,14 @@ async function verkenPortaal(arg, d, o) {
     appBegrijpt,
     appSchakelaar,
     appAccounts,
+    appVersie,
     live,
     functies,
     captcha,
     sitekey,
     inloggen,
     inlogdienst,
+    googleClientId,
   };
 }
 
@@ -691,7 +740,11 @@ function nogTeWijzigen(arg, d, o) {
   const nog = [];
   nog.push(...variabelenNog(o.variabelen, o.sitekey, o.inlogdienst));
   if (!o.auth) nog.push("het Supabase-project bestaat nog niet");
-  else if (d.smtpWachtwoord && (!o.captcha || d.captchaGeheim)) {
+  else if (
+    d.smtpWachtwoord &&
+    (!o.captcha || d.captchaGeheim) &&
+    (!googleClientIdVanApp(o.t, arg.app) || d.googleGeheim)
+  ) {
     const gewenst = portaalAuth(arg, d, { ...o, captcha: o.captcha });
     const anders = Object.keys(verschil(o.auth, gewenst)).filter(
       (veld) => !GEHEIME_VELDEN.includes(veld),
@@ -752,6 +805,8 @@ function portaalAuth(arg, d, { t, hostname, subdomein, testProject, functies, ca
       captchaGeheim: d.captchaGeheim,
       hooks: functies,
       inloggen: inloggenVanApp(t, arg.app),
+      googleClientId: googleClientIdVanApp(t, arg.app) ?? undefined,
+      googleGeheim: d.googleGeheim,
     }),
   };
 }
@@ -783,7 +838,7 @@ async function schrijfPortaalHooks(d, t, app, ref, voorvoegsel, { alleenAanmelde
   const functies = portaalHookFuncties(voorvoegsel);
   await d.supabase.voerSqlUit(ref, portaalAanmeldHookSql(t, app, functies.aanmelden));
   if (!alleenAanmelden) {
-    const wachtwoord = inloggenVanApp(t, app) === "account";
+    const wachtwoord = metKlantaccounts(t, app);
     await d.supabase.voerSqlUit(ref, portaalTokenHookSql(functies.token, { wachtwoord }));
   }
   return functies;
@@ -796,6 +851,13 @@ export const CAPTCHA_UIT =
 function portaalWaarschuwingen(arg, v) {
   const uit = [];
   if (!captchaVanApp(v.t, arg.app)) uit.push(`klantportaal ${arg.app}: ${CAPTCHA_UIT}`);
+  if (inloggenVanApp(v.t, arg.app) === "vooraf") {
+    uit.push(
+      `klantportaal ${arg.app} (accounts vooraf): ${CLOUDFLARE_REM_VOORAF}`,
+      `klantportaal ${arg.app} (accounts vooraf): rol na de merge de Edge Function klant-uitnodigen uit (workflow Functies uitrollen in deze beheer-repo, app ${arg.app}); zonder die functie kan geen medewerker een klant uitnodigen of een inloglink sturen`,
+      `klantportaal ${arg.app} (accounts vooraf): de controle op gelekte wachtwoorden van Supabase (Authentication, Attack Protection, Prevent use of leaked passwords) bestaat alleen op het Pro-plan en zet de inrichting niet; zet hem aan als het plan dat heeft`,
+    );
+  }
   if (inloggenVanApp(v.t, arg.app) === "account") {
     uit.push(
       `klantportaal ${arg.app} (accounts): ${CLOUDFLARE_REM_ACCOUNTS}`,
@@ -1258,6 +1320,8 @@ function geplandeMail(arg, v) {
       : stand === CAPTCHA_LATER
         ? "blijft zoals hij is (het portaal is live; alleen een run met het vinkje Deur weghalen zet een nieuw geheim)"
         : "aan (Turnstile)";
+  if (v.portaal.inloggen === "vooraf")
+    return `klantportaal met accounts vooraf: alleen op uitnodiging, inloggen met een link of een code van ${CODE_LENGTE} cijfers per mail (24 uur geldig; een medewerker kan een inloglink laten sturen), een wachtwoord naar keuze (minstens 10 tekens), Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId})` : "uit"}, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
   if (v.portaal.inloggen === "account")
     return `klantportaal met accounts: inloggen met e-mail en wachtwoord (minstens 10 tekens), alleen op uitnodiging (de link werkt een dag), wachtwoord vergeten per mail, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
   return `klantportaal: inloggen per mail aan (code van ${CODE_LENGTE} cijfers en link, 15 minuten geldig), mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
@@ -1603,7 +1667,7 @@ export async function richtIn(arg, d) {
     worker: arg.worker,
     subdomein: v.subdomein,
   });
-  for (const geheim of [d.smtpWachtwoord, d.captchaGeheim]) {
+  for (const geheim of [d.smtpWachtwoord, d.captchaGeheim, d.googleGeheim]) {
     if (v.klantportaal && geheim) maskeer(geheim);
   }
   const sitekey = v.klantportaal ? v.portaal.sitekey : null;
@@ -1618,7 +1682,7 @@ export async function richtIn(arg, d) {
     const f = await schrijfPortaalHooks(d, v.t, arg.app, project.ref, arg.voorvoegsel);
     stap(
       "3.4 hooks van het klantportaal",
-      v.portaal.inloggen === "account"
+      v.portaal.inloggen !== "code"
         ? `public.${f.aanmelden} (een nieuw account alleen op uitnodiging, nooit op een adres van een medewerker) en public.${f.token} (laat elk token door) geschreven`
         : `public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord) geschreven`,
     );
@@ -1705,6 +1769,12 @@ export async function richtIn(arg, d) {
           ? "UIT"
           : `niet aangeraakt: het portaal is live (nu ${v.portaal.auth?.security_captcha_enabled === true ? "aan" : "UIT"})`,
     );
+    if (v.portaal.inloggen === "vooraf") {
+      stap(
+        "3.4 accounts vooraf",
+        `inloggen met een link of code per mail (24 uur geldig) of een wachtwoord naar keuze; Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId}; het geheim uit GOOGLE_GEHEIM)` : "uit"}`,
+      );
+    }
     resultaat.waarschuwingen.push(
       ...(await klantenOpMedewerkeradresMeldingen(d, v.t, arg.app, project.ref)),
     );
@@ -1870,7 +1940,9 @@ export async function richtIn(arg, d) {
       );
       resultaat.watNu = [
         "Rol de app uit: ga naar de app-repo, Actions, Uitrollen, de laatste run, Re-run all jobs (stap 4 in beheer/README.md).",
-        `Test achter de deur: open https://${v.hostname}, log uit in de app en log in per mail met een privéadres.`,
+        v.portaal.inloggen === "vooraf"
+          ? `Test achter de deur: open https://${v.hostname}, laat als medewerker een inloglink sturen naar een privéadres (klant uitnodigen), log uit in de app en log in met de link uit die mail.`
+          : `Test achter de deur: open https://${v.hostname}, log uit in de app en log in per mail met een privéadres.`,
         `Werkt dat, draai App inrichten voor ${arg.app} dan nog een keer met ${VINKJE} en droogloop uit (stap 5).`,
       ];
     }
@@ -2642,12 +2714,14 @@ if (
       // geheime sleutel van Turnstile als `captcha` aan staat. Zie "Klantportaal" in de README.
       smtpWachtwoord: process.env.SMTP_WACHTWOORD?.trim() || undefined,
       captchaGeheim: process.env.TURNSTILE_GEHEIM?.trim() || undefined,
+      // Alleen nodig bij "klantportaal_inloggen": "vooraf" met een google_client_id.
+      googleGeheim: process.env.GOOGLE_GEHEIM?.trim() || undefined,
       maskeer,
       meldPortaal: () => {
         portaalInSpel = true;
       },
     };
-    // De twee geheimen van een klantportaal maskeren (getrimd; leeg slaat maskeer over) en de
+    // De geheimen van een klantportaal maskeren (getrimd; leeg slaat maskeer over) en de
     // eigen samenvatting schrijven gebeurt alleen als er in toegang.json een klantportaal staat,
     // of als deze run een portaal ziet dat dicht moet (meldPortaal). Zonder klantportaal zijn
     // stdout en de samenvatting gelijk aan versie 42, ook als die secrets toevallig bestaan; de
@@ -2656,6 +2730,7 @@ if (
     if (portaalInSpel) {
       maskeer(d.smtpWachtwoord);
       maskeer(d.captchaGeheim);
+      maskeer(d.googleGeheim);
     }
     const uitvoeren = {
       inrichten: richtIn,

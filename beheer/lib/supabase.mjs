@@ -372,6 +372,9 @@ export const GESLOTEN_PORTAAL = {
   mailer_secure_email_change_enabled: true,
   security_manual_linking_enabled: false,
   external_anonymous_users_enabled: false,
+  // Een portaal met "vooraf" kan Google aan hebben gehad; een gewone app logt alleen via
+  // Cloudflare in.
+  external_google_enabled: false,
   mailer_subjects_email_change: "Je adres wijzigen kan hier niet",
   mailer_templates_email_change_content:
     "<p>Er is gevraagd om het e-mailadres van een account te wijzigen. Dat kan niet zelf: er is niets gewijzigd.</p>\n<p>Heb je dit niet zelf gevraagd? Dan hoef je niets te doen.</p>",
@@ -481,6 +484,94 @@ export function accountInstellingen(naam) {
   };
 }
 
+/**
+ * Een klantportaal met accounts vooraf (`"klantportaal_inloggen": "vooraf"`, vanaf versie 47
+ * van de openbare template): een account komt er alleen op uitnodiging, net als bij `account`,
+ * maar een klant logt in met een link of een code per mail. Een medewerker kan hem een
+ * inloglink laten sturen (Edge Function klant-uitnodigen); een klant die zelf komt, vraagt een
+ * code. Een wachtwoord instellen kan op `/account`, en met een client-id van Google (in
+ * toegang.json) kan hij ook met Google inloggen.
+ *
+ * Alle vier de mails die inloggen (magic_link, confirmation, invite en recovery) zijn dezelfde
+ * inlogmail, met de code (`id="code"`) en de knop (`id="link"`) naar `/login`. Alleen het type
+ * in de link verschilt, want Supabase wisselt een `token_hash` alleen om met het type waarmee
+ * hij is gemaakt:
+ *
+ *   magic_link en confirmation  `email` (een bekend adres; de eerste keer van een account);
+ *   invite                      `invite` (de uitnodiging van een medewerker);
+ *   recovery                    `recovery` (/recover; hier geen route "wachtwoord vergeten",
+ *                               maar de mail moet wel werken als iemand /recover aanroept).
+ *
+ * De pagina `/login` logt pas in als een scriptje in de browser het formulier verstuurt; een
+ * linkscanner die de link opent, verbruikt hem dan niet. Een link en een code werken 24 uur
+ * (`mailer_otp_exp`): een link van een medewerker moet de volgende ochtend nog werken. Supabase
+ * kent één duur voor alle mails. Wachtwoord minstens 10 tekens en TOTP aan, zoals bij `account`.
+ */
+export const VOORAF_LINK = (soort) =>
+  `{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=${soort}`;
+
+/** De inlogmail van een klantportaal met accounts vooraf, met het type van de link. */
+export function voorafInlogmail(naam, soort) {
+  if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
+  if (!["email", "invite", "recovery"].includes(soort))
+    throw new Error(`onbekend type link "${soort}"`);
+  const n = htmlTekst(naam);
+  return {
+    onderwerp: `Inloggen bij ${naam}`,
+    inhoud: [
+      `<h2>Inloggen bij ${n}</h2>`,
+      `<p><a id="link" href="${VOORAF_LINK(soort)}">Log in bij ${n}</a></p>`,
+      "<p>Of vul deze code in op de inlogpagina:</p>",
+      '<p style="font-size: 28px; font-weight: bold; letter-spacing: 4px"><span id="code">{{ .Token }}</span></p>',
+      "<p>De link en de code werken 24 uur, en één keer.</p>",
+      `<p>Heb je dit niet zelf aangevraagd, en verwachtte je ook geen mail van ${n}? Dan hoef je niets te doen. Klik niet op de link en geef de code aan niemand; zonder de link of de code kan niemand inloggen.</p>`,
+    ].join("\n"),
+  };
+}
+
+export function voorafMails(naam) {
+  const uit = {};
+  for (const [mail, soort] of [
+    ["magic_link", "email"],
+    ["confirmation", "email"],
+    ["invite", "invite"],
+    ["recovery", "recovery"],
+  ]) {
+    const m = voorafInlogmail(naam, soort);
+    uit[`mailer_subjects_${mail}`] = m.onderwerp;
+    uit[`mailer_templates_${mail}_content`] = m.inhoud;
+  }
+  return uit;
+}
+
+/**
+ * Inloggen met Google, alleen bij `vooraf`. Met een client-id staat Google aan met dat id en het
+ * geheim (GOOGLE_GEHEIM; dat staat alleen in de body van de PATCH, nooit in een melding). Zonder
+ * client-id staat Google uitdrukkelijk uit. Veldnamen uit UpdateAuthConfigBody van de Management
+ * API (https://api.supabase.com/api/v1-json, nagelopen 26-11-2026).
+ */
+export function googleInstellingen({ googleClientId, googleGeheim } = {}) {
+  if (!googleClientId) return { external_google_enabled: false };
+  if (!googleGeheim) throw new Error("GOOGLE_GEHEIM ontbreekt");
+  return {
+    external_google_enabled: true,
+    external_google_client_id: googleClientId,
+    external_google_secret: googleGeheim,
+  };
+}
+
+/** Wat een klantportaal met accounts vooraf bovenop de gewone instellingen zet. */
+export function voorafInstellingen(naam, google = {}) {
+  return {
+    ...voorafMails(naam),
+    mailer_otp_exp: LINK_GELDIG_SECONDEN,
+    password_min_length: WACHTWOORD_MINIMAAL,
+    mfa_totp_enroll_enabled: true,
+    mfa_totp_verify_enabled: true,
+    ...googleInstellingen(google),
+  };
+}
+
 /** De captcha-instellingen blijven in deze run zoals ze zijn (zie klantportaalInstellingen). */
 export const CAPTCHA_LATER = "later";
 
@@ -491,15 +582,19 @@ export function klantportaalInstellingen({
   captchaGeheim,
   hooks,
   inloggen = "code",
+  googleClientId,
+  googleGeheim,
 }) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
   if (!smtpWachtwoord) throw new Error("SMTP_WACHTWOORD ontbreekt");
   if (captcha !== false && !captchaGeheim) throw new Error("TURNSTILE_GEHEIM ontbreekt");
-  if (inloggen !== "code" && inloggen !== "account")
+  if (!["code", "account", "vooraf"].includes(inloggen))
     throw new Error(`onbekende manier van inloggen "${inloggen}"`);
-  if (inloggen === "account" && captcha === false)
+  if (inloggen !== "code" && captcha === false)
     throw new Error("een klantportaal met accounts kan niet zonder captcha");
+  if (googleClientId && inloggen !== "vooraf")
+    throw new Error('inloggen met Google hoort alleen bij "klantportaal_inloggen": "vooraf"');
   const mail = inlogmail(afzender.naam);
   return {
     external_email_enabled: true,
@@ -512,6 +607,10 @@ export function klantportaalInstellingen({
     // Anoniem aanmelden (een account zonder adres) hoort hier niet: de aanmeld-hook weigert
     // het al, en zo staat het ook in Supabase zelf uit.
     external_anonymous_users_enabled: false,
+    // Google alleen bij "vooraf" met een client-id (voorafInstellingen); anders uit. Supabase
+    // zet hem standaard uit, dus bij code en account verandert dit niets, behalve na een
+    // stand "vooraf" met Google: dan gaat Google hier weer uit.
+    external_google_enabled: false,
     ...portaalHookInstellingen(hooks),
     smtp_host: SMTP_HOST,
     smtp_port: SMTP_POORT,
@@ -535,6 +634,9 @@ export function klantportaalInstellingen({
     mailer_secure_email_change_enabled: true,
     ...REM,
     ...(inloggen === "account" ? accountInstellingen(afzender.naam) : {}),
+    ...(inloggen === "vooraf"
+      ? voorafInstellingen(afzender.naam, { googleClientId, googleGeheim })
+      : {}),
     ...(captcha === CAPTCHA_LATER
       ? {}
       : captcha !== false
@@ -583,7 +685,7 @@ export function organisaties(orgSlug) {
 }
 
 /** De velden van de auth-config waar een geheim in staat. */
-export const GEHEIME_VELDEN = ["smtp_pass", "security_captcha_secret"];
+export const GEHEIME_VELDEN = ["smtp_pass", "security_captcha_secret", "external_google_secret"];
 
 export const TURNSTILE_SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
