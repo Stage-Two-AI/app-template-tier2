@@ -270,7 +270,8 @@ object zijn. De korte vorm blijft werken:
   testdatabase, maar ververst hij de testlogin wel. Handig als alle tabellen aan een
   gebruiker hangen en er toch niets te kopiëren valt.
 
-- `klantportaal`, met `afzender`, `turnstile_sitekey`, `captcha` en `klantportaal_inloggen`: zie het volgende hoofdstuk.
+- `klantportaal`, met `afzender`, `turnstile_sitekey`, `captcha`, `klantportaal_inloggen` en
+  `google_client_id`: zie het volgende hoofdstuk.
 
 ## Klantportaal
 
@@ -462,21 +463,87 @@ verschillen:
 - de regel bij Cloudflare tegen raden zet je met de hand (elke run noemt hem, zie
   "Klantaccounts" in `KLANTPORTAAL.md`).
 
+### Klantportaal met accounts vooraf (link, code, wachtwoord of Google)
+
+Alleen voor een app van de openbare template, vanaf versie 47. De accounts bestaan vooraf:
+een medewerker maakt ze, niemand meldt zich zelf aan. Een medewerker kan een klant vanuit de app
+een inloglink laten sturen; de klant klikt en is binnen. Een klant die zelf komt, vraagt een code
+per mail. Wie geen codes meer wil, stelt op Mijn account een wachtwoord in, of logt in met Google
+als jij dat aanzet. Een link en een code werken 24 uur. Zet bij de app in `toegang.json`:
+
+```json
+"klantportaal_inloggen": "vooraf"
+```
+
+Verder gaat het als bij een gewoon klantportaal (de zeven stappen hierboven), met deze stappen
+erbij:
+
+1. **In stap 2** zet je de regel hierboven bij de app. Google kan er later bij (stap 3 hieronder).
+2. **Na de merge van de app** rol je de Edge Function `klant-uitnodigen` uit (Functies
+   uitrollen, met de naam van de app). Zonder die functie kan geen medewerker een klant
+   uitnodigen of een inloglink sturen.
+3. **Alleen als klanten met Google inloggen.** Dit kan pas als App inrichten één keer heeft
+   gedraaid: je hebt het adres van het Supabase-project nodig. De project-ref staat in de
+   samenvatting van die run (stap `3.1 Supabase-project`) en in Supabase (Project Settings,
+   General, Project ID). Ga naar Google Cloud (console.cloud.google.com), kies of maak een
+   project voor dit portaal, en open Google Auth Platform:
+
+   | Scherm | Veld | Waarde |
+   |---|---|---|
+   | Branding | App name | de naam van het portaal zoals klanten hem kennen; Google toont die bij het inloggen |
+   | Branding | User support email | een adres van het bedrijf dat klanten mogen mailen |
+   | Branding | App logo | het logo van het bedrijf (mag leeg; met een logo kijkt Google het eerst na, en dat kan dagen duren) |
+   | Branding | Authorized domains | het domein van de app zonder subdomein (bijvoorbeeld `klant.nl`), en `<project-ref>.supabase.co` |
+   | Branding | Developer contact information | een adres van het bedrijf |
+   | Audience | User type | External |
+   | Audience | Publishing status | Publish app (In production); zonder dat kunnen alleen testgebruikers inloggen |
+   | Data Access | Scopes | alleen `openid`, `.../auth/userinfo.email` en `.../auth/userinfo.profile`; niets anders |
+   | Clients, Create client | Application type | Web application |
+   | Clients, Create client | Name | bijvoorbeeld `Klantportaal <app>` |
+   | Clients, Create client | Authorized JavaScript origins | `https://<domein>` (het domein van de app, bijvoorbeeld `https://shop.klant.nl`) |
+   | Clients, Create client | Authorized redirect URIs | `https://<project-ref>.supabase.co/auth/v1/callback` |
+
+   Na Create toont Google twee waarden. Zet ze zo:
+
+   | Waarde van Google | Waar |
+   |---|---|
+   | Client ID (eindigt op `.apps.googleusercontent.com`) | `"google_client_id": "<client-id>"` bij de app in `toegang.json` (openbaar, via een pull request zoals in stap 2) |
+   | Client secret (begint met `GOCSPX-`) | secret `GOOGLE_GEHEIM` in de beheer-repo: Settings, Environments, de omgeving `beheer` (waar ook `SMTP_WACHTWOORD` staat). Nooit in `toegang.json` |
+
+   Draai daarna App inrichten opnieuw zonder vinkje (stap 3 van de zeven) en rol de app uit
+   (stap 4): pas dan toont de inlogpagina "Doorgaan met Google". Staat er een `google_client_id`
+   zonder het secret, dan stopt App inrichten vóór de eerste wijziging en zegt dat.
+4. **De regel bij Cloudflare tegen raden** zet je met de hand (elke run noemt hem, zie "Accounts
+   vooraf" in `KLANTPORTAAL.md`).
+5. **Testen achter de deur (stap 4)** gaat hier anders: een adres zonder account krijgt geen
+   mail. Laat als medewerker in de app een inloglink sturen naar een privéadres, log uit, en log
+   in met de link uit die mail. Probeer daarna in een privévenster ook een code aan te vragen
+   voor dat adres.
+
+Goed als: de klant met de link binnenkomt, en een adres zonder account geen mail krijgt terwijl
+de pagina hetzelfde zegt als bij een bekend adres.
+
+Een medewerker logt nooit op de klantpagina in met Google: daarna heeft hij geen
+medewerkerrechten meer, tot jij de identiteit `google` van zijn account weghaalt. Hoe je dat
+vindt en herstelt, staat onder "Bekende grens" in `KLANTPORTAAL.md`. De klantpagina zegt bij de
+knop: "Medewerker? Log in via /medewerkers."
+
 ### Wat je moet weten
 
 - De regels in de database zijn bij een klantportaal de enige grens: iedereen ter wereld kan
   een account maken. Daarom stap 0.
 - Zonder het vinkje verandert geen run iets aan de deur. Met het vinkje verandert een run
   alleen de deur.
-- Klanten hebben geen wachtwoord (behalve met accounts, hierboven) en kunnen hun adres niet
-  zelf wijzigen; dat loopt via de eigenaar van de app.
+- Klanten hebben geen wachtwoord (behalve met accounts of accounts vooraf, hierboven) en
+  kunnen hun adres niet zelf wijzigen; dat loopt via de eigenaar van de app.
 - De captcha staat standaard aan. Uitzetten kan alleen met `"captcha": false` bij de app, en
   is bedoeld voor een storing bij Turnstile.
 - Toegang bijwerken trekt bij een klantportaal alleen medewerkers in, nooit klanten. Een
   portaal sluiten bant niemand. Een klantportaal komt vóór de gewone apps aan de beurt; lukt
   er daar iets niet, dan gaat hij door en eindigt de run rood. Een fout bij een gewone app
   stopt de run, zoals altijd.
-- `SMTP_WACHTWOORD` en `TURNSTILE_GEHEIM` staan nooit in het logboek of de samenvatting.
+- `SMTP_WACHTWOORD`, `TURNSTILE_GEHEIM` en `GOOGLE_GEHEIM` staan nooit in het logboek of de
+  samenvatting.
 - Een klantportaal vraagt een eigen domein, en hoort een testdatabase te hebben (anders
   waarschuwt elke run).
 - Een nieuwe medewerker krijgt bij zijn eerste inlog via Cloudflare één keer een mail om zijn

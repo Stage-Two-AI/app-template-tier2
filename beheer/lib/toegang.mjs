@@ -28,7 +28,11 @@
  * uit, en dan waarschuwt het resultaat. `publiek` kan er niet naast: het hele domein is dan
  * al open. `klantportaal_inloggen` (standaard "code"): met "account" loggen klanten in met
  * e-mail en wachtwoord; een account komt er alleen op uitnodiging van een medewerker (zie
- * portaalAanmeldHookSql). Zie "Klantportaal" in beheer/README.md.
+ * portaalAanmeldHookSql). Met "vooraf" bestaan de accounts ook vooraf, en logt een klant in
+ * met een inloglink van een medewerker, een code per mail, een wachtwoord als hij dat wil, of
+ * met Google als er een `google_client_id` staat (de openbare client-id van de inlogkoppeling
+ * bij Google; het geheim staat als secret GOOGLE_GEHEIM in de beheeromgeving). Zie
+ * "Klantportaal" in beheer/README.md.
  *
  * `testaccounts` is optioneel en geldt alleen voor de testdatabase van die app
  * (`<vv><app>-test`): accounts met e-mail en wachtwoord, zodat iemand (of Claude) de
@@ -67,13 +71,21 @@ const APP_VELDEN = [
   "captcha",
   "turnstile_sitekey",
   "klantportaal_inloggen",
+  "google_client_id",
 ];
 /**
- * Hoe klanten van een klantportaal inloggen: `code` (standaard, een code per mail) of `account`
- * (e-mail en wachtwoord, alleen op uitnodiging, met een tweede stap naar keuze). `account`
- * vraagt een app van de openbare template, versie 46 of later (zie verkenPortaal).
+ * Hoe klanten van een klantportaal inloggen: `code` (standaard, een code per mail), `account`
+ * (e-mail en wachtwoord, alleen op uitnodiging, met een tweede stap naar keuze) of `vooraf`
+ * (accounts vooraf, alleen op uitnodiging; inloggen met een link of code per mail, en naar keuze
+ * met een wachtwoord of Google). `account` vraagt een app van de openbare template, versie 46
+ * of later, `vooraf` versie 47 of later (zie verkenPortaal).
  */
-export const INLOGGEN = ["code", "account"];
+export const INLOGGEN = ["code", "account", "vooraf"];
+/**
+ * De openbare client-id van een inlogkoppeling bij Google (Google Cloud, Clients, type Web
+ * application). Het geheim van die koppeling begint met GOCSPX- en hoort hier nooit.
+ */
+const GOOGLE_CLIENT_ID = /^[A-Za-z0-9][A-Za-z0-9-]{4,150}\.apps\.googleusercontent\.com$/;
 /** De openbare sleutel van een Turnstile-widget (begint bij Cloudflare met 0x4). */
 const SITEKEY = /^[A-Za-z0-9_-]{10,100}$/;
 /**
@@ -161,10 +173,25 @@ export function captchaVanApp(t, app) {
   return isKlantportaal(t, app) && t.apps[app].captcha !== false;
 }
 
-/** Hoe klanten van dit klantportaal inloggen: "code" (standaard) of "account". */
+/** Hoe klanten van dit klantportaal inloggen: "code" (standaard), "account" of "vooraf". */
 export function inloggenVanApp(t, app) {
   if (!isKlantportaal(t, app)) throw new Error(`app "${app}" is geen klantportaal`);
   return t.apps[app].klantportaal_inloggen ?? "code";
+}
+
+/**
+ * Bestaan de klantaccounts bij dit klantportaal alleen op uitnodiging ("account" en "vooraf")?
+ * Dan eist de aanmeld-hook een open uitnodiging en laat de token-hook elk token door.
+ */
+export function metKlantaccounts(t, app) {
+  return ["account", "vooraf"].includes(inloggenVanApp(t, app));
+}
+
+/** De client-id van Google bij een klantportaal met "vooraf"; anders null. */
+export function googleClientIdVanApp(t, app) {
+  return isKlantportaal(t, app) && t.apps[app].klantportaal_inloggen === "vooraf"
+    ? (t.apps[app].google_client_id ?? null)
+    : null;
 }
 
 /** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
@@ -286,8 +313,25 @@ export function valideerToegang(t) {
         !INLOGGEN.includes(waarde.klantportaal_inloggen)
       ) {
         fouten.push(
-          `app "${app}": klantportaal_inloggen is "code" (een code per mail) of "account" (e-mail en wachtwoord, op uitnodiging); nu staat er ${JSON.stringify(waarde.klantportaal_inloggen)}`,
+          `app "${app}": klantportaal_inloggen is "code" (een code per mail), "account" (e-mail en wachtwoord, op uitnodiging) of "vooraf" (accounts vooraf; een link of code per mail, en naar keuze een wachtwoord of Google); nu staat er ${JSON.stringify(waarde.klantportaal_inloggen)}`,
         );
+      }
+      if (waarde.google_client_id !== undefined) {
+        const id = waarde.google_client_id;
+        if (typeof id === "string" && /^GOCSPX-/i.test(id.trim())) {
+          fouten.push(
+            `app "${app}": google_client_id is het GEHEIM van de inlogkoppeling bij Google (het begint met GOCSPX-). Hier hoort de client-id (die eindigt op .apps.googleusercontent.com). Staat het geheim nu in git, maak dan in Google Cloud een nieuw geheim (Clients, de koppeling, Add secret, het oude weghalen) en zet dat alleen als secret GOOGLE_GEHEIM`,
+          );
+        } else if (typeof id !== "string" || !GOOGLE_CLIENT_ID.test(id)) {
+          fouten.push(
+            `app "${app}": google_client_id is de client-id van de inlogkoppeling bij Google (Google Cloud, Clients); die eindigt op .apps.googleusercontent.com. Nu staat er ${JSON.stringify(id)}`,
+          );
+        }
+        if (waarde.klantportaal === true && waarde.klantportaal_inloggen !== "vooraf") {
+          fouten.push(
+            `app "${app}": google_client_id hoort alleen bij "klantportaal_inloggen": "vooraf". Zet die stand erbij, of haal google_client_id weg`,
+          );
+        }
       }
       if (
         waarde.turnstile_sitekey !== undefined &&
@@ -314,7 +358,10 @@ export function valideerToegang(t) {
           );
         }
         // Met wachtwoorden is de captcha de enige rem op raden rechtstreeks bij Supabase.
-        if (waarde.klantportaal_inloggen === "account" && waarde.captcha === false) {
+        if (
+          ["account", "vooraf"].includes(waarde.klantportaal_inloggen) &&
+          waarde.captcha === false
+        ) {
           fouten.push(
             `app "${app}": een klantportaal met accounts kan niet zonder captcha. Bij een inlog met een wachtwoord rechtstreeks bij Supabase is de captcha de enige rem op raden; haal "captcha": false weg`,
           );
@@ -335,7 +382,13 @@ export function valideerToegang(t) {
           );
         }
       } else {
-        for (const veld of ["afzender", "captcha", "turnstile_sitekey", "klantportaal_inloggen"]) {
+        for (const veld of [
+          "afzender",
+          "captcha",
+          "turnstile_sitekey",
+          "klantportaal_inloggen",
+          "google_client_id",
+        ]) {
           if (waarde[veld] !== undefined) {
             fouten.push(
               `app "${app}": ${veld} hoort bij een klantportaal; zet "klantportaal": true erbij of haal ${veld} weg`,
@@ -997,9 +1050,10 @@ export const UITNODIGING_FUNCTIE = "public.klantaccount_toestaan";
  * via Cloudflare kwam. Een groep met alleen `idp_groepen` heeft geen adressen om te weigeren;
  * daarvoor waarschuwt de inrichting.
  *
- * Bij `"klantportaal_inloggen": "account"` maakt niemand zelf een account: een aanmelding per
- * mail gaat alleen door als de functie van de app (UITNODIGING_FUNCTIE) een open uitnodiging
- * vindt. Zonder die functie in de database faalt de hook en komt er geen account; de
+ * Bij `"klantportaal_inloggen": "account"` en `"vooraf"` maakt niemand zelf een account: een
+ * aanmelding per mail gaat alleen door als de functie van de app (UITNODIGING_FUNCTIE) een open
+ * uitnodiging vindt. Een nieuw account via Google weigert de hook al hierboven (de aanbieder is
+ * dan `google`, niet `email`); Google koppelt Supabase alleen aan een account dat er al is. Zonder die functie in de database faalt de hook en komt er geen account; de
  * inrichting stopt daarom eerder al als de app hem niet heeft (verkenPortaal).
  *
  * Toegang bijwerken schrijft de functie bij elke run opnieuw, zodat hij de groepen volgt.
@@ -1019,7 +1073,7 @@ export function portaalAanmeldHookSql(toegang, app, functie) {
   const groepen = groepenVanApp(t, app).map((g) => t.groepen[g]);
   const domeinen = [...new Set(groepen.flatMap((g) => klein(g.domeinen)))];
   const adressen = [...new Set(groepen.flatMap((g) => klein(g.adressen)))];
-  const accounts = inloggenVanApp(t, app) === "account";
+  const accounts = metKlantaccounts(t, app);
   const naam = `public.${functie}`;
   return `create or replace function ${naam}(event jsonb)
 returns jsonb
@@ -1087,7 +1141,8 @@ export function groepenZonderAdressen(t, app) {
  * Een project heeft maar één zo'n hook. Heeft de app er zelf een (extra claims), dan stopt de
  * inrichting vóór de eerste wijziging. Nooit stil vervangen.
  *
- * Bij `"klantportaal_inloggen": "account"` (`wachtwoord: true`) laat de hook elk token door:
+ * Bij `"klantportaal_inloggen": "account"` en `"vooraf"` (`wachtwoord: true`) laat de hook elk
+ * token door:
  * daar is het wachtwoord de inlog, en het gat hierboven bestaat niet, want niemand maakt zelf
  * een account (de aanmeld-hook eist een uitnodiging). De hook blijft wel staan, zodat de
  * inrichting het project als klantportaal blijft herkennen (wasKlantportaal).
