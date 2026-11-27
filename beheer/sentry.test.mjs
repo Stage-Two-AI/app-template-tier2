@@ -149,6 +149,43 @@ test("Sentry: komt de proefmelding niet aan, dan een waarschuwing, en de inricht
   );
 });
 
+test("Sentry: een sleutel die Sentry weigert (401 of 403) is een waarschuwing met uitleg, en de rest van de inrichting gaat door", async () => {
+  for (const status of [401, 403]) {
+    const w = nepWolk({ sentry: { weigert: status } });
+    const r = await richtIn(ARG, opzet(w));
+    const s = r.stappen.find((x) => x.stap === "S foutmeldingen (Sentry)").actie;
+    assert.match(s, /overgeslagen, de rest gaat door/);
+    assert.match(s, /Organization: Read/);
+    assert.match(s, /SENTRY_URL op https:\/\/de\.sentry\.io/);
+    assert.ok(
+      r.waarschuwingen.some((x) =>
+        /Sentry voor cf-proef niet gekoppeld.*App inrichten opnieuw/.test(x),
+      ),
+    );
+    assert.equal(w.staat.ghVariabelen.production.VITE_SENTRY_DSN, undefined);
+    // De rest is gewoon gebeurd: de stappen na Sentry staan in het resultaat.
+    assert.ok(r.stappen.length > 3);
+    // Ook een droogloop stopt er niet op.
+    const droog = await richtIn(
+      { ...ARG, droogloop: true },
+      opzet(nepWolk({ sentry: { weigert: status } })),
+    );
+    assert.match(
+      droog.stappen.find((x) => x.stap === "S foutmeldingen (Sentry)").actie,
+      /^gepland: overgeslagen/,
+    );
+  }
+});
+
+test("Sentry: mogen leden geen project maken, dan noemt de waarschuwing de schakelaar in Sentry", async () => {
+  const w = nepWolk({ sentry: { geenNieuwProject: true } });
+  const r = await richtIn(ARG, opzet(w));
+  assert.match(
+    r.stappen.find((x) => x.stap === "S foutmeldingen (Sentry)").actie,
+    /Let Members Create Projects/,
+  );
+});
+
 test("Sentry: zonder sleutel een duidelijke regel in het resultaat, en niets bij Sentry", async () => {
   const w = nepWolk();
   const r = await richtIn(ARG, opzet(w, { sentry: null }));

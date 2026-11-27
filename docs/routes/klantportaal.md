@@ -39,6 +39,12 @@ met de verkeerde gegevens. Zoek ze op (`grep -rn "klanten" supabase/migrations`,
 database `select proname from pg_proc where prosrc ~ '\mklanten\M'`) en schrijf elke gevonden
 functie in dezelfde migratie opnieuw met `create or replace`, met de nieuwe naam.
 
+**Een eigen functie `is_medewerker()`** valt ook onder regel 4. De migratie van het klantportaal
+maakt die functie met `create function`, zonder `or replace`, en loopt dan vast. Geef de eigen
+functie eerst een andere naam (met de policies die hem aanroepen), in een eigen pull request.
+Zolang het klantportaal uit staat, is er niets aan de hand: de controle van het klantportaal
+herkent een portaal aan `is_goedgekeurde_klant()`, niet aan `is_medewerker()`.
+
 Staan `src/features/auth/inlog-met-code.tsx` en `supabase/migrations/*_klantportaal.sql` er al
 (de app is op versie 43 of later gemaakt), doe dan van stap 2 alleen `supabase/testrol.sql` en
 van stap 3 alleen "Daarna, met de hand".

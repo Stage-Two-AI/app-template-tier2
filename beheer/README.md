@@ -76,7 +76,7 @@ Verder in omgeving `proef-beheer`, als variabelen (geen secrets):
 | `CLOUDFLARE_GROEPEN_IDP` | optioneel: `azureAD:<id>` als een groep `idp_groepen` gebruikt |
 | `SENTRY_ORG` | optioneel, samen met het secret `SENTRY_AUTH_TOKEN`: de slug van de organisatie in Sentry. Dan krijgt elke app een eigen Sentry-project en DSN (zie "Foutbewaking" hieronder) |
 | `SENTRY_TEAM` | optioneel: het team in Sentry voor nieuwe projecten. Alleen nodig als de organisatie meer dan één team heeft |
-| `SENTRY_URL` | optioneel: `https://de.sentry.io` voor een organisatie in de EU-regio. Leeg = `https://sentry.io` |
+| `SENTRY_URL` | voor een organisatie in de EU-regio verplicht: `https://de.sentry.io` (`sentry-koppelen.mjs --regio eu` zet hem). Leeg = `https://sentry.io` |
 | `VITE_SENTRY_DSN` | alleen voor de proef, als er geen `SENTRY_AUTH_TOKEN` is: één DSN die de inrichting bij elke app zet. Bij een klant niet gebruiken: met één DSN zie je in Sentry niet uit welke app een fout komt |
 
 Beperk de omgevingen `proef-beheer`, `production` en `preview` tot de tak `main`
@@ -120,7 +120,12 @@ van de beheer-repo, met zijn eigen Sentry-account, met `sentry-koppelen.mjs`
 (`skills/installatie/scripts/` in de plugin): dat zet het token zonder dat iemand de waarde ziet
 (gh vraagt erom), zet `SENTRY_ORG` en start App inrichten opnieuw. De sleutel is een token van
 een interne integratie in Sentry (Settings, Custom Integrations, Internal Integration) met
-Project: Write (aanmaken en de DSN lezen), Team: Read en Issue & Event: Read (de proefmelding terugzien).
+Organization: Read (de projecten en teams lezen), Project: Write (aanmaken en de DSN lezen),
+Team: Read en Issue & Event: Read (de proefmelding terugzien). Een organisatie in de EU heeft
+`SENTRY_URL` nodig (zie de tabel). Een fout bij Sentry (een sleutel die 401 of 403 geeft, een
+recht dat ontbreekt) houdt de inrichting niet tegen: stap S wordt een waarschuwing die zegt wat
+er na te kijken is, en de rest gaat door. Mogen leden in Sentry geen project maken (Settings,
+General Settings, "Let Members Create Projects"), dan zegt de waarschuwing dat.
 Opruimen haalt de variabelen weg, maar laat het Sentry-project staan (met de geschiedenis van
 de fouten); dat verwijder je zo nodig in Sentry.
 
@@ -469,11 +474,17 @@ Alleen voor een app van de openbare template, vanaf versie 47. De accounts besta
 een medewerker maakt ze, niemand meldt zich zelf aan. Een medewerker kan een klant vanuit de app
 een inloglink laten sturen; de klant klikt en is binnen. Een klant die zelf komt, vraagt een code
 per mail. Wie geen codes meer wil, stelt op Mijn account een wachtwoord in, of logt in met Google
-als jij dat aanzet. Een link en een code werken 24 uur. Zet bij de app in `toegang.json`:
+als jij dat aanzet. Een link en een code werken standaard een dag. Zet bij de app in
+`toegang.json`:
 
 ```json
 "klantportaal_inloggen": "vooraf"
 ```
+
+Moet een link langer werken, bijvoorbeeld omdat een klant de mail van een medewerker niet altijd
+dezelfde dag opent, zet er dan `"link_geldig_dagen": 7` bij (1 tot en met 7). Dat geldt voor de
+link en de code samen, en de mail noemt de duur. Raden wordt er niet makkelijker van: een nieuwe
+code vervangt de oude, en de rem per IP-adres blijft gelijk.
 
 Verder gaat het als bij een gewoon klantportaal (de zeven stappen hierboven), met deze stappen
 erbij:

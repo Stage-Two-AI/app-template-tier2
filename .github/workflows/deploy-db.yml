@@ -158,7 +158,7 @@ jobs:
           fi
           # Ook als de push mislukt gaan de regels terug; daarna telt de uitkomst van de push.
           uitkomst=0
-          pnpm exec supabase db push --db-url "$DB_URL" --include-all || uitkomst=$?
+          pnpm exec supabase db push --db-url "$DB_URL" --include-all --yes || uitkomst=$?
           terugzetten
           exit "$uitkomst"
 
@@ -194,7 +194,7 @@ jobs:
           DB_URL=$(node scripts/db-url.mjs)
           echo "Wat er zou draaien:"
           pnpm exec supabase migration list --db-url "$DB_URL"
-          pnpm exec supabase db push --db-url "$DB_URL" --include-all
+          pnpm exec supabase db push --db-url "$DB_URL" --include-all --yes
 
 # Let op de volgorde in de tijd: de workflow `uitrollen` begint aan zijn eigen deploy zodra er naar
 # main gemerged wordt, dus heel even kan nieuwe code op het oude schema draaien.

@@ -328,8 +328,11 @@ export function adresStand(app, gewenst) {
  * (geweest) en dat accounts zonder inlog via Cloudflare klanten zijn. Een app die nooit
  * klantportaal was heeft het merk niet. NAGAAN (U7): dat Cloudflare `custom_deny_message` in
  * de lijst teruggeeft en een lege tekst accepteert om hem weg te halen.
+ *
+ * Alleen letters en spaties: Cloudflare weigert in deze tekst onder meer , . ! : @ ? en -
+ * (fout 400, gezien bij de eerste echte inrichting op 20-11-2026).
  */
-export const PORTAAL_MERK = "Dit adres is alleen voor medewerkers (klantportaal).";
+export const PORTAAL_MERK = "Dit adres is alleen voor medewerkers van dit klantportaal";
 
 export function heeftPortaalMerk(app) {
   return app?.custom_deny_message === PORTAAL_MERK;

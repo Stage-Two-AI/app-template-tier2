@@ -72,7 +72,11 @@ const APP_VELDEN = [
   "turnstile_sitekey",
   "klantportaal_inloggen",
   "google_client_id",
+  "link_geldig_dagen",
 ];
+/** Hoe lang een link en een code bij `vooraf` werken, in dagen. */
+export const LINK_DAGEN_MIN = 1;
+export const LINK_DAGEN_MAX = 7;
 /**
  * Hoe klanten van een klantportaal inloggen: `code` (standaard, een code per mail), `account`
  * (e-mail en wachtwoord, alleen op uitnodiging, met een tweede stap naar keuze) of `vooraf`
@@ -192,6 +196,16 @@ export function googleClientIdVanApp(t, app) {
   return isKlantportaal(t, app) && t.apps[app].klantportaal_inloggen === "vooraf"
     ? (t.apps[app].google_client_id ?? null)
     : null;
+}
+
+/**
+ * Hoe lang een inloglink en een code werken bij een klantportaal met "vooraf", in dagen
+ * (`link_geldig_dagen`, 1 tot en met 7, standaard 1). Bij de andere standen geldt de vaste duur.
+ */
+export function linkGeldigDagenVanApp(t, app) {
+  return isKlantportaal(t, app) && t.apps[app].klantportaal_inloggen === "vooraf"
+    ? (t.apps[app].link_geldig_dagen ?? LINK_DAGEN_MIN)
+    : LINK_DAGEN_MIN;
 }
 
 /** De openbare Turnstile-sleutel van een klantportaal met captcha; anders null. */
@@ -333,6 +347,19 @@ export function valideerToegang(t) {
           );
         }
       }
+      if (waarde.link_geldig_dagen !== undefined) {
+        const d = waarde.link_geldig_dagen;
+        if (!Number.isInteger(d) || d < LINK_DAGEN_MIN || d > LINK_DAGEN_MAX) {
+          fouten.push(
+            `app "${app}": link_geldig_dagen is een heel getal van ${LINK_DAGEN_MIN} tot en met ${LINK_DAGEN_MAX} (zonder aanhalingstekens): zoveel dagen werken een inloglink en een code; nu staat er ${JSON.stringify(d)}`,
+          );
+        }
+        if (waarde.klantportaal === true && waarde.klantportaal_inloggen !== "vooraf") {
+          fouten.push(
+            `app "${app}": link_geldig_dagen hoort alleen bij "klantportaal_inloggen": "vooraf". Zet die stand erbij, of haal link_geldig_dagen weg`,
+          );
+        }
+      }
       if (
         waarde.turnstile_sitekey !== undefined &&
         (typeof waarde.turnstile_sitekey !== "string" || !SITEKEY.test(waarde.turnstile_sitekey))
@@ -388,6 +415,7 @@ export function valideerToegang(t) {
           "turnstile_sitekey",
           "klantportaal_inloggen",
           "google_client_id",
+          "link_geldig_dagen",
         ]) {
           if (waarde[veld] !== undefined) {
             fouten.push(

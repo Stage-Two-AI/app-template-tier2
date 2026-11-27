@@ -73,7 +73,7 @@ eigen computer dus nooit. Zet nooit de sleutels van productie in `.env.local`.
 | `pnpm db:start` | lokale Supabase starten; vraagt Docker. Voor lokaal kijken is `pnpm env:test` genoeg, zonder Docker |
 | `pnpm env:local` | `.env.local` en `.env.test` schrijven op basis van die database |
 | `pnpm env:test` | `.env.local` laten wijzen naar de testdatabase van de app (geen Docker nodig), met de testlogin erbij |
-| `pnpm testlogin` | het wachtwoord van de testgebruiker ophalen uit de beheer-repo (elke nacht nieuw) en in `.env.development.local` zetten; de preview doet dit bij elke start |
+| `pnpm testlogin` | het wachtwoord van de testgebruiker ophalen uit de beheer-repo (elke dag nieuw, in de loop van de ochtend) en in `.env.development.local` zetten; de preview doet dit bij elke start |
 | `pnpm db:reset` | lokale database opnieuw opbouwen uit alle migraties |
 | `pnpm db:types` | databasetypes genereren na een migratie |
 | `pnpm test:rls` | beveiligingstests (database moet draaien) |
@@ -123,6 +123,10 @@ docs/solutions/        gedocumenteerde oplossingen van eerdere problemen (bugs, 
   naar een Supabase Edge Function.
 - **`supabase/functions/` draait op Deno**, de rest op Node en in de browser. Imports
   zijn niet uitwisselbaar tussen die twee, en die map valt buiten `tsconfig.json`.
+- **Een Edge Function die de browser aanroept** (`supabase.functions.invoke` vanuit de app)
+  beantwoordt zelf de preflight (OPTIONS) en zet de CORS-headers op elk antwoord, met
+  `antwoordOpPreflight` en `jsonAntwoord` uit `supabase/functions/_shared/cors.ts` (zoals in
+  `voorbeeld-met-geheim`). Supabase doet dat niet; zonder weigert de browser de aanroep.
 - **Edge Functions gaan live via de beheer-repo, niet vanaf deze computer.** Na de merge
   start je de workflow **Functies uitrollen** in de beheer-repo van de organisatie
   (`gh workflow run functies-uitrollen.yml --repo <org>/stagetwo-beheer-tier2 -f app=<naam>`); die zet

@@ -36,6 +36,7 @@ import {
   stap,
 } from "./klantportaal-opzet.mjs";
 import {
+  dagenInWoorden,
   GEHEIME_VELDEN,
   GESLOTEN_PORTAAL,
   klantportaalInstellingen,
@@ -46,6 +47,7 @@ import {
 import {
   googleClientIdVanApp,
   inloggenVanApp,
+  linkGeldigDagenVanApp,
   MELDING_ALLEEN_UITNODIGING,
   MELDING_GEEN_WACHTWOORD,
   MELDING_MEDEWERKER,
@@ -181,7 +183,7 @@ test("aanmeld-hook bij vooraf: zoals bij account, alleen met een open uitnodigin
 
 // ---------------------------------------------------------------- de instellingen van Supabase
 
-test("instellingen bij vooraf: vier keer dezelfde inlogmail met code en link naar /login met het juiste type, 24 uur geldig", () => {
+test("instellingen bij vooraf: vier keer dezelfde inlogmail met code en link naar /login met het juiste type, standaard een dag geldig", () => {
   const i = inst();
   assert.equal(i.mailer_otp_exp, LINK_GELDIG_SECONDEN);
   assert.equal(LINK_GELDIG_SECONDEN, 24 * 60 * 60);
@@ -211,7 +213,7 @@ test("instellingen bij vooraf: vier keer dezelfde inlogmail met code en link naa
     );
     assert.match(inhoud, /Heb je dit niet zelf aangevraagd/, mail);
     assert.match(inhoud, /geef de code aan niemand/, mail);
-    assert.match(inhoud, /24 uur/, mail);
+    assert.match(inhoud, /werken een dag, en één keer/, mail);
     assert.doesNotMatch(inhoud, /wachtwoord-instellen|ConfirmationURL|RedirectTo/, mail);
   }
   // De rest van het klantportaal blijft: captcha, geen autoconfirm, hooks, geen eigen koppelen.
@@ -247,6 +249,49 @@ test("instellingen bij vooraf: Google aan met client-id en geheim, anders uitdru
   assert.equal(inst({ inloggen: "code" }).mailer_otp_exp, 900);
 });
 
+test("link_geldig_dagen: 1 tot en met 7 dagen, alleen bij vooraf; de mail en mailer_otp_exp volgen de duur", () => {
+  const met = (velden) => ({ ...PORTAAL, apps: { direct: { ...PORTAAL_APP, ...velden } } });
+  // Standaard een dag, ook zonder het veld.
+  assert.equal(linkGeldigDagenVanApp(valideerToegang(VOORAF), "direct"), 1);
+  const week = valideerToegang(met({ klantportaal_inloggen: "vooraf", link_geldig_dagen: 7 }));
+  assert.equal(linkGeldigDagenVanApp(week, "direct"), 7);
+  for (const fout of [0, 8, 1.5, "7", null]) {
+    assert.throws(
+      () => valideerToegang(met({ klantportaal_inloggen: "vooraf", link_geldig_dagen: fout })),
+      /link_geldig_dagen is een heel getal van 1 tot en met 7/,
+      JSON.stringify(fout),
+    );
+  }
+  for (const stand of [undefined, "code", "account"]) {
+    assert.throws(
+      () => valideerToegang(met({ klantportaal_inloggen: stand, link_geldig_dagen: 3 })),
+      /link_geldig_dagen hoort alleen bij "klantportaal_inloggen": "vooraf"/,
+    );
+  }
+  assert.throws(
+    () =>
+      valideerToegang({
+        ...PORTAAL,
+        apps: { direct: { groepen: ["kantoor"], link_geldig_dagen: 3 } },
+      }),
+    /hoort bij een klantportaal/,
+  );
+  // De instellingen: de duur in seconden en in woorden in alle vier de mails.
+  assert.equal(inst().mailer_otp_exp, 86400);
+  const w = inst({ linkGeldigDagen: 7 });
+  assert.equal(w.mailer_otp_exp, 604800);
+  for (const mail of ["magic_link", "confirmation", "invite", "recovery"]) {
+    assert.match(w[`mailer_templates_${mail}_content`], /werken een week, en één keer/, mail);
+  }
+  assert.match(inst({ linkGeldigDagen: 3 }).mailer_templates_invite_content, /werken 3 dagen/);
+  assert.equal(dagenInWoorden(1), "een dag");
+  assert.equal(dagenInWoorden(7), "een week");
+  assert.throws(() => inst({ linkGeldigDagen: 8 }), /1 tot en met 7 dagen/);
+  // Bij de code per mail en bij account verandert de duur niet.
+  assert.equal(inst({ inloggen: "code", linkGeldigDagen: 7 }).mailer_otp_exp, 900);
+  assert.equal(inst({ inloggen: "account", linkGeldigDagen: 7 }).mailer_otp_exp, 86400);
+});
+
 // ---------------------------------------------------------------- de inrichting
 
 test("inrichten bij vooraf zonder Google: VITE_INLOGDIENST cloudflare,mailcode,wachtwoord, de hooks met uitnodiging, Google uit, en de stand in de samenvatting", async () => {
@@ -259,6 +304,7 @@ test("inrichten bij vooraf zonder Google: VITE_INLOGDIENST cloudflare,mailcode,w
   assert.equal(w.staat.ghVariabelen.preview.VITE_INLOGDIENST, "cloudflare");
   assert.match(stap(r, "3.4 hooks van het klantportaal"), /alleen op uitnodiging/);
   assert.match(stap(r, "3.4 accounts vooraf"), /Google uit/);
+  assert.match(stap(r, "3.4 accounts vooraf"), /een dag geldig/);
   const a = auth(w);
   assert.equal(a.external_google_enabled, false);
   assert.equal(a.mailer_otp_exp, 86400);

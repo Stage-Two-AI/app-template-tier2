@@ -92,6 +92,10 @@ export function nepWolk({
       teams: structuredClone(sentry.teams ?? [{ slug: "klant" }]),
       projecten: structuredClone(sentry.projecten ?? []),
       aankomst: sentry.aankomst ?? true,
+      // Een sleutel die Sentry weigert (401 of 403 op alles), of een organisatie waar leden
+      // geen project mogen maken (403 op een nieuw project).
+      weigert: sentry.weigert ?? null,
+      geenNieuwProject: sentry.geenNieuwProject ?? false,
       // De event-id's van de proefmeldingen die binnenkwamen (ook als ze niet "aankomen").
       ontvangen: [],
       aangekomen: new Set(),
@@ -307,10 +311,15 @@ export function nepWolk({
     if (pad.startsWith(SENTRY)) {
       const rest = pad.slice(SENTRY.length);
       const sn = staat.sentry;
+      if (sn.weigert) return antwoord(sn.weigert, { detail: "Forbidden" });
       let m = rest.match(/^\/organizations\/klant\/(projects|teams)\/$/);
       if (m && methode === "GET") return antwoord(200, m[1] === "teams" ? sn.teams : sn.projecten);
       m = rest.match(/^\/teams\/klant\/([^/]+)\/projects\/$/);
       if (m && methode === "POST") {
+        if (sn.geenNieuwProject)
+          return antwoord(403, {
+            detail: "Your organization has disabled this feature for members.",
+          });
         if (!sn.teams.some((t) => t.slug === m[1]))
           return antwoord(404, { detail: "team bestaat niet" });
         const id = String(100 + sn.projecten.length);

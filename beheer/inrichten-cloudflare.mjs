@@ -98,7 +98,7 @@ import {
   wachtOpDiscovery,
   workerApp,
 } from "./lib/cloudflare.mjs";
-import { koppelSentry, sentryUitOmgeving } from "./lib/sentry.mjs";
+import { koppelSentry, sentryUitOmgeving, uitlegSentryFout } from "./lib/sentry.mjs";
 import {
   afmeldSql,
   alleGebruikers,
@@ -107,6 +107,7 @@ import {
   CAPTCHA_LATER,
   CODE_LENGTE,
   callbackAdres,
+  dagenInWoorden,
   GEHEIME_VELDEN,
   GESLOTEN_PORTAAL,
   hookInstellingen,
@@ -145,6 +146,7 @@ import {
   kaleNaamConflicten,
   klantenOpMedewerkeradres,
   koppelPolicies,
+  linkGeldigDagenVanApp,
   metKlantaccounts,
   PUBLIEK_GROEP,
   policyIdsVoorApp,
@@ -807,6 +809,7 @@ function portaalAuth(arg, d, { t, hostname, subdomein, testProject, functies, ca
       inloggen: inloggenVanApp(t, arg.app),
       googleClientId: googleClientIdVanApp(t, arg.app) ?? undefined,
       googleGeheim: d.googleGeheim,
+      linkGeldigDagen: linkGeldigDagenVanApp(t, arg.app),
     }),
   };
 }
@@ -1168,6 +1171,11 @@ export const SENTRY_NIET_GEKOPPELD =
  * weg van de proef (één DSN uit de beheeromgeving, `d.sentryDsn`), of een duidelijke regel.
  * Geeft `{ actie, dsn?, waarschuwing? }`; met `dsn` zet 3.6 hem in production, preview en
  * als PREVIEW_VITE_SENTRY_DSN.
+ *
+ * Sentry is optioneel: een fout bij Sentry (een sleutel die 401 of 403 geeft, een recht dat
+ * ontbreekt, het netwerk) wordt een waarschuwing met uitleg, en de rest van de inrichting gaat
+ * door. De app draait dan zonder foutmeldingen in Sentry tot de sleutel klopt en App inrichten
+ * opnieuw loopt.
  */
 async function stapSentry(arg, d, { droog }) {
   const huidig = droog
@@ -1176,15 +1184,24 @@ async function stapSentry(arg, d, { droog }) {
         (v) => v.name === "VITE_SENTRY_DSN",
       )?.value ?? null);
   if (d.sentry) {
-    const k = await koppelSentry(d.sentry, {
-      app: arg.app,
-      huidig,
-      droog,
-      slaap: d.slaap,
-      pogingen: d.sentryPogingen,
-      wachtMs: d.sentryWachtMs,
-    });
-    return { actie: k.actie, dsn: k.nieuw ? k.dsn : null, waarschuwing: k.waarschuwing };
+    try {
+      const k = await koppelSentry(d.sentry, {
+        app: arg.app,
+        huidig,
+        droog,
+        slaap: d.slaap,
+        pogingen: d.sentryPogingen,
+        wachtMs: d.sentryWachtMs,
+      });
+      return { actie: k.actie, dsn: k.nieuw ? k.dsn : null, waarschuwing: k.waarschuwing };
+    } catch (fout) {
+      const uitleg = uitlegSentryFout(fout, { org: d.sentry.org });
+      return {
+        actie: `${droog ? "gepland: " : ""}overgeslagen, de rest gaat door. ${uitleg}`,
+        dsn: null,
+        waarschuwing: `Sentry voor ${arg.app} niet gekoppeld: ${uitleg}. Daarna App inrichten opnieuw.`,
+      };
+    }
   }
   if (d.sentryDsn) {
     return {
@@ -1321,7 +1338,7 @@ function geplandeMail(arg, v) {
         ? "blijft zoals hij is (het portaal is live; alleen een run met het vinkje Deur weghalen zet een nieuw geheim)"
         : "aan (Turnstile)";
   if (v.portaal.inloggen === "vooraf")
-    return `klantportaal met accounts vooraf: alleen op uitnodiging, inloggen met een link of een code van ${CODE_LENGTE} cijfers per mail (24 uur geldig; een medewerker kan een inloglink laten sturen), een wachtwoord naar keuze (minstens 10 tekens), Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId})` : "uit"}, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
+    return `klantportaal met accounts vooraf: alleen op uitnodiging, inloggen met een link of een code van ${CODE_LENGTE} cijfers per mail (${dagenInWoorden(linkGeldigDagenVanApp(v.t, arg.app))} geldig; een medewerker kan een inloglink laten sturen), een wachtwoord naar keuze (minstens 10 tekens), Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId})` : "uit"}, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
   if (v.portaal.inloggen === "account")
     return `klantportaal met accounts: inloggen met e-mail en wachtwoord (minstens 10 tekens), alleen op uitnodiging (de link werkt een dag), wachtwoord vergeten per mail, tweede stap met een authenticator-app aan, mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (een nieuw account alleen met een uitnodiging, en nooit op een adres van een medewerker) en public.${f.token} (laat elk token door), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
   return `klantportaal: inloggen per mail aan (code van ${CODE_LENGTE} cijfers en link, 15 minuten geldig), mail via Resend van ${a.naam} <${a.adres}>, adressen eerst bevestigen (mailer_autoconfirm uit), adres wijzigen niet zelf te bevestigen, de rem op het inlogformulier, captcha ${captcha}, hooks public.${f.aanmelden} (geen aanmelding per mail op een adres van een medewerker) en public.${f.token} (geen sessie met een wachtwoord), sessies vervallen na ${SESSIE.sessions_inactivity_timeout / 24} dagen zonder gebruik (als het plan van Supabase dat toelaat)`;
@@ -1772,7 +1789,7 @@ export async function richtIn(arg, d) {
     if (v.portaal.inloggen === "vooraf") {
       stap(
         "3.4 accounts vooraf",
-        `inloggen met een link of code per mail (24 uur geldig) of een wachtwoord naar keuze; Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId}; het geheim uit GOOGLE_GEHEIM)` : "uit"}`,
+        `inloggen met een link of code per mail (${dagenInWoorden(linkGeldigDagenVanApp(v.t, arg.app))} geldig) of een wachtwoord naar keuze; Google ${v.portaal.googleClientId ? `aan (client-id ${v.portaal.googleClientId}; het geheim uit GOOGLE_GEHEIM)` : "uit"}`,
       );
     }
     resultaat.waarschuwingen.push(

@@ -10,34 +10,31 @@
 // Live zetten: na de merge de workflow "Functies uitrollen" in de beheer-repo (zie AGENTS.md).
 // De geheime sleutel zet de owner van de organisatie bij Supabase; dat is een
 // architectuurwijziging en geen werk vanaf de computer van de bouwer.
+//
+// Dit voorbeeld roept de app vanuit de browser aan, dus het beantwoordt eerst de preflight
+// (OPTIONS) en zet de CORS-headers op elk antwoord (zie _shared/cors.ts).
+
+import { antwoordOpPreflight, jsonAntwoord } from "../_shared/cors.ts";
 
 Deno.serve(async (request: Request) => {
+  const preflight = antwoordOpPreflight(request);
+  if (preflight) return preflight;
+
   if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Alleen POST" }), {
-      status: 405,
-      headers: { "content-type": "application/json" },
-    });
+    return jsonAntwoord({ error: "Alleen POST" }, 405);
   }
 
   // De sleutel komt uit de omgeving van de functie, nooit uit de app.
   const apiKey = Deno.env.get("MIJN_API_SLEUTEL");
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: "MIJN_API_SLEUTEL is niet gezet" }), {
-      status: 500,
-      headers: { "content-type": "application/json" },
-    });
+    return jsonAntwoord({ error: "MIJN_API_SLEUTEL is niet gezet" }, 500);
   }
 
   // Wie roept dit aan? De Authorization-header komt van de ingelogde gebruiker.
   const authorization = request.headers.get("Authorization");
   if (!authorization) {
-    return new Response(JSON.stringify({ error: "Niet ingelogd" }), {
-      status: 401,
-      headers: { "content-type": "application/json" },
-    });
+    return jsonAntwoord({ error: "Niet ingelogd" }, 401);
   }
 
-  return new Response(JSON.stringify({ ok: true }), {
-    headers: { "content-type": "application/json" },
-  });
+  return jsonAntwoord({ ok: true });
 });

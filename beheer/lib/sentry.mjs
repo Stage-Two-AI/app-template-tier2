@@ -21,6 +21,25 @@ import { vraag, wacht } from "./vraag.mjs";
 export const SENTRY_URL = "https://sentry.io";
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,49}$/;
 
+/**
+ * Een fout van Sentry in gewone woorden: wat de bouwer of owner moet nakijken. Bij 401 of 403
+ * op het lezen van de organisatie is het bijna altijd een recht dat ontbreekt
+ * (Organization: Read) of de verkeerde regio (een organisatie in de EU heeft SENTRY_URL
+ * https://de.sentry.io nodig); bij 403 op een nieuw project de schakelaar "Let Members Create
+ * Projects". De tekst van Sentry zelf blijft erachter staan.
+ */
+export function uitlegSentryFout(fout, { org } = {}) {
+  const status = fout?.status;
+  const bron = fout?.message ?? String(fout);
+  if (status === 403 && /\/teams\/[^/]+\/[^/]+\/projects\//.test(bron)) {
+    return `Sentry weigert een nieuw project (403). Zet in Sentry bij Settings, General Settings de schakelaar "Let Members Create Projects" aan, of geef de koppeling het recht Organization: Write. (${bron})`;
+  }
+  if (status === 401 || status === 403) {
+    return `Sentry weigert de sleutel (${status}). Kijk twee dingen na: de interne koppeling in Sentry${org ? ` van ${org}` : ""} heeft het recht Organization: Read (naast Project: Read & Write, Team: Read en Issue & Event: Read), en staat de organisatie in de EU, zet dan de variabele SENTRY_URL op https://de.sentry.io in de omgeving beheer. Een sleutel die je net hebt gekopieerd: kijk na dat het de hele sleutel is. (${bron})`;
+  }
+  return `Sentry gaf een fout: ${bron}`;
+}
+
 /** Een DSN uit elkaar: `https://<sleutel>@<host>/<project-id>`. */
 export function leesDsn(dsn) {
   const m = /^https:\/\/([0-9a-f]+)@([a-z0-9.-]+)\/(\d+)$/.exec(String(dsn ?? "").trim());
