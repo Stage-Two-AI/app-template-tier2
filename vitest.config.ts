@@ -5,6 +5,9 @@ import { defineConfig } from "vitest/config";
 /** Unittests: draaien in een nagebootste browser, zonder database. */
 export default defineConfig({
   plugins: [react()],
+  // Geen .env-bestanden lezen: na `pnpm env:test` staat in .env.local de testdatabase, en de
+  // unittests horen daar niet van af te hangen. De waarden staan hieronder.
+  envDir: false,
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

@@ -41,7 +41,7 @@
     "nooit mee naar een afgeleide app; in U9 verhuizen ze naar beheer-template."
   ],
   "manifestFormaat": 1,
-  "stackVersion": 47,
+  "stackVersion": 48,
   "variant": "cloudflare",
   "vanDeTemplate": {
     "vervangen": [
@@ -93,6 +93,7 @@
       "supabase/functions/_shared/apparaat.ts",
       "supabase/functions/_shared/apparaat-kern.ts",
       "supabase/functions/_shared/mail.ts",
+      "supabase/functions/_shared/cors.ts",
       "docs/WERKWIJZE.md",
       "docs/routes/verder-werken.md",
       "docs/routes/databasewijziging.md",
@@ -109,6 +110,7 @@
       "tests/unit/guard-secrets.test.ts",
       "tests/unit/guard-template.test.ts",
       "tests/unit/mail.test.ts",
+      "tests/unit/cors.test.ts",
       "tests/unit/testlogin.test.ts",
       "tests/unit/uitrollen-workflow.test.ts",
       "tests/unit/rls-regels.test.ts",

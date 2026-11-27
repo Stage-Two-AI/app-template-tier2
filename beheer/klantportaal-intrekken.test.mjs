@@ -766,6 +766,10 @@ test("een gewone app wordt alleen als (gesloten) klantportaal herkend aan exact 
   assert.equal(heeftPortaalMerk({ custom_deny_message: PORTAAL_MERK }), true);
 });
 
+test("het merk bevat alleen letters en spaties: Cloudflare weigert leestekens in custom_deny_message", () => {
+  assert.match(PORTAAL_MERK, /^[A-Za-z ]+$/);
+});
+
 test("een gewone app met een eigen hook die op <voorvoegsel>portaal_voor_token eindigt (in een ander schema) gaat niet als klantportaal dicht: geen klant gemarkeerd of afgemeld, en een vreemde met alleen een mailaccount wordt ingetrokken zoals altijd", async () => {
   const w = nepWolk({
     gebruikers: [medewerker(1, "anna@voorbeeld.nl"), klant(2, "vreemd@elders.example")],

@@ -91,7 +91,10 @@ van welk project dan ook hoort hier nooit in.
 
 Gewoon inloggen loopt via Cloudflare, en dat werkt op je eigen computer niet. Daarom heeft
 de testdatabase een vaste testgebruiker, `testgebruiker@stagetwo.nl`. Het wachtwoord wordt
-elke nacht vernieuwd en staat klaar in de beheer-repo van je organisatie.
+elke dag vernieuwd en staat klaar in de beheer-repo van je organisatie. De verversing staat
+'s nachts gepland, maar GitHub start hem in de praktijk in de loop van de ochtend. Lukt inloggen
+ineens niet meer, start de preview dan opnieuw (of `pnpm testlogin`): dan haalt hij het nieuwe
+wachtwoord op.
 
 ```bash
 pnpm testlogin     # haalt het wachtwoord op met gh en zet het in .env.development.local
@@ -191,3 +194,11 @@ een assistent werk "oplevert".
   krijgt na de merge en de eerstvolgende verversing. Verzin geen omweg langs het inloggen.
 - Zet het wachtwoord van de testgebruiker nooit in een bestand dat in git komt, in een
   PR-tekst of in het gesprek, en verplaats het niet naar `.env.local`.
+
+## De browsertest in de cloud
+
+In een cloudsessie (claude.ai) vraagt `pnpm test:e2e` een lokale database, dus Docker. Die
+dienst draait daar niet vanzelf: start hem eerst zelf op de achtergrond (`dockerd`), dan
+`pnpm db:start` en `pnpm env:local`. De browser hoef je niet te installeren: staat de eigen
+browser van Playwright er niet, dan neemt de test de Chromium die in de cloud al klaarstaat
+(`PLAYWRIGHT_BROWSERS_PATH`). Met `PLAYWRIGHT_CHROMIUM_PAD` wijs je er zelf een aan.

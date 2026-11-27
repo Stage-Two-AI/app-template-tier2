@@ -82,7 +82,8 @@ bepalen alleen de regels in de database (RLS). Dit is wat de bouwer in stap 0 be
 
 **Het merk.** De inrichting van een klantportaal zet op de Access op de Worker de tekst die
 Cloudflare toont aan wie daar wordt geweigerd (`custom_deny_message`): "Dit adres is alleen
-voor medewerkers (klantportaal)." Dat gebeurt vóór inloggen per mail aangaat. Toegang bijwerken
+voor medewerkers van dit klantportaal" (alleen letters en spaties: Cloudflare weigert leestekens
+in deze tekst). Dat gebeurt vóór inloggen per mail aangaat. Toegang bijwerken
 leest de Access-apps toch al, en ziet aan dit merk dat een app klantportaal is, ook als
 `klantportaal` al uit `toegang.json` is gehaald. App inrichten haalt het merk pas weg als het
 portaal weer helemaal dicht is. Een app die nooit klantportaal was heeft het merk niet.
@@ -365,7 +366,7 @@ Wat anders is dan bij accounts:
 | Mail `magic_link` en `confirmation` | geen code: "log in met je wachtwoord" | de inlogmail "Inloggen bij <naam>": de code (`id="code"`) en de knop (`id="link"`) naar `/login?token_hash=...&type=email` |
 | Mail `invite` | link naar `/wachtwoord-instellen` | dezelfde inlogmail, met `type=invite` |
 | Mail `recovery` | link naar `/wachtwoord-instellen` | dezelfde inlogmail, met `type=recovery` (er is geen route "wachtwoord vergeten"; de mail werkt als iemand `/recover` aanroept) |
-| Een link en een code werken (`mailer_otp_exp`) | een dag | 24 uur: een link van een medewerker moet de volgende ochtend nog werken |
+| Een link en een code werken (`mailer_otp_exp`) | een dag | standaard een dag: een link van een medewerker moet de volgende ochtend nog werken. Met `link_geldig_dagen` (1 tot en met 7) in `toegang.json` tot een week; de mail noemt de duur |
 | `password_min_length` en tweede stap (TOTP) | 10, aan | hetzelfde |
 | Google | uit | aan met een `google_client_id`, anders uitdrukkelijk uit |
 | Captcha | altijd aan | altijd aan |

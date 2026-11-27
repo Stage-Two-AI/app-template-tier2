@@ -130,7 +130,9 @@ describe("deploy-db.yml", () => {
       /insert into supabase_migrations\.schema_migrations\s+select \* from supabase_migrations\.canary_opzij/,
     );
     expect(run).toContain("drop table supabase_migrations.canary_opzij");
-    expect(run).toMatch(/supabase db push --db-url "\$DB_URL" --include-all \|\| uitkomst=\$\?/);
+    expect(run).toMatch(
+      /supabase db push --db-url "\$DB_URL" --include-all --yes \|\| uitkomst=\$\?/,
+    );
     const aanroepen = [...run.matchAll(/^\s*terugzetten\s*$/gm)].map((m) => m.index ?? -1);
     expect(aanroepen.length).toBe(2);
     expect(aanroepen[0]).toBeLessThan(verschil);

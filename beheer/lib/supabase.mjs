@@ -503,15 +503,25 @@ export function accountInstellingen(naam) {
  *                               maar de mail moet wel werken als iemand /recover aanroept).
  *
  * De pagina `/login` logt pas in als een scriptje in de browser het formulier verstuurt; een
- * linkscanner die de link opent, verbruikt hem dan niet. Een link en een code werken 24 uur
- * (`mailer_otp_exp`): een link van een medewerker moet de volgende ochtend nog werken. Supabase
- * kent één duur voor alle mails. Wachtwoord minstens 10 tekens en TOTP aan, zoals bij `account`.
+ * linkscanner die de link opent, verbruikt hem dan niet. Een link en een code werken standaard
+ * een dag (`mailer_otp_exp`): een link van een medewerker moet de volgende ochtend nog werken.
+ * Met `link_geldig_dagen` in toegang.json kiest de bouwer tot een week (de Management
+ * API neemt 604800 aan, nagegaan 26-11-2026). Raden wordt er niet makkelijker van: een nieuwe
+ * code vervangt de oude, en de rem per IP-adres blijft gelijk. Supabase kent één duur voor alle
+ * mails. Wachtwoord minstens 10 tekens en TOTP aan, zoals bij `account`.
  */
+/** Een duur in dagen in woorden, voor de mail en de samenvatting: "een dag", "3 dagen", "een week". */
+export function dagenInWoorden(dagen) {
+  if (dagen === 1) return "een dag";
+  if (dagen === 7) return "een week";
+  return `${dagen} dagen`;
+}
+
 export const VOORAF_LINK = (soort) =>
   `{{ .SiteURL }}/login?token_hash={{ .TokenHash }}&type=${soort}`;
 
 /** De inlogmail van een klantportaal met accounts vooraf, met het type van de link. */
-export function voorafInlogmail(naam, soort) {
+export function voorafInlogmail(naam, soort, dagen = 1) {
   if (/[{}<>]/.test(naam)) throw new Error("de naam van de afzender bevat een ongeldig teken");
   if (!["email", "invite", "recovery"].includes(soort))
     throw new Error(`onbekend type link "${soort}"`);
@@ -523,13 +533,13 @@ export function voorafInlogmail(naam, soort) {
       `<p><a id="link" href="${VOORAF_LINK(soort)}">Log in bij ${n}</a></p>`,
       "<p>Of vul deze code in op de inlogpagina:</p>",
       '<p style="font-size: 28px; font-weight: bold; letter-spacing: 4px"><span id="code">{{ .Token }}</span></p>',
-      "<p>De link en de code werken 24 uur, en één keer.</p>",
+      `<p>De link en de code werken ${dagenInWoorden(dagen)}, en één keer.</p>`,
       `<p>Heb je dit niet zelf aangevraagd, en verwachtte je ook geen mail van ${n}? Dan hoef je niets te doen. Klik niet op de link en geef de code aan niemand; zonder de link of de code kan niemand inloggen.</p>`,
     ].join("\n"),
   };
 }
 
-export function voorafMails(naam) {
+export function voorafMails(naam, dagen = 1) {
   const uit = {};
   for (const [mail, soort] of [
     ["magic_link", "email"],
@@ -537,7 +547,7 @@ export function voorafMails(naam) {
     ["invite", "invite"],
     ["recovery", "recovery"],
   ]) {
-    const m = voorafInlogmail(naam, soort);
+    const m = voorafInlogmail(naam, soort, dagen);
     uit[`mailer_subjects_${mail}`] = m.onderwerp;
     uit[`mailer_templates_${mail}_content`] = m.inhoud;
   }
@@ -561,10 +571,12 @@ export function googleInstellingen({ googleClientId, googleGeheim } = {}) {
 }
 
 /** Wat een klantportaal met accounts vooraf bovenop de gewone instellingen zet. */
-export function voorafInstellingen(naam, google = {}) {
+export function voorafInstellingen(naam, google = {}, dagen = 1) {
+  if (!Number.isInteger(dagen) || dagen < 1 || dagen > 7)
+    throw new Error(`een link werkt 1 tot en met 7 dagen, niet ${JSON.stringify(dagen)}`);
   return {
-    ...voorafMails(naam),
-    mailer_otp_exp: LINK_GELDIG_SECONDEN,
+    ...voorafMails(naam, dagen),
+    mailer_otp_exp: dagen * LINK_GELDIG_SECONDEN,
     password_min_length: WACHTWOORD_MINIMAAL,
     mfa_totp_enroll_enabled: true,
     mfa_totp_verify_enabled: true,
@@ -584,6 +596,7 @@ export function klantportaalInstellingen({
   inloggen = "code",
   googleClientId,
   googleGeheim,
+  linkGeldigDagen = 1,
 }) {
   if (!afzender?.adres || !afzender?.naam)
     throw new Error("de afzender van de inlogmail ontbreekt");
@@ -635,7 +648,7 @@ export function klantportaalInstellingen({
     ...REM,
     ...(inloggen === "account" ? accountInstellingen(afzender.naam) : {}),
     ...(inloggen === "vooraf"
-      ? voorafInstellingen(afzender.naam, { googleClientId, googleGeheim })
+      ? voorafInstellingen(afzender.naam, { googleClientId, googleGeheim }, linkGeldigDagen)
       : {}),
     ...(captcha === CAPTCHA_LATER
       ? {}

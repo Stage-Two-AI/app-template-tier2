@@ -38,7 +38,7 @@ function isDeTemplate(): boolean {
 
 const heeftKlantportaal =
   vraagDatabase<{ ja: boolean }>(
-    "select to_regprocedure('public.is_medewerker()') is not null as ja",
+    "select to_regprocedure('public.is_goedgekeurde_klant()') is not null as ja",
   )[0]?.ja === true;
 
 /** Een gewone start voor een klantportaal: een tabel alleen voor medewerkers, met de poort. */

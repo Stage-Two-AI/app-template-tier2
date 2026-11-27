@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
-import { defineConfig, devices } from "@playwright/test";
+import { join } from "node:path";
+import { chromium, defineConfig, devices } from "@playwright/test";
 import { databaseModus } from "./e2e/stack-config";
 
 // De testomgeving wordt geschreven door `pnpm env:local` en staat niet in git.
@@ -27,6 +28,22 @@ function omgevingMet(extra: Record<string, string>): Record<string, string> {
   return { ...omgeving, ...extra };
 }
 
+/**
+ * Welke Chromium. Normaal die van Playwright zelf. In de cloud (claude.ai) staat er één klaar
+ * onder PLAYWRIGHT_BROWSERS_PATH, vaak van een andere versie dan de Playwright van de app
+ * verwacht, en downloaden mag daar niet. Ontbreekt de eigen browser, dan neemt de
+ * test die klaarstaande. PLAYWRIGHT_CHROMIUM_PAD wijst er met de hand een aan.
+ */
+function chromiumPad(): string | undefined {
+  const handmatig = process.env.PLAYWRIGHT_CHROMIUM_PAD;
+  if (handmatig) return handmatig;
+  if (existsSync(chromium.executablePath())) return undefined;
+  const map = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const klaar = map ? join(map, "chromium") : "";
+  return klaar && existsSync(klaar) ? klaar : undefined;
+}
+const executablePath = chromiumPad();
+
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
@@ -39,6 +56,7 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] }, testIgnore: KLANTPORTAAL },
